@@ -47,8 +47,9 @@ services:
 This is the point of the project, so it is enforced rather than asserted:
 
 - **No Docker socket.** Mounting it would make the container root on the host.
-- **No host bind mounts.** `/workspace` is a named volume; `/`, `/home` and
-  `/etc` are not visible.
+- **No host bind mounts in the sandbox.** `/workspace` is a named volume; `/`,
+  `/home` and `/etc` are not visible. The proxy — a separate container, not the
+  sandbox — mounts only its own config file, read-only.
 - **No privileges.** Every process runs as UID 1000 with all capabilities
   dropped and `no-new-privileges` set.
 - **Bounded.** CPU, memory and PID ceilings stop a runaway agent from taking

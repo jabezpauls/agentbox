@@ -21,6 +21,23 @@ over the host.
   see "Egress filtering" below.
 - Its own named volume, which persists across restarts and updates.
 
+## Verifying the boundary yourself
+
+Do not take the table above on trust; the claims are observable:
+
+```bash
+# No container mounts the Docker socket.
+docker inspect $(docker compose ps -q) \
+  --format '{{.Name}}: {{range .Mounts}}{{.Source}} {{end}}'
+
+# The sandbox runs unprivileged with no capabilities.
+docker inspect agentbox-code-1 \
+  --format 'user={{.Config.User}} caps={{.HostConfig.CapDrop}} priv={{.HostConfig.Privileged}}'
+```
+
+Expect `User=1000:1000`, `CapDrop=[ALL]`, `Privileged=false`, and only
+`/var/lib/docker/volumes/...` paths for the sandbox services.
+
 ## Rootless mode (recommended)
 
 In `rootless` mode the Docker daemon itself runs as an unprivileged user, so a

@@ -6,6 +6,25 @@
 	auto_https off
 }
 
+# Shared routing, defined before use: Caddy resolves snippets in file order.
+(routes) {
+	# A full-screen shell, handy for running an agent as a TUI.
+	handle /terminal* {
+		reverse_proxy terminal:7681
+	}
+
+	# Live CPU, memory and process usage for the sandbox.
+	handle /monitor* {
+		reverse_proxy monitor:7682
+	}
+
+	# Everything else is the editor, served at the root so VS Code needs no
+	# sub-path gymnastics.
+	handle {
+		reverse_proxy code:8080
+	}
+}
+
 :8080 {
 	encode zstd gzip
 
@@ -14,18 +33,4 @@
 	}
 
 	import routes
-}
-
-(routes) {
-	handle /terminal* {
-		reverse_proxy terminal:7681
-	}
-
-	handle /monitor* {
-		reverse_proxy monitor:7682
-	}
-
-	handle {
-		reverse_proxy code:8080
-	}
 }

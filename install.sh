@@ -79,7 +79,10 @@ docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon; add yourse
 # --- Source -----------------------------------------------------------------
 if [ -d "$INSTALL_DIR/.git" ]; then
     log "Updating existing install at $INSTALL_DIR"
-    git -C "$INSTALL_DIR" pull --ff-only
+    # A local checkout may have no upstream, or a pinned one. Failing to update
+    # must not abort an otherwise valid install.
+    git -C "$INSTALL_DIR" pull --ff-only \
+        || warn "could not update the checkout; continuing with what is on disk"
 elif [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     log "Using existing directory $INSTALL_DIR"
 else
