@@ -5,6 +5,8 @@ FROM debian:bookworm-slim
 ARG NODE_MAJOR=22
 # ttyd is not packaged by Debian; pin the upstream static build.
 ARG TTYD_VERSION=1.7.7
+# herdr keeps agent panes alive in a background server; pin and checksum it too.
+ARG HERDR_VERSION=0.9.1
 # Set to "false" to build without the coding agents (smaller image).
 ARG INSTALL_AGENTS=true
 
@@ -23,8 +25,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ripgrep fd-find jq unzip zip \
         python3 python3-venv python3-pip \
         btop procps htop \
+        tmux \
         build-essential \
+        gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI, from its own apt repository (Debian does not package it).
+RUN mkdir -p -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+         > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/* \
+    && gh --version
 
 # ttyd powers the full-screen shell and the process monitor. Debian does not
 # ship it, so take the upstream static binary for this architecture.
@@ -38,6 +54,21 @@ RUN arch="$(dpkg --print-architecture)" \
          "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ttyd_arch}" \
     && chmod 0755 /usr/local/bin/ttyd \
     && ttyd --version
+
+# herdr keeps agent panes alive in a background server; the Workbench and the
+# full-screen terminal are both clients of it. Pinned and checksum-verified.
+# Release assets are plain static binaries, not archives.
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) herdr_asset=herdr-linux-x86_64; herdr_sha=2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7 ;; \
+         arm64) herdr_asset=herdr-linux-aarch64; herdr_sha=f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e ;; \
+         *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /usr/local/bin/herdr \
+         "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/${herdr_asset}" \
+    && echo "${herdr_sha}  /usr/local/bin/herdr" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/herdr \
+    && herdr --version
 
 # Node, for the agent CLIs and most workspace tooling.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
@@ -66,8 +97,10 @@ RUN if [ "$INSTALL_AGENTS" = "true" ]; then \
         npm install -g --prefix /usr/local --no-fund --no-audit \
             @anthropic-ai/claude-code \
             @openai/codex \
+            lavish-axi \
         && claude --version \
-        && codex --version ; \
+        && codex --version \
+        && lavish-axi --version ; \
     fi
 
 # Keep user-installed npm binaries on PATH for login shells too.

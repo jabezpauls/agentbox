@@ -14,7 +14,9 @@ codex       # OpenAI Codex
 ```
 
 Run them in the integrated terminal (`Ctrl+\``), or full-screen at `/terminal`,
-which is often nicer on a phone.
+which runs [herdr](https://github.com/herdrdev/herdr), a background agent
+multiplexer — it keeps your agent panes alive independent of the browser tab,
+and is often nicer on a phone.
 
 If you set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env`, the agents pick
 them up automatically. Otherwise sign in interactively the first time you run
@@ -23,7 +25,8 @@ one; the credentials persist in the `agentbox_home` volume.
 ## Other entry points
 
 - `/` — this editor
-- `/terminal` — a full-screen shell
+- `/terminal` — herdr, the full-screen agent multiplexer
+- `/shell` — a full-screen plain bash shell
 - `/monitor` — live CPU, memory and process usage for the sandbox
 
 ## Getting code in

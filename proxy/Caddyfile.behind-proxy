@@ -8,14 +8,20 @@
 
 # Shared routing, defined before use: Caddy resolves snippets in file order.
 (routes) {
-	# A full-screen shell, handy for running an agent as a TUI.
+	# herdr's client, full-screen: the agent multiplexer, handy for running
+	# agents as a TUI. Shares the editor's network namespace.
 	handle /terminal* {
-		reverse_proxy terminal:7681
+		reverse_proxy code:7681
 	}
 
 	# Live CPU, memory and process usage for the sandbox.
 	handle /monitor* {
-		reverse_proxy monitor:7682
+		reverse_proxy code:7682
+	}
+
+	# A plain bash shell, when you want that instead of the herdr client.
+	handle /shell* {
+		reverse_proxy code:7683
 	}
 
 	# Everything else is the editor, served at the root so VS Code needs no

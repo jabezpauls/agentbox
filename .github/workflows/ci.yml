@@ -51,4 +51,4 @@ jobs:
         run: docker build -t agentbox/workspace:ci images/workspace
       - name: The agents must actually be present
         run: |
-          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop'
+          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v lavish-axi'

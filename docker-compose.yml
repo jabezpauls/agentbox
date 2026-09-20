@@ -53,12 +53,22 @@ services:
       retries: 5
       start_period: 30s
 
-  # A plain shell in the browser, for driving an agent as a full-screen TUI.
+  # herdr's client, full-screen: the agent multiplexer, for driving agent
+  # panes as a TUI (handy on a phone).
   terminal:
     <<: *sandbox
-    command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--writable", "bash", "-l"]
+    command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--writable", "herdr"]
     # Same localhost and process table as the editor: a dev server started in
     # one is reachable from all, and the proxy reaches every port via `code`.
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
+
+  # A plain shell, for when you want bash rather than the herdr client.
+  shell:
+    <<: *sandbox
+    command: ["ttyd", "--port", "7683", "--base-path", "/shell", "--writable", "bash", "-l"]
     network_mode: "service:code"
     pid: "service:code"
     depends_on:
