@@ -1,0 +1,12 @@
+# Standalone mode: the proxy owns :80 and :443 and obtains a Let's Encrypt
+# certificate for AGENTBOX_DOMAIN. Use this on a VPS where nothing else is
+# serving HTTP.
+services:
+  proxy:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/Caddyfile.standalone:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config

@@ -1,0 +1,94 @@
+# agentbox — base stack.
+#
+# Every service below is deliberately unprivileged and unable to reach the host:
+# no Docker socket, no host bind mounts, all capabilities dropped. The only
+# service that publishes a port is the proxy, and which address it binds to is
+# decided by the mode overlay (docker-compose.standalone.yml or
+# docker-compose.behind-proxy.yml) rather than here.
+
+x-sandbox: &sandbox
+  build:
+    context: ./images/workspace
+    args:
+      NODE_MAJOR: "22"
+  image: agentbox/workspace:latest
+  restart: unless-stopped
+  # UID/GID 1000 inside the image. Never root.
+  user: "1000:1000"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 512
+  cpus: ${AGENTBOX_CPUS:-2}
+  mem_limit: ${AGENTBOX_MEMORY:-4g}
+  networks:
+    - internal
+  volumes:
+    # A named volume, NOT a host path: the sandbox cannot see the host filesystem.
+    - workspace:/workspace
+    - home:/home/coder
+  environment:
+    TZ: ${TZ:-UTC}
+    # Optional agent credentials, passed through only if you set them.
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+services:
+  # VS Code in the browser: files, editor, integrated terminal, and the coding
+  # agents installed in the image.
+  code:
+    <<: *sandbox
+    command:
+      - code-server
+      - --bind-addr=0.0.0.0:8080
+      - --auth=none          # the proxy authenticates; see proxy/Caddyfile.*
+      - --disable-telemetry
+      - --disable-update-check
+      - /workspace
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # A plain shell in the browser, for driving an agent as a full-screen TUI.
+  terminal:
+    <<: *sandbox
+    command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--writable", "bash", "-l"]
+
+  # Live resource usage for the sandbox itself.
+  monitor:
+    <<: *sandbox
+    command: ["ttyd", "--port", "7682", "--base-path", "/monitor", "btop"]
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - code
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+    environment:
+      AGENTBOX_DOMAIN: ${AGENTBOX_DOMAIN:-localhost}
+      AGENTBOX_USER: ${AGENTBOX_USER:-admin}
+      AGENTBOX_PASSWORD_HASH: ${AGENTBOX_PASSWORD_HASH:?run install.sh to generate a password hash}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+networks:
+  internal:
+    name: agentbox_internal
+    driver: bridge
+
+volumes:
+  workspace:
+    name: agentbox_workspace
+  home:
+    name: agentbox_home
+  caddy_data:
+  caddy_config:

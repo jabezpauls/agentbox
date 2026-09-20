@@ -1,0 +1,11 @@
+# Behind-proxy mode: the stack binds to loopback only, so an existing reverse
+# proxy (Traefik, nginx, another Caddy) keeps ports 80/443 and terminates TLS.
+# Point that proxy at AGENTBOX_BIND.
+services:
+  proxy:
+    ports:
+      - "${AGENTBOX_BIND:-127.0.0.1:8443}:8080"
+    volumes:
+      - ./proxy/Caddyfile.behind-proxy:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
