@@ -22,8 +22,6 @@ x-sandbox: &sandbox
   pids_limit: 512
   cpus: ${AGENTBOX_CPUS:-2}
   mem_limit: ${AGENTBOX_MEMORY:-4g}
-  networks:
-    - internal
   volumes:
     # A named volume, NOT a host path: the sandbox cannot see the host filesystem.
     - workspace:/workspace
@@ -46,6 +44,8 @@ services:
       - --disable-telemetry
       - --disable-update-check
       - /workspace
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 30s
@@ -57,11 +57,23 @@ services:
   terminal:
     <<: *sandbox
     command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--writable", "bash", "-l"]
+    # Same localhost and process table as the editor: a dev server started in
+    # one is reachable from all, and the proxy reaches every port via `code`.
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
 
   # Live resource usage for the sandbox itself.
   monitor:
     <<: *sandbox
     command: ["ttyd", "--port", "7682", "--base-path", "/monitor", "btop"]
+    # Same localhost and process table as the editor: a dev server started in
+    # one is reachable from all, and the proxy reaches every port via `code`.
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
 
   proxy:
     image: caddy:2-alpine

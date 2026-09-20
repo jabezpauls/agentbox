@@ -20,6 +20,12 @@ over the host.
   package managers need it to install dependencies. If you want to restrict this,
   see "Egress filtering" below.
 - Its own named volume, which persists across restarts and updates.
+- The other sandbox services. `terminal`, `monitor` and the Workbench services
+  share the `code` container's network and PID namespaces, so `localhost` and
+  the process table are common to all of them. This is deliberate: a dev server
+  an agent starts in one pane is previewable from the others. The shared
+  namespaces belong to sandbox containers only; nothing about the host boundary
+  changes.
 
 ## Verifying the boundary yourself
 
