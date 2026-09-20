@@ -148,6 +148,43 @@ describe("agent events", () => {
     expect(s.panes[d.pane_id]?.agent_status).toBe(d.agent_status);
   });
 
+  it("advances state_change_seq only on a real status change", () => {
+    // seed an agent at seq 3 with status working
+    const seeded: Session = {
+      ...base(),
+      agents: {
+        "w1:p1": {
+          pane_id: "w1:p1",
+          terminal_id: "t",
+          workspace_id: "w1",
+          tab_id: "w1:t1",
+          focused: false,
+          agent_status: "working",
+          revision: 0,
+          interactive_ready: true,
+          launch_pending: false,
+          state_change_seq: 3,
+        },
+      },
+    };
+    const changed = applyEvent(seeded, {
+      event: "pane_agent_status_changed",
+      data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done" },
+    } as HerdrEvent);
+    expect(changed.agents["w1:p1"]?.state_change_seq).toBe(4);
+
+    const sameAgain = applyEvent(changed, {
+      event: "pane_agent_status_changed",
+      data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done" },
+    } as HerdrEvent);
+    expect(sameAgain.agents["w1:p1"]?.state_change_seq).toBe(4);
+
+    // markSeen then compares correctly: seen (3) < current (4) => unseen Done
+    expect((seeded.agents["w1:p1"]?.state_change_seq ?? 0) < (changed.agents["w1:p1"]?.state_change_seq ?? 0)).toBe(
+      true,
+    );
+  });
+
   it("removes the agent when detection reports released", () => {
     const withAgent = applyEvent(base(), ev("pane_agent_status_changed"));
     const pid = (ev("pane_agent_status_changed").data as { pane_id: string }).pane_id;

@@ -232,9 +232,17 @@ export function applyEvent(s: Session, e: HerdrEvent): Session {
               interactive_ready: false,
               launch_pending: false,
             });
+      // herdr's status events do not carry a sequence, but each client needs a
+      // monotonic marker to tell a freshly-Done agent from one it has already
+      // acknowledged (see the store's seenDone). Advance it only on a real
+      // status change; a repeat of the same status leaves it untouched.
+      const priorStatus = prior?.agent_status ?? pane?.agent_status;
+      const priorSeq = prior?.state_change_seq ?? 0;
+      const nextSeq = priorStatus === agent_status ? priorSeq : priorSeq + 1;
       const nextAgent: AgentInfo = {
         ...baseAgent,
         agent_status,
+        state_change_seq: nextSeq,
         ...(agent !== undefined ? { agent } : {}),
         ...(display_agent !== undefined ? { display_agent } : {}),
         ...(title !== undefined ? { title } : {}),

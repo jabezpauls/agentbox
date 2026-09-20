@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PanelLeftOpen, Plus, X } from "lucide-react";
+import { MoreHorizontal, PanelLeftOpen, Pencil, Plus, X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
 import { rpc } from "../api/client.ts";
@@ -26,23 +26,35 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<Menu | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The element focus returns to when a menu closes.
+  const menuTrigger = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
 
+  // On open, move focus into the menu; on close, restore it to the trigger.
+  useEffect(() => {
+    if (menu) {
+      menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    } else {
+      menuTrigger.current?.focus();
+      menuTrigger.current = null;
+    }
+  }, [menu]);
+
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", close);
+    const onDocClick = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(null);
     };
+    window.addEventListener("mousedown", onDocClick);
+    return () => window.removeEventListener("mousedown", onDocClick);
   }, [menu]);
 
   const startRename = (tabId: string, label: string) => {
+    setMenu(null);
     setEditing(tabId);
     setDraft(label);
   };
@@ -66,6 +78,58 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
     setMenu(null);
   };
 
+  const openMenuFrom = (tabId: string, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    menuTrigger.current = el;
+    setMenu({ tabId, x: r.left, y: r.bottom + 4 });
+  };
+
+  const onTabKeyDown = (e: React.KeyboardEvent, tabId: string, label: string, active: boolean) => {
+    switch (e.key) {
+      case "F2":
+        e.preventDefault();
+        startRename(tabId, label);
+        break;
+      case "Enter":
+      case " ":
+        // Activation on an inactive tab falls through to the button's click;
+        // on the active tab, the same key starts an inline rename.
+        if (active) {
+          e.preventDefault();
+          startRename(tabId, label);
+        }
+        break;
+      case "Delete":
+      case "Backspace":
+        e.preventDefault();
+        closeTab(tabId);
+        break;
+      case "ArrowRight":
+      case "ArrowLeft": {
+        e.preventDefault();
+        const i = tabs.findIndex((t) => t.tab_id === tabId);
+        const next = tabs[e.key === "ArrowRight" ? i + 1 : i - 1];
+        if (next) document.getElementById(`tab-${next.tab_id}`)?.focus();
+        break;
+      }
+    }
+  };
+
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMenu(null);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      items[(i + 1) % items.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      items[(i - 1 + items.length) % items.length]?.focus();
+    }
+  };
+
   return (
     <div className="tabbar">
       {!sidebarOpen && (
@@ -74,38 +138,56 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
         </button>
       )}
 
-      <div className="tabbar-tabs" role="tablist">
+      <div className="tabbar-tabs" role="tablist" aria-label="Tabs">
         {tabs.map((t) => {
           const active = t.tab_id === session.focusedTabId;
           return (
-            <div
-              key={t.tab_id}
-              role="tab"
-              aria-selected={active}
-              className={`tab${active ? " is-active" : ""}`}
-              onClick={() => editing !== t.tab_id && focusTab(t.tab_id)}
-              onDoubleClick={() => startRename(t.tab_id, t.label)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setMenu({ tabId: t.tab_id, x: e.clientX, y: e.clientY });
-              }}
-            >
-              <StatusBadge status={t.agent_status} muted={t.agent_status === "unknown"} />
+            <div key={t.tab_id} className={`tab${active ? " is-active" : ""}`}>
               {editing === t.tab_id ? (
-                <input
-                  ref={inputRef}
-                  className="tab-rename"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    else if (e.key === "Escape") setEditing(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <>
+                  <StatusBadge status={t.agent_status} muted={t.agent_status === "unknown"} />
+                  <input
+                    ref={inputRef}
+                    className="tab-rename"
+                    aria-label={`Rename tab ${t.label}`}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      else if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                </>
               ) : (
-                <span className="tab-label">{t.label}</span>
+                <>
+                  <button
+                    id={`tab-${t.tab_id}`}
+                    role="tab"
+                    aria-selected={active}
+                    className="tab-btn"
+                    onClick={() => focusTab(t.tab_id)}
+                    onDoubleClick={() => startRename(t.tab_id, t.label)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      menuTrigger.current = e.currentTarget;
+                      setMenu({ tabId: t.tab_id, x: e.clientX, y: e.clientY });
+                    }}
+                    onKeyDown={(e) => onTabKeyDown(e, t.tab_id, t.label, active)}
+                  >
+                    <StatusBadge status={t.agent_status} muted={t.agent_status === "unknown"} />
+                    <span className="tab-label">{t.label}</span>
+                  </button>
+                  <button
+                    className="tab-menu-btn"
+                    aria-label={`Tab actions for ${t.label}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.tabId === t.tab_id}
+                    onClick={(e) => openMenuFrom(t.tab_id, e.currentTarget)}
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                </>
               )}
             </div>
           );
@@ -119,7 +201,24 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
       </div>
 
       {menu && (
-        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+        <div
+          className="ctx-menu"
+          style={{ left: menu.x, top: menu.y }}
+          role="menu"
+          ref={menuRef}
+          onKeyDown={onMenuKeyDown}
+        >
+          <button
+            className="ctx-item"
+            role="menuitem"
+            onClick={() => {
+              const t = tabs.find((tab) => tab.tab_id === menu.tabId);
+              if (t) startRename(t.tab_id, t.label);
+            }}
+          >
+            <Pencil size={14} />
+            Rename
+          </button>
           <button className="ctx-item" role="menuitem" onClick={() => closeTab(menu.tabId)}>
             <X size={14} />
             Close tab

@@ -364,15 +364,12 @@
   display: none;
 }
 .tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
   height: 28px;
-  padding: 0 var(--sp-3);
+  padding-left: var(--sp-1);
   border-radius: var(--r-sm);
   color: var(--text-2);
-  cursor: pointer;
-  user-select: none;
   white-space: nowrap;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
@@ -383,16 +380,56 @@
 .tab.is-active {
   background: var(--surface);
   color: var(--text);
-  font-weight: 500;
   box-shadow: var(--shadow-sm);
+}
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-1) 0 var(--sp-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--r-sm);
+}
+.tab.is-active .tab-btn {
+  font-weight: 500;
 }
 .tab-label {
   max-width: 20ch;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tab-menu-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-xs);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.tab:hover .tab-menu-btn,
+.tab.is-active .tab-menu-btn,
+.tab-menu-btn:focus-visible {
+  opacity: 1;
+}
+.tab-menu-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .tab-rename {
   width: 12ch;
+  margin: 0 var(--sp-2) 0 var(--sp-1);
   padding: 2px var(--sp-1);
   border: 1px solid var(--accent);
   border-radius: var(--r-xs);
