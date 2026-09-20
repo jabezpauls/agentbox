@@ -5,8 +5,10 @@ import fastifyStatic from "@fastify/static";
 import type { LavishState, ListeningPort } from "@workbench/shared";
 import type { Config } from "./config.js";
 import type { SessionHub } from "./herdr/session.js";
+import { TerminalStreams } from "./herdr/terminal.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
+import { registerTerminalWs } from "./routes/terminal-ws.js";
 
 /** Watches for locally listening ports; wired into the app in a later task. */
 export interface PortsWatcher {
@@ -18,11 +20,18 @@ export interface AppDeps {
   hub: SessionHub;
   ports?: PortsWatcher;
   lavish?: () => Promise<LavishState>;
+  /** Terminal stream registry; defaults to one bound to herdr's socket. */
+  streams?: TerminalStreams;
 }
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(websocket);
+
+  const streams =
+    deps.streams ??
+    new TerminalStreams({ ...process.env, HERDR_SOCKET_PATH: config.socketPath });
+  app.addHook("onClose", async () => streams.stop());
 
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
@@ -30,6 +39,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     async (scope) => {
       registerApiRoutes(scope, config, deps.hub);
       registerEventsWs(scope, deps.hub);
+      registerTerminalWs(scope, streams);
 
       if (serveStatic) {
         await scope.register(fastifyStatic, {
