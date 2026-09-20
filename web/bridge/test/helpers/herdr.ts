@@ -48,16 +48,50 @@ export async function startTestHerdr(): Promise<TestHerdr> {
     HERDR_SOCKET_PATH: socketPath,
     SHELL: "/bin/bash",
   };
+
   const child: ChildProcess = spawn("herdr", ["server"], { env, stdio: ["ignore", "pipe", "pipe"] });
-  await waitForSocket(socketPath, 10_000);
-  return {
-    socketPath,
-    env,
-    dir,
-    stop: async () => {
-      child.kill("SIGTERM");
-      await new Promise((resolve) => child.once("exit", resolve));
-      fs.rmSync(dir, { recursive: true, force: true });
-    },
+
+  // Always keep at least one "error" listener attached so a spawn/runtime
+  // failure (missing binary, EPIPE, ...) becomes a readable rejection or a
+  // swallowed post-startup event instead of an uncaught exception that
+  // crashes the vitest worker.
+  let started = false;
+  let startupReject: ((err: Error) => void) | null = null;
+  child.on("error", (err) => {
+    if (!started && startupReject) {
+      startupReject(err);
+    }
+    // After startup, swallow further errors here; stop()/exit handling below
+    // still resolves the process lifecycle.
+  });
+
+  const stop = async (): Promise<void> => {
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, 5_000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    fs.rmSync(dir, { recursive: true, force: true });
   };
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      startupReject = reject;
+      waitForSocket(socketPath, 10_000).then(resolve, reject);
+    });
+  } catch (err) {
+    child.kill("SIGKILL");
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw err;
+  } finally {
+    started = true;
+    startupReject = null;
+  }
+
+  return { socketPath, env, dir, stop };
 }

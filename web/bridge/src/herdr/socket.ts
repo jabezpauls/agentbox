@@ -27,18 +27,20 @@ export function request<T = unknown>(
   return new Promise((resolve, reject) => {
     const id = `wb_${++seq}`;
     const sock = net.connect(socketPath);
+    const rl = readline.createInterface({ input: sock });
     const timer = setTimeout(() => {
+      rl.close();
       sock.destroy();
       reject(new HerdrError("timeout", `${method} timed out`));
     }, opts.timeoutMs ?? 10_000);
     sock.once("error", (err) => {
       clearTimeout(timer);
+      rl.close();
       reject(err);
     });
     sock.once("connect", () => {
       sock.write(JSON.stringify({ id, method, params }) + "\n");
     });
-    const rl = readline.createInterface({ input: sock });
     rl.once("line", (line) => {
       clearTimeout(timer);
       rl.close();
@@ -79,6 +81,10 @@ export function subscribe(
   return new Promise((resolve, reject) => {
     const sock = net.connect(socketPath);
     let started = false;
+    // Set by the caller's close() just before destroying the socket, so an
+    // intentional close does not also invoke onClose (which is reserved for
+    // unexpected disconnects/errors).
+    let closing = false;
     const rl = readline.createInterface({ input: sock });
     sock.once("connect", () => {
       sock.write(JSON.stringify({ id: "sub", method: "events.subscribe", params: { subscriptions } }) + "\n");
@@ -86,12 +92,12 @@ export function subscribe(
     sock.on("error", (err) => {
       if (!started) {
         reject(err);
-      } else {
+      } else if (!closing) {
         onClose(err);
       }
     });
     sock.on("close", () => {
-      if (started) onClose();
+      if (started && !closing) onClose();
     });
     rl.on("line", (line) => {
       let msg: HerdrResponse & Partial<HerdrStreamEvent>;
@@ -107,7 +113,12 @@ export function subscribe(
           return;
         }
         started = true;
-        resolve({ close: () => sock.destroy() });
+        resolve({
+          close: () => {
+            closing = true;
+            sock.destroy();
+          },
+        });
         return;
       }
       if (msg.event) onEvent(msg as HerdrStreamEvent);

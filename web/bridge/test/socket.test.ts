@@ -37,4 +37,35 @@ describe("socket", () => {
     expect(got).toEqual(["workspace_created", "workspace_renamed"]);
     sub.close();
   });
+
+  it("does not invoke onClose on an intentional close()", async () => {
+    let closed = false;
+    const sub = await subscribe(
+      h.socketPath,
+      [{ type: "workspace.created" }],
+      () => {},
+      () => {
+        closed = true;
+      },
+    );
+    sub.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(closed).toBe(false);
+  });
+
+  it("invokes onClose when the server ends the connection unexpectedly", async () => {
+    const other = await startTestHerdr();
+    let closed = false;
+    await subscribe(
+      other.socketPath,
+      [{ type: "workspace.created" }],
+      () => {},
+      () => {
+        closed = true;
+      },
+    );
+    await other.stop();
+    await waitFor(() => closed, 5_000);
+    expect(closed).toBe(true);
+  });
 });
