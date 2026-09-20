@@ -94,7 +94,9 @@ cd "$INSTALL_DIR"
 
 # --- Credentials ------------------------------------------------------------
 GENERATED="false"
+KEPT="false"
 if [ -z "$PASSWORD" ] && [ -f .env ] && grep -q '^AGENTBOX_PASSWORD_HASH=.\+' .env; then
+    KEPT="true"
     log "Keeping the existing password"
     HASH_ESCAPED="$(grep '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2-)"
     HASH="$HASH_ESCAPED"
@@ -148,7 +150,9 @@ printf '  Username  %s\n' "$USERNAME"
 if [ "$GENERATED" = "true" ]; then
     printf '  Password  %s\n\n' "$PASSWORD"
     printf '  This password is shown once. Save it now.\n'
-else
+elif [ "$KEPT" = "true" ]; then
     printf '  Password  (unchanged)\n'
+else
+    printf '  Password  (the one you passed with --password)\n'
 fi
 printf '\n  Editor /   Terminal /terminal   Monitor /monitor\n\n'

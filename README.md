@@ -60,6 +60,23 @@ It protects the host from the sandbox. It does not make the code inside safe:
 an agent with your keys can still push commits and spend tokens. See
 [docs/security.md](docs/security.md) for the full threat model.
 
+## Behind a Cloudflare Tunnel
+
+If your server is already reachable through a Cloudflare Tunnel, use
+behind-proxy mode and add a published application route pointing at the bind
+address — no ports are opened and Cloudflare terminates TLS:
+
+```
+code.example.com  →  http://127.0.0.1:8443
+```
+
+**Order matters.** `cloudflared` matches ingress rules top to bottom, so a
+route placed below a wildcard such as `*.example.com` never runs. The symptom
+is confusing: the hostname answers, but with whatever the wildcard points at,
+so you get a `200` from the wrong service rather than an obvious error. Move
+the specific hostname above the wildcard (row menu → **Move up**), and confirm
+with the connector's own log, which prints the resolved ingress list.
+
 ## If ports 80 and 443 are taken
 
 Common on a VPS that already runs something. Bind to loopback and let your
@@ -86,8 +103,13 @@ root.
 
 ## Requirements
 
-A Linux VPS with 2 GB RAM and a few GB of disk. Docker is installed for you if
-absent. A domain is needed only for standalone mode's certificate.
+A Linux VPS with 2 GB RAM. Docker is installed for you if absent. A domain is
+needed only for standalone mode's certificate.
+
+Allow about 5 GB of disk: the image carries VS Code, Node, a Python toolchain
+and a compiler, because agents routinely install dependencies that need them.
+Build without the agents (see above) or drop `build-essential` from the
+Dockerfile if you want it smaller.
 
 ## Licence
 
