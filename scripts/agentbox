@@ -22,6 +22,8 @@ case "${1:-help}" in
     password)
         [ $# -ge 2 ] && NEW="$2" || NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
         HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$NEW")"
+        # Escape '$' so Compose does not interpolate the bcrypt hash away.
+        HASH="$(printf '%s' "$HASH" | sed 's/[$]/$$/g')"
         tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
         grep -v '^AGENTBOX_PASSWORD_HASH=' .env > "$tmp"
         printf 'AGENTBOX_PASSWORD_HASH=%s\n' "$HASH" >> "$tmp"

@@ -93,7 +93,8 @@ cd "$INSTALL_DIR"
 GENERATED="false"
 if [ -z "$PASSWORD" ] && [ -f .env ] && grep -q '^AGENTBOX_PASSWORD_HASH=.\+' .env; then
     log "Keeping the existing password"
-    HASH="$(grep '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2-)"
+    HASH_ESCAPED="$(grep '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2-)"
+    HASH="$HASH_ESCAPED"
 else
     if [ -z "$PASSWORD" ]; then
         PASSWORD="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
@@ -104,6 +105,11 @@ else
 fi
 [ -n "$HASH" ] || die "failed to generate a password hash"
 
+# A bcrypt hash is full of '$', which Docker Compose reads as variable
+# interpolation and would silently blank out, breaking the login. Escaping each
+# '$' as '$$' makes Compose hand the container the literal hash.
+HASH_ESCAPED="$(printf '%s' "$HASH" | sed 's/[$]/$$/g')"
+
 # --- Configuration ----------------------------------------------------------
 log "Writing .env"
 umask 077
@@ -112,7 +118,7 @@ AGENTBOX_DOMAIN=$DOMAIN
 AGENTBOX_MODE=$MODE
 AGENTBOX_BIND=$BIND
 AGENTBOX_USER=$USERNAME
-AGENTBOX_PASSWORD_HASH=$HASH
+AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_CPUS=$CPUS
 AGENTBOX_MEMORY=$MEMORY
 TZ=$(cat /etc/timezone 2>/dev/null || echo UTC)
