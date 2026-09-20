@@ -2,6 +2,8 @@ import { loadConfig } from "./config.js";
 import { ensureServer } from "./herdr/supervisor.js";
 import { SessionHub } from "./herdr/session.js";
 import { buildApp } from "./app.js";
+import { PortsWatcher } from "./ports.js";
+import { readLavishSessions } from "./lavish.js";
 
 const USAGE = "Usage: workbench-bridge [--help]\n\nRuns the Workbench bridge server that proxies browser clients to herdr.";
 
@@ -19,7 +21,16 @@ async function main(argv: string[]): Promise<void> {
   const hub = new SessionHub(config.socketPath);
   await hub.start();
 
-  const app = await buildApp(config, { hub });
+  // Ports that belong to the sandbox's own services, flagged so the UI can tell
+  // infrastructure apart from the dev servers an agent starts.
+  const systemPorts = [config.port, 8080, 7681, 7682, 7683, config.lavishPort];
+  const ports = new PortsWatcher({ systemPorts });
+
+  const app = await buildApp(config, {
+    hub,
+    ports,
+    lavish: () => readLavishSessions(config),
+  });
   await app.listen({ host: "0.0.0.0", port: config.port });
   console.log(`[workbench] listening on 0.0.0.0:${config.port}${config.basePath}`);
 
@@ -32,6 +43,7 @@ async function main(argv: string[]): Promise<void> {
       .close()
       .catch(() => {})
       .finally(() => {
+        ports.stop();
         hub.stop();
         process.exit(0);
       });

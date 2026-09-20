@@ -9,11 +9,17 @@ import { TerminalStreams } from "./herdr/terminal.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
+import { registerPreviewRoutes } from "./routes/preview.js";
 
-/** Watches for locally listening ports; wired into the app in a later task. */
+/**
+ * Watches for locally listening ports. Polling runs only between `start()` and
+ * `stop()` so the events websocket can ref-count it against connected clients.
+ */
 export interface PortsWatcher {
   current(): ListeningPort[];
   on(listener: (ports: ListeningPort[]) => void): () => void;
+  start(): void;
+  stop(): void;
 }
 
 export interface AppDeps {
@@ -37,9 +43,10 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   await app.register(
     async (scope) => {
-      registerApiRoutes(scope, config, deps.hub);
-      registerEventsWs(scope, deps.hub);
+      registerApiRoutes(scope, config, deps.hub, { ports: deps.ports, lavish: deps.lavish });
+      registerEventsWs(scope, deps.hub, deps.ports);
       registerTerminalWs(scope, streams);
+      await registerPreviewRoutes(scope, config);
 
       if (serveStatic) {
         await scope.register(fastifyStatic, {

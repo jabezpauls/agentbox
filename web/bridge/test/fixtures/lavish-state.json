@@ -1,0 +1,39 @@
+{
+  "sessions": {
+    "a1b2c3d4e5f60718": {
+      "key": "a1b2c3d4e5f60718",
+      "file": "/workspace/site/index.html",
+      "url": "http://127.0.0.1:4387/session/a1b2c3d4e5f60718",
+      "status": "open",
+      "pending_prompts": 0,
+      "prompts": [],
+      "layout_warnings": [],
+      "artifact_revision": 0,
+      "artifact_failures": [],
+      "delivered_attachments": [],
+      "dom_snapshot": "",
+      "chat": [],
+      "chat_revision": 0,
+      "chat_ack_ids": [],
+      "updated_at": "2026-09-20T12:00:00.000Z"
+    },
+    "0011223344556677": {
+      "key": "0011223344556677",
+      "file": "/workspace/docs/report.html",
+      "url": "http://127.0.0.1:4387/session/0011223344556677",
+      "status": "ended",
+      "ended_by": "user",
+      "pending_prompts": 0,
+      "prompts": [],
+      "layout_warnings": [],
+      "artifact_revision": 3,
+      "artifact_failures": [],
+      "delivered_attachments": [],
+      "dom_snapshot": "",
+      "chat": [],
+      "chat_revision": 0,
+      "chat_ack_ids": [],
+      "updated_at": "2026-09-20T11:00:00.000Z"
+    }
+  }
+}
