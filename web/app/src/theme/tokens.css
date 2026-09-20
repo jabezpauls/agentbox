@@ -1,0 +1,247 @@
+/*
+ * Workbench design tokens.
+ *
+ * A control room for coding agents should feel like a well-built native tool,
+ * not a website: quiet neutral surfaces, one accent, and a small family of
+ * status "lights" that carry the only real colour. The visual language is the
+ * status system — the rollup dots and badges read like terminal status lights.
+ * Everything else stays deliberately restrained so those lights are legible at
+ * a glance.
+ *
+ * Light is defined on :root; dark overrides the same tokens. `system` follows
+ * prefers-color-scheme (dark tokens apply when no explicit data-theme is set),
+ * an explicit [data-theme] always wins. Both palettes meet WCAG AA for text.
+ */
+
+:root {
+  /* neutral surfaces, back to front */
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --surface-2: #eceef3;
+  --surface-3: #e2e5ec;
+  --overlay: rgba(255, 255, 255, 0.72);
+  --scrim: rgba(18, 20, 27, 0.34);
+
+  --border: rgba(18, 22, 31, 0.1);
+  --border-strong: rgba(18, 22, 31, 0.16);
+  --ring: rgba(76, 99, 230, 0.5);
+
+  /* text */
+  --text: #171a1f;
+  --text-2: #545b68;
+  --text-3: #838a97;
+
+  /* single accent */
+  --accent: #4c63e6;
+  --accent-2: #3d51cf;
+  --accent-tint: rgba(76, 99, 230, 0.12);
+  --on-accent: #ffffff;
+
+  /* status lights */
+  --st-blocked: #d9772b;
+  --st-working: var(--accent);
+  --st-done: #2e9e5b;
+  --st-idle: #9aa1ad;
+  --st-unknown: #c3c8d1;
+
+  /* type */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --fs-micro: 0.6875rem; /* 11px — small-caps labels */
+  --fs-xs: 0.75rem; /* 12px */
+  --fs-sm: 0.8125rem; /* 13px — base UI text (native density) */
+  --fs-md: 0.875rem; /* 14px */
+  --fs-lg: 1rem; /* 16px */
+  --fs-xl: 1.25rem; /* 20px */
+
+  --lh-tight: 1.2;
+  --lh: 1.45;
+  --track-label: 0.04em; /* small text reads better with a touch more tracking */
+  --track-tight: -0.01em; /* larger text tightens */
+
+  /* spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+
+  /* materials */
+  --blur: 20px;
+  --shadow-sm: 0 1px 2px rgba(18, 22, 31, 0.06), 0 1px 3px rgba(18, 22, 31, 0.08);
+  --shadow-md: 0 6px 16px rgba(18, 22, 31, 0.12), 0 2px 6px rgba(18, 22, 31, 0.08);
+  --shadow-lg: 0 16px 48px rgba(18, 22, 31, 0.22);
+
+  /* motion — one calm curve; springs would be overkill for chrome */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+
+  /* layout */
+  --sidebar-w: 260px;
+  --tabbar-h: 42px;
+
+  /* z-order */
+  --z-menu: 40;
+  --z-scrim: 50;
+  --z-sheet: 60;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #171a20;
+  --surface-2: #1f232b;
+  --surface-3: #272c36;
+  --overlay: rgba(23, 26, 32, 0.66);
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --ring: rgba(127, 146, 247, 0.55);
+
+  --text: #e8eaef;
+  --text-2: #a3aab8;
+  --text-3: #6d7482;
+
+  --accent: #7f92f7;
+  --accent-2: #93a3ff;
+  --accent-tint: rgba(127, 146, 247, 0.16);
+  --on-accent: #0f1115;
+
+  --st-blocked: #e0913f;
+  --st-working: var(--accent);
+  --st-done: #45c07d;
+  --st-idle: #6d7482;
+  --st-unknown: #464c57;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
+  --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+}
+
+/* system default: apply dark unless an explicit light theme is chosen */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115;
+    --surface: #171a20;
+    --surface-2: #1f232b;
+    --surface-3: #272c36;
+    --overlay: rgba(23, 26, 32, 0.66);
+    --scrim: rgba(0, 0, 0, 0.5);
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --ring: rgba(127, 146, 247, 0.55);
+
+    --text: #e8eaef;
+    --text-2: #a3aab8;
+    --text-3: #6d7482;
+
+    --accent: #7f92f7;
+    --accent-2: #93a3ff;
+    --accent-tint: rgba(127, 146, 247, 0.16);
+    --on-accent: #0f1115;
+
+    --st-blocked: #e0913f;
+    --st-working: var(--accent);
+    --st-done: #45c07d;
+    --st-idle: #6d7482;
+    --st-unknown: #464c57;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
+    --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.6);
+
+    color-scheme: dark;
+  }
+}
+
+/* --- base ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  line-height: var(--lh);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--accent-tint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* accessibility signals bake into every component */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --overlay: var(--surface);
+    --blur: 0px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: rgba(18, 22, 31, 0.3);
+    --border-strong: rgba(18, 22, 31, 0.45);
+    --text-2: #3a4049;
+    --text-3: #545b68;
+  }
+  :root[data-theme="dark"],
+  :root:not([data-theme="light"]) {
+    --border: rgba(255, 255, 255, 0.28);
+    --border-strong: rgba(255, 255, 255, 0.42);
+    --text-2: #c4c9d3;
+    --text-3: #9aa1ad;
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@workbench/app",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc -b --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "zustand": "^5",
+    "@xterm/xterm": "^5.5",
+    "@xterm/addon-fit": "^0.10",
+    "@xterm/addon-webgl": "^0.18",
+    "@xterm/addon-web-links": "^0.11",
+    "lucide-react": "^0.460",
+    "@fontsource/jetbrains-mono": "^5"
+  },
+  "devDependencies": {
+    "vite": "^5",
+    "@vitejs/plugin-react": "^4",
+    "typescript": "^5.6",
+    "vitest": "^2",
+    "jsdom": "^25",
+    "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14",
+    "@testing-library/jest-dom": "^6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "typescript-eslint": "^8",
+    "eslint-plugin-react-hooks": "^5",
+    "@playwright/test": "^1.48"
+  }
+}
