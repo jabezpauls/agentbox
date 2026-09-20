@@ -65,16 +65,24 @@ class PaneStream {
   private readonly viewerSize = new WeakMap<Viewer, { cols: number; rows: number }>();
   lastFullSeq = 0;
   private released = false;
+  private dead = false;
 
   constructor(
     private readonly paneId: string,
     private readonly env: NodeJS.ProcessEnv,
     cols: number,
     rows: number,
+    /** Called once when the child dies, so the registry can drop this stream. */
+    private readonly onDead: (paneId: string, stream: PaneStream) => void,
   ) {
     this.cols = cols;
     this.rows = rows;
     this.child = this.spawn();
+  }
+
+  /** True once the child has exited/errored or herdr reported the pane closed. */
+  get isDead(): boolean {
+    return this.dead;
   }
 
   private spawn(): ChildProcess {
@@ -98,9 +106,21 @@ class PaneStream {
     }
     // Drain stderr so a chatty child never blocks on a full pipe.
     child.stderr?.resume();
-    child.on("error", () => this.shutdownViewers("stream error"));
-    child.on("exit", () => this.shutdownViewers("stream ended"));
+    child.on("error", () => this.markDead("stream error"));
+    child.on("exit", () => this.markDead("stream ended"));
     return child;
+  }
+
+  /**
+   * Mark the stream dead exactly once (dropping it from the registry) and close
+   * any remaining viewers. Called on child exit/error and on terminal.closed.
+   */
+  private markDead(reason: string): void {
+    if (!this.dead) {
+      this.dead = true;
+      this.onDead(this.paneId, this);
+    }
+    this.shutdownViewers(reason);
   }
 
   private shutdownViewers(reason: string): void {
@@ -125,10 +145,17 @@ class PaneStream {
       } else {
         this.diffs.push(buf);
         this.diffBytes += buf.length;
+        if (this.diffBytes > MAX_REPLAY_BYTES) {
+          // Replay buffer too large: drop it and the baseline so it cannot grow
+          // unbounded. Late joiners then get a forced repaint instead of replay.
+          this.full = null;
+          this.diffs = [];
+          this.diffBytes = 0;
+        }
       }
       for (const v of this.viewers) v.send(buf);
     } else if (msg.type === "terminal.closed") {
-      this.shutdownViewers(msg.reason ?? "closed");
+      this.markDead(msg.reason ?? "closed");
     }
   }
 
@@ -217,22 +244,34 @@ export class TerminalStreams {
 
   constructor(private readonly env: NodeJS.ProcessEnv) {}
 
+  /** Drop a stream from the registry, but only if it is still the live one. */
+  private forget(paneId: string, stream: PaneStream): void {
+    if (this.streams.get(paneId) === stream) this.streams.delete(paneId);
+  }
+
   attach(paneId: string, viewer: Viewer, cols = 80, rows = 24): Attachment {
     let stream = this.streams.get(paneId);
-    if (!stream) {
-      stream = new PaneStream(paneId, this.env, cols, rows);
+    // A dead stream (child gone, closed cascade not yet finished) must never be
+    // reused: spawn a fresh controller in its place.
+    if (!stream || stream.isDead) {
+      stream = new PaneStream(paneId, this.env, cols, rows, (p, s) => this.forget(p, s));
       this.streams.set(paneId, stream);
     }
     stream.addViewer(viewer, cols, rows);
     const s = stream;
+    let detached = false;
     return {
       input: (text, bytes) => s.input(text, bytes),
       resize: (c, r) => s.resizeFor(viewer, c, r),
       scroll: (direction, lines) => s.scroll(direction, lines),
       focus: () => s.focus(viewer),
       detach: () => {
+        // Idempotent per attachment: a double detach from the same viewer must
+        // not touch a stream that a later viewer now owns.
+        if (detached) return;
+        detached = true;
         s.removeViewer(viewer);
-        if (s.viewerCount === 0) this.streams.delete(paneId);
+        if (s.viewerCount === 0) this.forget(paneId, s);
       },
     };
   }
@@ -247,6 +286,11 @@ export class TerminalStreams {
 
   lastFullSeq(paneId: string): number {
     return this.streams.get(paneId)?.lastFullSeq ?? 0;
+  }
+
+  /** Test-only: number of live pane streams in the registry. */
+  streamCount(): number {
+    return this.streams.size;
   }
 
   /** Tear down every live stream; call on server shutdown. */

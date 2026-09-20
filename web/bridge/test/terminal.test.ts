@@ -34,13 +34,17 @@ function recorder(): Recorder {
   return rec;
 }
 
-beforeAll(async () => {
-  h = await startTestHerdr();
+async function newPane(label: string): Promise<string> {
   const created = await request<{ root_pane: { pane_id: string } }>(h.socketPath, "workspace.create", {
     cwd: h.dir,
-    label: "term",
+    label,
   });
-  pane = created.root_pane.pane_id;
+  return created.root_pane.pane_id;
+}
+
+beforeAll(async () => {
+  h = await startTestHerdr();
+  pane = await newPane("term");
   streams = new TerminalStreams(h.env);
 }, 20_000);
 
@@ -115,5 +119,59 @@ describe("TerminalStreams", () => {
     a1.detach();
     await waitFor(() => streams.active(pane) === false, 2_000);
     expect(streams.active(pane)).toBe(false);
+  });
+
+  it("keeps a re-attached stream alive across a stale double detach", async () => {
+    const va = recorder();
+    const a = streams.attach(pane, va.viewer, 80, 24);
+    await waitFor(() => va.frames.length >= 1, 2_000);
+
+    a.detach();
+    await waitFor(() => streams.active(pane) === false, 2_000);
+
+    // A new viewer B attaches and gets a fresh stream.
+    const vb = recorder();
+    const b = streams.attach(pane, vb.viewer, 80, 24);
+    await waitFor(() => vb.frames.length >= 1, 2_000);
+    expect(streams.active(pane)).toBe(true);
+    expect(streams.streamCount()).toBe(1);
+
+    // A stale second detach from A must not tear down B's stream.
+    a.detach();
+    expect(streams.active(pane)).toBe(true);
+    expect(streams.streamCount()).toBe(1);
+
+    // B's stream is still live: input still echoes to B.
+    const before = vb.frames.length;
+    b.input("echo WB_STALE_$((2*3))\n");
+    await waitFor(() => vb.text().includes("WB_STALE_6"), 5_000);
+    expect(vb.frames.length).toBeGreaterThan(before);
+
+    b.detach();
+    await waitFor(() => streams.active(pane) === false, 2_000);
+  });
+
+  it("drops a dead stream so a later attach spawns a fresh one", async () => {
+    const p1 = await newPane("dead1");
+    const v = recorder();
+    streams.attach(p1, v.viewer, 80, 24);
+    await waitFor(() => v.frames.length >= 1, 2_000);
+    expect(streams.active(p1)).toBe(true);
+
+    // Killing the pane makes herdr emit terminal.closed to the controller.
+    await request(h.socketPath, "pane.close", { pane_id: p1 });
+    await waitFor(() => v.closed !== null, 3_000);
+    // The dead stream is dropped immediately, before any reuse can occur.
+    expect(streams.active(p1)).toBe(false);
+
+    // A fresh pane attaches cleanly afterward.
+    const p2 = await newPane("dead2");
+    const v2 = recorder();
+    const a2 = streams.attach(p2, v2.viewer, 80, 24);
+    await waitFor(() => v2.frames.length >= 1, 2_000);
+    expect(streams.active(p2)).toBe(true);
+
+    a2.detach();
+    await waitFor(() => streams.active(p2) === false, 2_000);
   });
 });

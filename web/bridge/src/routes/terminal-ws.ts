@@ -65,7 +65,9 @@ export function registerTerminalWs(app: FastifyInstance, streams: TerminalStream
             );
             break;
           case "scroll":
-            attachment.scroll(msg.direction, Number(msg.lines));
+            if (msg.direction === "up" || msg.direction === "down") {
+              attachment.scroll(msg.direction, Number(msg.lines));
+            }
             break;
           case "focus":
             attachment.focus();
