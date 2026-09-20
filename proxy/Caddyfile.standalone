@@ -1,0 +1,33 @@
+# Standalone: Caddy terminates TLS for AGENTBOX_DOMAIN and authenticates every
+# request before it reaches the sandbox.
+{
+	admin off
+}
+
+{$AGENTBOX_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
+	}
+
+	import routes
+}
+
+(routes) {
+	# A full-screen shell, handy for running an agent as a TUI.
+	handle /terminal* {
+		reverse_proxy terminal:7681
+	}
+
+	# Live CPU/memory/process view for the sandbox.
+	handle /monitor* {
+		reverse_proxy monitor:7682
+	}
+
+	# Everything else is the editor, served at the root so VS Code needs no
+	# sub-path gymnastics.
+	handle {
+		reverse_proxy code:8080
+	}
+}

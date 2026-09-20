@@ -1,0 +1,31 @@
+# Behind-proxy: no TLS and no ACME here — the host's existing reverse proxy
+# terminates TLS and forwards to this listener. Authentication still happens at
+# this hop, so the sandbox is never reachable unauthenticated even from the host.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode zstd gzip
+
+	basic_auth {
+		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
+	}
+
+	import routes
+}
+
+(routes) {
+	handle /terminal* {
+		reverse_proxy terminal:7681
+	}
+
+	handle /monitor* {
+		reverse_proxy monitor:7682
+	}
+
+	handle {
+		reverse_proxy code:8080
+	}
+}
