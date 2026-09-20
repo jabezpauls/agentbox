@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Thin wrapper so day-to-day operations do not require remembering which
+# compose overlay is in use — it is read from .env.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+[ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
+MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
+DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
+
+case "${1:-help}" in
+    start)   shift; "${DC[@]}" up -d "$@" ;;
+    stop)    shift; "${DC[@]}" stop "$@" ;;
+    restart) shift; "${DC[@]}" restart "$@" ;;
+    status)  "${DC[@]}" ps ;;
+    logs)    shift; "${DC[@]}" logs -f --tail=100 "$@" ;;
+    shell)   "${DC[@]}" exec code bash -l ;;
+    update)
+        git pull --ff-only
+        "${DC[@]}" build --pull
+        "${DC[@]}" up -d
+        ;;
+    password)
+        [ $# -ge 2 ] && NEW="$2" || NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
+        HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$NEW")"
+        tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+        grep -v '^AGENTBOX_PASSWORD_HASH=' .env > "$tmp"
+        printf 'AGENTBOX_PASSWORD_HASH=%s\n' "$HASH" >> "$tmp"
+        install -m 600 "$tmp" .env
+        "${DC[@]}" up -d proxy
+        echo "new password: $NEW"
+        ;;
+    backup)
+        out="${2:-agentbox-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
+        docker run --rm -v agentbox_workspace:/w:ro -v agentbox_home:/h:ro \
+            -v "$PWD:/out" alpine \
+            tar czf "/out/$(basename "$out")" -C / w h
+        echo "wrote $out"
+        ;;
+    restore)
+        [ $# -ge 2 ] || { echo "usage: agentbox restore <file.tar.gz>" >&2; exit 1; }
+        "${DC[@]}" down
+        docker run --rm -v agentbox_workspace:/w -v agentbox_home:/h \
+            -v "$PWD:/in" alpine \
+            sh -c "rm -rf /w/* /h/* && tar xzf '/in/$(basename "$2")' -C /"
+        "${DC[@]}" up -d
+        echo "restored from $2"
+        ;;
+    destroy)
+        read -rp "Delete containers AND the workspace volume? Type 'delete': " c
+        [ "$c" = "delete" ] || { echo "aborted"; exit 1; }
+        "${DC[@]}" down -v
+        ;;
+    *)
+        cat <<'HELP'
+agentbox <command>
+
+  start | stop | restart | status | logs [service]
+  shell                 a shell inside the sandbox
+  update                pull, rebuild, restart
+  password [new]        rotate the login password
+  backup [file]         archive the workspace and home volumes
+  restore <file>        replace volumes from an archive
+  destroy               remove everything, including your files
+HELP
+        ;;
+esac
