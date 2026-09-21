@@ -2,11 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import type { ClientOptions } from "ws";
 import { WebSocket, WebSocketServer } from "ws";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import type { SessionHub } from "../src/herdr/session.js";
 import type { TerminalStreams } from "../src/herdr/terminal.js";
+import { isSameOrigin } from "../src/ws-origin.js";
 
 // The origin check runs before any handler, so neither herdr nor a real
 // terminal stream is needed: stubs keep the routes registrable.
@@ -128,22 +129,22 @@ describe("websocket origin checks", () => {
     });
   }
 
-  it("accepts an https origin when the proxy forwards that scheme", async () => {
+  it("accepts an https origin behind TLS termination, whatever the forwarded scheme says", async () => {
+    // Caddy is the last hop and rewrites X-Forwarded-Proto to its own
+    // listener's scheme, so behind a Cloudflare Tunnel (or any TLS-terminating
+    // proxy) the browser's https origin arrives alongside a forwarded "http".
+    // Comparing schemes here would refuse every upgrade on the recommended
+    // deployment; only the host is compared.
     await expect(
       accepted(EVENTS, {
         origin: `https://${baseUrl}`,
-        headers: { "x-forwarded-proto": "https" },
+        headers: { "x-forwarded-proto": "http" },
       }),
     ).resolves.toBeUndefined();
   });
 
-  it("rejects an origin whose scheme contradicts the forwarded one", async () => {
-    await expect(
-      refusedStatus(EVENTS, {
-        origin: `http://${baseUrl}`,
-        headers: { "x-forwarded-proto": "https" },
-      }),
-    ).resolves.toBe(403);
+  it("rejects an origin with a scheme no browser would send", async () => {
+    await expect(refusedStatus(EVENTS, { origin: `ftp://${baseUrl}` })).resolves.toBe(403);
   });
 
   it("rejects an origin that only looks like this host", async () => {
@@ -158,5 +159,41 @@ describe("websocket origin checks", () => {
     const res = await app.inject({ method: "GET", url: "/workbench/preview/70000/" });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "invalid preview port" });
+  });
+});
+
+// The header comparison itself, at the shape a real deployment produces.
+describe("isSameOrigin", () => {
+  const req = (headers: Record<string, string>): FastifyRequest =>
+    ({ headers }) as unknown as FastifyRequest;
+
+  it("accepts the browser's https origin behind a TLS-terminating proxy", () => {
+    // Cloudflare Tunnel in front of Caddy: the tunnel terminates TLS, Caddy
+    // rewrites X-Forwarded-Proto to its own plain listener, and the Host is
+    // carried through untouched. Only the host may be compared.
+    expect(
+      isSameOrigin(
+        req({
+          origin: "https://code.example.com",
+          host: "code.example.com",
+          "x-forwarded-proto": "http",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a per-port preview hostname on its own Host", () => {
+    expect(
+      isSameOrigin(
+        req({ origin: "https://3000.preview.example.com", host: "3000.preview.example.com" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a different host, a look-alike, null and an absent origin", () => {
+    expect(isSameOrigin(req({ origin: "https://evil.example", host: "code.example.com" }))).toBe(false);
+    expect(isSameOrigin(req({ origin: "https://code.example.com.evil.example", host: "code.example.com" }))).toBe(false);
+    expect(isSameOrigin(req({ origin: "null", host: "code.example.com" }))).toBe(false);
+    expect(isSameOrigin(req({ host: "code.example.com" }))).toBe(false);
   });
 });

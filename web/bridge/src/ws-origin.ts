@@ -9,10 +9,10 @@ import type { FastifyReply, FastifyRequest } from "fastify";
  * `Origin` check does.
  *
  * The Workbench is always served from the same host the socket is opened on, so
- * a legitimate upgrade carries an `Origin` equal to this request's own scheme
- * and `Host`. Comparing against the request rather than a configured origin
- * keeps the check correct under any domain, any base path, and the per-port
- * preview hostnames, none of which the bridge knows about.
+ * a legitimate upgrade carries an `Origin` naming this request's own `Host`.
+ * Comparing against the request rather than a configured origin keeps the
+ * check correct under any domain, any base path, and the per-port preview
+ * hostnames, none of which the bridge knows about.
  *
  * A sandboxed preview iframe sends `Origin: null`, and a page that wants to
  * escape that sandbox would too; both are refused along with everything else
@@ -25,18 +25,18 @@ export function isWebSocketUpgrade(req: FastifyRequest): boolean {
 }
 
 /**
- * The scheme the browser used. TLS terminates at the proxy, so the bridge
- * always sees plain HTTP; `X-Forwarded-Proto` is the only witness of the real
- * scheme. When no proxy sets it we accept either scheme on a matching host
- * rather than reject every upgrade behind a proxy that forwards less.
+ * True when `Origin` names this request's own host.
+ *
+ * Only the host is compared, deliberately. The scheme cannot be: TLS
+ * terminates before the bridge, and the last hop — our own Caddy — rewrites
+ * `X-Forwarded-Proto` to its own listener's scheme rather than passing on what
+ * a fronting proxy sent, so behind a Cloudflare Tunnel or any TLS-terminating
+ * nginx the browser's `https://host` would be compared against a forwarded
+ * `http` and every upgrade would be refused. The host equality is what carries
+ * the weight anyway: anyone able to serve `http://<this host>` to the browser
+ * is already a man in the middle of the connection this check protects. ttyd's
+ * own `--check-origin` compares host and port for the same reason.
  */
-function forwardedProto(req: FastifyRequest): string | null {
-  const raw = req.headers["x-forwarded-proto"];
-  const first = (Array.isArray(raw) ? raw[0] : raw)?.split(",")[0]?.trim().toLowerCase();
-  return first ? first : null;
-}
-
-/** True when `Origin` names this very request's own origin. */
 export function isSameOrigin(req: FastifyRequest): boolean {
   const origin = req.headers.origin;
   const host = req.headers.host;
@@ -53,11 +53,8 @@ export function isSameOrigin(req: FastifyRequest): boolean {
   } catch {
     return false;
   }
-  if (url.host.toLowerCase() !== host.toLowerCase()) return false;
-
-  const scheme = url.protocol.replace(/:$/, "");
-  const proto = forwardedProto(req);
-  return proto ? scheme === proto : scheme === "http" || scheme === "https";
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  return url.host.toLowerCase() === host.toLowerCase();
 }
 
 /**
