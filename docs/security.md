@@ -20,8 +20,8 @@ over the host.
   package managers need it to install dependencies. If you want to restrict this,
   see "Egress filtering" below.
 - Its own named volume, which persists across restarts and updates.
-- The other sandbox services. `terminal`, `shell`, `monitor`, `workbench` and
-  `lavish` share the `code` container's network and PID namespaces, so
+- The other sandbox services. `terminal`, `shell`, `monitor` and `workbench`
+  share the `code` container's network and PID namespaces, so
   `localhost` and the process table are common to all of them. This is
   deliberate: a dev server an agent starts in one pane is previewable from the
   others. The shared namespaces belong to sandbox containers only; nothing
@@ -63,10 +63,15 @@ over the host.
   workspace or worktree is *not* so confined — those RPCs pass the directory
   you choose to herdr, which can open a session anywhere in the sandbox the
   agents can already reach.
-- **lavish binds the internal network.** lavish-axi is unauthenticated and
-  serves local files, so it binds one address on `agentbox_internal` — not a
-  wildcard. That network carries only agentbox's own containers, and the proxy
-  is the only way in.
+- **Review artifacts are sandboxed twice.** A review artifact is HTML an agent
+  wrote, rendered inside the authenticated app, so the route serves it with
+  `Content-Security-Policy: sandbox allow-scripts` — an opaque origin, with no
+  cookies, no storage and no same-origin access — and the panel's iframe
+  carries `sandbox="allow-scripts"` as well. Two mechanisms, because only the
+  header survives the page being opened as a top-level tab. The only channel
+  across the boundary is `postMessage`, and the panel accepts messages from its
+  own frame alone. Session keys are short hashes matched against that shape, so
+  a `..` in a key is refused rather than resolved.
 - **On-demand certificates are gated.** In standalone mode the preview
   wildcard's certificates are issued on demand; the permission endpoint answers
   only for numeric subdomains of the configured preview domain, comparing that
@@ -83,7 +88,7 @@ docker inspect $(docker compose ps -q) \
   --format '{{.Name}}: {{range .Mounts}}{{.Source}} {{end}}'
 
 # The sandbox runs unprivileged with no capabilities.
-for c in agentbox-code-1 agentbox-workbench-1 agentbox-lavish-1; do
+for c in agentbox-code-1 agentbox-workbench-1 agentbox-terminal-1; do
   docker inspect "$c" \
     --format '{{.Name}} user={{.Config.User}} caps={{.HostConfig.CapDrop}} priv={{.HostConfig.Privileged}}'
 done
@@ -101,9 +106,9 @@ strongest configuration and is what the project recommends for shared hosts.
 ## Authentication
 
 The proxy demands credentials before any request reaches the editor, the
-Workbench, the terminal, the metrics, lavish or a preview. Basic authentication
-is scoped per origin, so the lavish hostname and each preview hostname prompt
-separately with the same credentials.
+Workbench, the terminal, the metrics or a preview. Basic authentication is
+scoped per origin, so each preview hostname prompts separately with the same
+credentials.
 
 Passwords are stored only as bcrypt hashes. In `standalone` mode the proxy also
 obtains and renews TLS certificates automatically.

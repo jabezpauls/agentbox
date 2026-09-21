@@ -73,18 +73,6 @@
 	import routes
 }
 
-# lavish-axi renders agent-written HTML for review. It cannot be served under a
-# path prefix, so it gets a hostname of its own. Same login as everything else.
-lavish.{$AGENTBOX_DOMAIN} {
-	encode zstd gzip
-
-	basic_auth {
-		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
-	}
-
-	reverse_proxy code:4387
-}
-
 # Optional per-port preview hostnames, mounted only when a preview domain is
 # configured (see docker-compose.previews.yml). Each file here is a site block.
 import /etc/caddy/previews/*

@@ -48,12 +48,6 @@
 	# proxy terminates TLS for all of them and forwards to this one port. They
 	# are matched by Host rather than split into their own site blocks.
 
-	# lavish-axi cannot be served under a path prefix, so it has a hostname.
-	@lavish host lavish.{$AGENTBOX_DOMAIN}
-	handle @lavish {
-		reverse_proxy code:4387
-	}
-
 	# PORT.<preview-domain>: the port is taken from the hostname and the
 	# request is rewritten onto the bridge's preview proxy. Only numeric
 	# subdomains match, so nothing else on the preview domain is reachable.

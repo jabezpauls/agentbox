@@ -35,7 +35,8 @@ it is open, which tab it shows and how wide it is.
 - **Composer** — appears under the grid when the focused pane holds an agent.
   `⌘/Ctrl+Enter` sends; `Escape` puts focus back in the terminal.
 - **Inspector** — a drawer on the right with two panels: **Preview** for the
-  ports something is listening on, and **Lavish** for review sessions.
+  ports something is listening on, and **Review** for the pages agents publish
+  for you to comment on.
 
 ## Working with agents
 
@@ -145,32 +146,50 @@ sandbox attribute, so the agent's page would get the Workbench's own origin —
 its storage, its API and its terminals. With a preview domain the page is on a
 separate origin anyway and it opens straight away.
 
-## Lavish
+## Review
 
-[lavish-axi](https://www.npmjs.com/package/lavish-axi) renders HTML an agent
-has written so you can look at it and comment. It runs as its own service in
-the sandbox and the Lavish panel lists its sessions.
+Some of what an agent has to say is a place in a document rather than a
+paragraph: a plan you want reordered, a table with one wrong row, a diagram
+missing an arrow. Review is that conversation. The agent writes an HTML file
+and publishes it; you see it in the drawer, click the heading or select the
+phrase you mean, say what you think, and send. The agent's command was blocked
+all along and returns with your comments attached to what they refer to.
 
-lavish cannot be served under a path prefix, so it gets a hostname:
-`lavish.<your domain>` by default, or `--lavish-domain` at install time. The
-installer writes both `AGENTBOX_LAVISH_DOMAIN` (which lavish uses to allow the
-`Host` header and to build links) and `AGENTBOX_LAVISH_URL` (which the
-Workbench links to).
-
-An agent opens a session from inside the sandbox:
+From inside the sandbox:
 
 ```bash
-lavish-axi open report.html
+agentbox-review open plan.html --label "Rollout plan"
+agentbox-review poll plan.html          # blocks until you press Send
 ```
 
-The session then appears in the panel. Selecting one shows it inline where the
-browser allows it; because it is a different origin from the Workbench, some
-sessions refuse to be framed and the panel offers to open them in a tab
-instead. That is a limitation of cross-origin framing, not of the setup — the
-hostname is what makes lavish work at all.
+`open` prints a link, and the session appears in the **Review** panel of the
+inspector. Choose it and the page renders there, beside the terminals — no
+second hostname and no second login, which is what the old lavish-axi service
+could never offer.
 
-The panel shows a setup card with the exact environment variables when lavish
-is not configured.
+Press **Annotate**, then click an element or select some text: it becomes a
+comment with that anchor, and you write your note against it. Clicking an
+anchor afterwards scrolls the page back to it. The free-form box at the bottom
+is for anything about the whole thing. **Send** hands everything over and the
+agent carries on; **Send & end** does the same and closes the session, which
+is how you say you are finished with it.
+
+Agents find this for themselves: the image installs a Claude Code skill at
+`~/.claude/skills/review/`, so an agent that is about to describe something
+visual reaches for the command without being told. `agentbox-review --help`
+is the same information for any other agent.
+
+The page an agent writes is not trusted. It is served with
+`Content-Security-Policy: sandbox allow-scripts`, so it runs with an opaque
+origin — no cookies, no storage, no same-origin access to the Workbench — and
+the iframe repeats that with a `sandbox` attribute of its own. The only thing
+crossing the boundary is the anchor you picked. This is why full screen (the ↗
+button) needs no warning here, unlike a preview: the header travels with the
+response, so the page is just as sandboxed in a tab of its own. Inline your
+CSS in artifacts, though: an external stylesheet or font cannot load.
+
+Sessions live under `~/.agentbox/review/` on the home volume, so they survive a
+restart or an update, and `agentbox-review list` shows what is outstanding.
 
 ## firstmate
 
@@ -213,8 +232,8 @@ one started on the host is invisible, by design. Ports belonging to agentbox's
 own services are hidden behind *Show system*.
 
 **The browser asks for the password again.** Basic authentication is per
-origin, so `lavish.<domain>` and each `PORT.<preview-domain>` prompt
-separately. The credentials are the same.
+origin, so each `PORT.<preview-domain>` prompts separately. The credentials are
+the same.
 
 **Cloudflare Access in front of the tunnel.** Access intercepts the websocket
 upgrade for anything without a session, so the Workbench's event stream and its

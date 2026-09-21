@@ -18,11 +18,10 @@ certificate and starts the stack. It prints the password once.
 | Path | What it is |
 | --- | --- |
 | `/` | VS Code in the browser — files, editor, integrated terminal, extensions |
-| `/workbench` | The Workbench: many agents, live terminals, previews |
+| `/workbench` | The Workbench: many agents, live terminals, previews, review |
 | `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
 | `/shell` | A plain bash shell, pleasant on a phone |
 | `/monitor` | Live CPU, memory and process usage for the sandbox |
-| `lavish.<domain>` | lavish-axi review sessions (its own hostname; see below) |
 | `PORT.<preview-domain>` | Optional: each listening port on its own hostname |
 
 ## The Workbench
@@ -35,6 +34,11 @@ the session, so closing the tab detaches instead of killing, and `/terminal`
 is the same session seen from a keyboard.
 
 ![The Workbench](docs/images/workbench-dark.png)
+
+It is also where an agent shows you something rather than describing it: it
+publishes an HTML page with `agentbox-review open plan.html`, you click the
+part you mean and comment on it, and its blocked command returns with what you
+said. No extra hostname and no extra container.
 
 See [docs/workbench.md](docs/workbench.md).
 
@@ -87,9 +91,6 @@ address — no ports are opened and Cloudflare terminates TLS:
 ```
 code.example.com  →  http://127.0.0.1:8443
 ```
-
-Give `lavish.code.example.com` a route to the same address — the Workbench's
-lavish panel needs it.
 
 **Wildcards and certificates.** Cloudflare's Universal SSL covers one wildcard
 level, so `*.example.com` is certified and `*.preview.code.example.com` is not.

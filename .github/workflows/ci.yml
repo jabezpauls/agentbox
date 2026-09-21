@@ -16,7 +16,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
             images/workspace/entrypoint.sh \
-            images/workspace/agentbox-workbench images/workspace/agentbox-lavish
+            images/workspace/agentbox-workbench
 
       - name: Validate Compose files
         run: |
@@ -108,7 +108,7 @@ jobs:
         run: docker build -t agentbox/workspace:ci -f images/workspace/Dockerfile .
       - name: The agents must actually be present
         run: |
-          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v lavish-axi && command -v agentbox-workbench && command -v agentbox-lavish'
+          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v agentbox-workbench && command -v agentbox-review'
       - name: The Workbench bridge must actually run
         run: |
           docker run --rm agentbox/workspace:ci \

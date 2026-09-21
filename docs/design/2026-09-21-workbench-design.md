@@ -1,5 +1,12 @@
 # Workbench: a browser client for herdr inside agentbox
 
+> **Partly superseded.** Everything about lavish-axi below — the panel, the
+> `lavish` service, its hostname and its environment variables — was replaced
+> in September 2026 by Review, which agentbox owns and serves under the
+> Workbench's own base path. See
+> [2026-09-22-review-design.md](2026-09-22-review-design.md). The rest of this
+> document still describes what is built.
+
 Status: approved design, September 2026.
 
 ## Purpose
