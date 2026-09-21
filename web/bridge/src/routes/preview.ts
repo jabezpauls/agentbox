@@ -90,15 +90,31 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
     return rest;
   };
 
-  // Rewrite a root-relative Location so it stays inside the preview prefix.
+  // Rewrite a root-relative Location so it stays inside the preview prefix,
+  // idempotently: an upstream that already emits a `/preview/<port>/…` path
+  // (some frameworks honour X-Forwarded-Prefix) must not be prefixed twice.
   const rewriteLocation = (value: string, port: string): string => {
-    if (value.startsWith("/") && !value.startsWith("//")) return `${proxyPrefix(port)}${value}`;
-    return value;
+    if (!value.startsWith("/") || value.startsWith("//")) return value;
+    const prefix = proxyPrefix(port);
+    if (value === prefix || value.startsWith(`${prefix}/`)) return value;
+    return `${prefix}${value}`;
   };
 
-  // Prefix a Set-Cookie Path=/... attribute so the cookie scopes to the preview.
-  const rewriteSetCookie = (cookie: string, port: string): string =>
-    cookie.replace(/;\s*[Pp]ath=(\/[^;]*)/, (_m, p: string) => `; Path=${proxyPrefix(port)}${p}`);
+  // Prefix a Set-Cookie Path attribute so the cookie scopes to the preview, and
+  // strip any Domain attribute so a previewed page cannot widen a cookie onto
+  // the appliance's own domain. The Path match is case-insensitive (cookie
+  // attribute names are) and idempotent against an already-prefixed path.
+  const rewriteSetCookie = (cookie: string, port: string): string => {
+    const prefix = proxyPrefix(port);
+    let out = cookie.replace(/;\s*path=(\/[^;]*)/i, (_m, p: string) => {
+      if (p === prefix || p.startsWith(`${prefix}/`)) return `; Path=${p}`;
+      return `; Path=${prefix}${p}`;
+    });
+    // Drop `Domain=…` entirely; without it the cookie stays scoped to the exact
+    // host that served it, which is what we want for an agent's preview.
+    out = out.replace(/;\s*domain=[^;]*/i, "");
+    return out;
+  };
 
   const buildResponseHeaders = (
     upstreamHeaders: IncomingHttpHeaders,

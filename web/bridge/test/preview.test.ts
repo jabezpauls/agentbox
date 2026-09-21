@@ -76,6 +76,30 @@ beforeAll(async () => {
       res.end("ok");
       return;
     }
+    if (url.startsWith("/cookiedomain")) {
+      res.writeHead(200, { "set-cookie": "a=1; Path=/; Domain=example.com; HttpOnly" });
+      res.end("ok");
+      return;
+    }
+    if (url.startsWith("/cookieucase")) {
+      // Cookie attribute names are case-insensitive; the rewrite must match PATH.
+      res.writeHead(200, { "set-cookie": "b=2; PATH=/app" });
+      res.end("ok");
+      return;
+    }
+    if (url.startsWith("/cookiepreprefixed")) {
+      const p = (req.headers.host ?? "").split(":")[1] ?? "";
+      res.writeHead(200, { "set-cookie": `c=3; Path=/workbench/preview/${p}/scoped` });
+      res.end("ok");
+      return;
+    }
+    if (url.startsWith("/preprefixed")) {
+      // An upstream that already honours a preview prefix must not be doubled.
+      const p = (req.headers.host ?? "").split(":")[1] ?? "";
+      res.writeHead(302, { location: `/workbench/preview/${p}/deep` });
+      res.end();
+      return;
+    }
     res.setHeader("content-type", "text/plain");
     res.end(url);
   });
@@ -210,6 +234,29 @@ describe("preview proxy", () => {
     it("prefixes a Set-Cookie Path with the preview prefix", async () => {
       const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/setcookie`);
       expect(headers["set-cookie"]).toEqual([`a=1; Path=/workbench/preview/${upstreamPort}/`]);
+    });
+
+    it("does not double-prefix a Location already inside the preview prefix", async () => {
+      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/preprefixed`);
+      expect(headers.location).toBe(`/workbench/preview/${upstreamPort}/deep`);
+    });
+
+    it("strips a Set-Cookie Domain so it cannot widen onto the appliance host", async () => {
+      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookiedomain`);
+      const cookie = (headers["set-cookie"] as string[])[0]!;
+      expect(cookie).not.toMatch(/domain=/i);
+      expect(cookie).toContain(`Path=/workbench/preview/${upstreamPort}/`);
+      expect(cookie).toContain("HttpOnly");
+    });
+
+    it("rewrites a case-insensitive Set-Cookie PATH attribute", async () => {
+      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookieucase`);
+      expect(headers["set-cookie"]).toEqual([`b=2; Path=/workbench/preview/${upstreamPort}/app`]);
+    });
+
+    it("does not double-prefix a Set-Cookie Path already inside the preview prefix", async () => {
+      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookiepreprefixed`);
+      expect(headers["set-cookie"]).toEqual([`c=3; Path=/workbench/preview/${upstreamPort}/scoped`]);
     });
   });
 
