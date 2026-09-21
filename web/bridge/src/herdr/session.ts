@@ -120,6 +120,13 @@ export class SessionHub {
 
   /** Open lifecycle subscription, load the snapshot, then open agent-status. */
   private async connect(): Promise<void> {
+    // A reopen may have been scheduled against the pane set of the socket we are
+    // about to replace; drop it so a stale resume cannot fire onto the fresh
+    // subscription mid-reconnect. `connect` opens agent-status itself below.
+    if (this.agentDebounce) {
+      clearTimeout(this.agentDebounce);
+      this.agentDebounce = null;
+    }
     this.closeSubs();
     this.lifecycleSub = await subscribe(
       this.socketPath,
