@@ -51,6 +51,16 @@ over the host.
 - **Previews are not handed your login.** `Authorization` and `Cookie` are
   stripped from every request and websocket upgrade the preview proxy forwards,
   so the password guarding the box never reaches a port an agent opened.
+- **Public shares are opt-in, unguessable and revocable.** A preview is private
+  until you mint a share for it. A share is a 128-bit CSPRNG token that the
+  proxy serves under `/s/<token>/` **without** the login, so anyone you hand the
+  link to can open it; it maps to exactly one loopback port and is not a general
+  proxy. An unknown, expired (24h default) or revoked token is a plain `404`
+  that reveals nothing else exists, revocation takes effect on the next request,
+  and the `/s/` path is rate-limited the way the login is. The same credential
+  stripping applies, so a share exposes your app's own dev server — your choice
+  to publish — never the box. Turn the whole feature off with `--preview off`.
+  Records live under `~/.agentbox/shares/` on the home volume.
 - **WebSocket upgrades are origin-checked.** The same-origin policy does not
   cover websocket handshakes, so a page in another tab could otherwise open
   `/workbench/ws/events` or `/workbench/ws/terminal` on your cached

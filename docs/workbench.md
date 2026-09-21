@@ -93,6 +93,15 @@ The bridge watches which TCP ports are listening inside the sandbox and lists
 them in the Preview panel, hiding agentbox's own services behind a toggle. Pick
 one and it loads in the panel, with device widths and an editable path.
 
+Before it mounts the frame the panel probes the port and shows a calm state —
+checking, or "nothing is serving on port N yet" with a Retry — so the common
+case of a dev server that has not finished starting is a message rather than a
+flash of an error page. If a request does reach a port that is refused or is
+answering with a bare gateway error, the bridge returns its own branded page
+with a Retry instead of letting Cloudflare or the browser render a raw 502. A
+plain application error (a framework's own 500 overlay) still comes through
+untouched.
+
 There are two ways to reach it, and the difference matters.
 
 **Path previews** are always available. The bridge proxies
@@ -148,6 +157,36 @@ the path proxy otherwise. In path mode it asks first: a top-level window has no
 sandbox attribute, so the agent's page would get the Workbench's own origin —
 its storage, its API and its terminals. With a preview domain the page is on a
 separate origin anyway and it opens straight away.
+
+### Sharing a preview
+
+Everything above is for your own viewing, behind the login. To hand a preview
+to someone without an account, **share** the port. The **Share** action on a
+port mints a public link on the same hostname:
+
+```
+https://code.example.com/s/<token>/
+```
+
+The token is 128 bits from a cryptographic RNG, so the link is unguessable, and
+it is served by the proxy *without* the login — anyone you send it to can open
+it. A share is never created for you: a port is private until you press Share.
+While a share is live the panel keeps a "Public — anyone with this link can
+view this" banner in view and marks the port in the list, so a public preview
+is never a surprise. The link **expires after 24 hours** by default; **Extend**
+pushes that back out and **Revoke** kills it immediately — the next request to a
+revoked, expired or unknown token is a plain 404 that reveals nothing.
+
+What you are exposing is your own app's dev server, by your choice. The
+sandbox's own isolation does not change: the shared page reaches only the one
+mapped loopback port, the same credential-stripping applies, and the `/s/` path
+is rate-limited the way the login is. Full-screen of a shared preview opens its
+`/s/` link, so what you see and what a viewer sees are the same page.
+
+Sharing is on by default (`--preview path`). An operator can turn it off
+entirely with `--preview off`, which hides the Share action and 404s every
+share link. Minted shares live under `~/.agentbox/shares/` on the home volume,
+so a link survives a restart.
 
 ## Review
 

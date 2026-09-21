@@ -22,6 +22,7 @@ certificate and starts the stack. It prints the password once.
 | `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
 | `/shell` | A plain bash shell, pleasant on a phone |
 | `/monitor` | Live CPU, memory and process usage for the sandbox |
+| `/s/<token>` | An opt-in public preview you shared — no login, expiring, revocable |
 | `PORT.<preview-domain>` | Optional: each listening port on its own hostname |
 
 ## The Workbench
@@ -53,16 +54,19 @@ Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` to skip the interactive
 login. Otherwise sign in once inside the sandbox; credentials persist in a
 volume across restarts and updates.
 
-Build without them if you prefer a plain environment:
+Which agents are baked in is a build-time choice. The default is both; pick with
+`--agents`:
 
-```yaml
-# docker-compose.override.yml
-services:
-  code:
-    build:
-      args:
-        INSTALL_AGENTS: "false"
+```bash
+./install.sh --agents claude          # just Claude Code
+./install.sh --agents claude,codex    # the default
+./install.sh --agents ''              # a plain environment, no agents
 ```
+
+`herdr`, the multiplexer the Workbench and the TUI attach to, is always
+installed. Adding another agent is a one-line entry in the manifest — the `case`
+in `images/workspace/Dockerfile` mapping a name to its npm package — after which
+that name is a valid `--agents` value.
 
 ## The sandbox boundary
 
@@ -138,7 +142,7 @@ needed only for standalone mode's certificate.
 
 Allow about 5 GB of disk: the image carries VS Code, Node, a Python toolchain
 and a compiler, because agents routinely install dependencies that need them.
-Build without the agents (see above) or drop `build-essential` from the
+Build with fewer agents (`--agents`, above) or drop `build-essential` from the
 Dockerfile if you want it smaller.
 
 ## Licence
