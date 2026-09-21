@@ -8,7 +8,9 @@
 	# it will issue one, so an attacker pointing any DNS name at this box
 	# cannot make it mint certificates on demand.
 	on_demand_tls {
-		ask http://localhost:9444/ask
+		# 127.0.0.1, not localhost: the gate below binds IPv4 only, and this
+		# must not depend on a ::1 → 127.0.0.1 fallback.
+		ask http://127.0.0.1:9444/ask
 	}
 }
 

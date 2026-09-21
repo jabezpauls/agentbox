@@ -95,15 +95,26 @@ There are two ways to reach it, and the difference matters.
 `/workbench/preview/<port>/…` to `127.0.0.1:<port>` inside the sandbox. Because
 that is the Workbench's own origin, the iframe is sandboxed *without*
 `allow-same-origin`: an agent-written dev server must not be able to script the
-Workbench, read its storage or call its API as you. The cost is that the
-previewed page has no cookies, no `localStorage` and no same-origin requests of
-its own. Its websockets are refused too: a sandboxed document has no origin of
-its own — it sends `Origin: null` — and the bridge accepts an upgrade only from
-its own origin, so live reload does not connect in this mode. Page loads and
-reloads are unaffected. Apps that build absolute URLs from the origin, or that
-are mounted at the root, may also need to be told they are behind a prefix —
-Vite's `base`, Next's `basePath`, JupyterLab's `--ServerApp.base_url`, and
-similar. Hostname previews have none of these limits.
+Workbench, read its storage or call its API as you. Three things follow.
+
+The previewed page has no `localStorage` and no same-origin requests of its
+own — that much is the sandbox, and it applies inside the panel only.
+
+It has no cookies either, and that is not the sandbox: the proxy strips
+`Cookie` (and `Authorization`) from everything it forwards, so your login for
+the box is never handed to a port an agent opened. That holds in the
+full-screen window too, so a previewed app with its own cookie login will not
+work through a path preview at all.
+
+Its websockets are refused as well: a sandboxed document has no origin of its
+own — it sends `Origin: null` — and the bridge accepts an upgrade only from its
+own origin, so live reload does not connect in this mode. Page loads and
+reloads are unaffected.
+
+Apps that build absolute URLs from the origin, or that are mounted at the root,
+may also need to be told they are behind a prefix — Vite's `base`, Next's
+`basePath`, JupyterLab's `--ServerApp.base_url`, and similar. Hostname previews
+have none of these limits.
 
 **Hostname previews** give each port an origin of its own,
 `PORT.<preview-domain>`, and therefore full fidelity with no sandbox. Turn them
@@ -120,13 +131,13 @@ of your preview domain; no DNS-provider plugin is needed. Behind an existing
 proxy, that proxy needs the wildcard certificate and should forward those
 hostnames to the same address as the main one.
 
-> **Cloudflare Tunnel:** Universal SSL covers a single wildcard level, so
-> `*.example.com` is certified and `*.preview.code.example.com` is not. Put the
-> preview domain one label below the zone apex — `preview.example.com`, whose
-> wildcard `*.preview.example.com` is *two* levels and therefore not covered
-> either. In practice this means either buying Advanced Certificate Manager, or
-> using the apex wildcard itself (`3000.example.com`) as the preview domain.
-> Path previews need none of this and are the right default for a tunnel.
+> **Cloudflare Tunnel:** Universal SSL covers a single wildcard level: only
+> `*.example.com` is certified. A preview domain one label down needs
+> `*.preview.example.com`, which is two levels and is not, so there are two
+> options — buy Advanced Certificate Manager, or use the apex wildcard itself
+> by setting the preview domain to `example.com`, which serves ports as
+> `3000.example.com`. Path previews need neither and are the right default for
+> a tunnel.
 
 Full-screen (the ↗ button) opens the preview domain when one is configured and
 the path proxy otherwise. In path mode it asks first: a top-level window has no
