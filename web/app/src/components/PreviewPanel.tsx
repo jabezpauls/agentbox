@@ -37,6 +37,7 @@ const DEVICES: { id: PreviewDevice; label: string }[] = [
  */
 export function PreviewPanel() {
   const ports = useApp((s) => s.ports);
+  const portsReadable = useApp((s) => s.portsReadable);
   const port = useApp((s) => s.ui.inspector.port);
   const path = useApp((s) => s.ui.inspector.path);
   const device = useApp((s) => s.ui.inspector.device);
@@ -58,12 +59,17 @@ export function PreviewPanel() {
   if (port === null) {
     return (
       <div className="prev">
-        <PortList ports={visible} selected={port} showSystem={showSystem} onToggleSystem={setShowSystem} onSelect={(p) => setInspector({ port: p, path: "/" })} />
+        <PortList ports={visible} selected={port} showSystem={showSystem} readable={portsReadable} onToggleSystem={setShowSystem} onSelect={(p) => setInspector({ port: p, path: "/" })} />
         <div className="empty">
           <span className="empty-glyph" aria-hidden="true">
             <Radio size={22} />
           </span>
-          {ports.length === 0 ? (
+          {!portsReadable ? (
+            <>
+              <p className="empty-title">Couldn&apos;t read ports.</p>
+              <p className="empty-sub">The bridge could not read /proc to list listening ports.</p>
+            </>
+          ) : ports.length === 0 ? (
             <>
               <p className="empty-title">Nothing is listening.</p>
               <p className="empty-sub">Start a dev server in any pane and its port shows up here.</p>
@@ -89,7 +95,7 @@ export function PreviewPanel() {
 
   return (
     <div className="prev">
-      <PortList ports={visible} selected={port} showSystem={showSystem} onToggleSystem={setShowSystem} onSelect={(p) => setInspector({ port: p, path: "/" })} />
+      <PortList ports={visible} selected={port} showSystem={showSystem} readable={portsReadable} onToggleSystem={setShowSystem} onSelect={(p) => setInspector({ port: p, path: "/" })} />
 
       <div className="prev-bar">
         <span className="prev-origin">:{port}</span>
@@ -168,11 +174,12 @@ interface PortListProps {
   ports: { port: number; process: string | null; system: boolean }[];
   selected: number | null;
   showSystem: boolean;
+  readable: boolean;
   onToggleSystem(v: boolean): void;
   onSelect(port: number): void;
 }
 
-function PortList({ ports, selected, showSystem, onToggleSystem, onSelect }: PortListProps) {
+function PortList({ ports, selected, showSystem, readable, onToggleSystem, onSelect }: PortListProps) {
   return (
     <div className="port-list">
       <div className="port-list-head">
@@ -183,7 +190,9 @@ function PortList({ ports, selected, showSystem, onToggleSystem, onSelect }: Por
         </label>
       </div>
       <ul className="ports">
-        {ports.length === 0 && <li className="ports-empty">No ports</li>}
+        {ports.length === 0 && (
+          <li className="ports-empty">{readable ? "No ports" : "Couldn't read ports"}</li>
+        )}
         {ports.map((p) => (
           <li key={p.port}>
             <button className={`port-row${p.port === selected ? " is-active" : ""}`} onClick={() => onSelect(p.port)}>

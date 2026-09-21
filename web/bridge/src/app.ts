@@ -19,6 +19,8 @@ import { ReviewStore } from "./review/store.js";
  */
 export interface PortsWatcher {
   current(): ListeningPort[];
+  /** False when the last poll could not read `/proc` at all. */
+  readable(): boolean;
   on(listener: (ports: ListeningPort[]) => void): () => void;
   start(): void;
   stop(): void;

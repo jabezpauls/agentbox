@@ -69,6 +69,20 @@ describe("opening a preview full screen", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("says it couldn't read ports, not that none are listening, when /proc was unreadable", () => {
+    vi.stubGlobal("location", { pathname: "/workbench/", protocol: "http:", host: "box.example" } as Location);
+    act(() => {
+      useApp.setState({
+        ports: [],
+        portsReadable: false,
+        ui: { ...useApp.getState().ui, inspector: { ...useApp.getState().ui.inspector, port: null } },
+      });
+    });
+    render(<PreviewPanel />);
+    expect(screen.getByText(/Couldn't read ports\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing is listening\./)).not.toBeInTheDocument();
+  });
+
   it("does not ask when a preview domain puts the page on its own origin", async () => {
     setup("previews.example.com");
     const user = userEvent.setup();

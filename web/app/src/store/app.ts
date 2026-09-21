@@ -107,6 +107,8 @@ export interface AppState {
   status: ConnStatus;
   session: Session;
   ports: ListeningPort[];
+  /** False when the bridge could not read `/proc` to enumerate ports at all. */
+  portsReadable: boolean;
   health: HealthInfo | null;
   ui: UiState;
   seenDone: Record<string, number>;
@@ -195,6 +197,7 @@ export const useApp = create<AppState>((set, get) => ({
   status: "connecting",
   session: emptySession(),
   ports: [],
+  portsReadable: true,
   health: null,
   ui: initialUi,
   seenDone: {},
@@ -224,7 +227,7 @@ export const useApp = create<AppState>((set, get) => ({
         break;
       }
       case "ports": {
-        set({ ports: m.ports });
+        set({ ports: m.ports, portsReadable: m.readable !== false });
         // The first time a real (non-system) port appears while the inspector
         // is closed, open it on that port — once per session.
         if (!previewAutoOpened) {

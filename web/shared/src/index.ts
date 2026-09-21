@@ -56,7 +56,7 @@ export interface ListeningPort { port: number; pid: number | null; process: stri
 export type EventsMessage =
   | { kind: "snapshot"; snapshot: SessionSnapshot }
   | { kind: "event"; event: HerdrEventName; data: unknown }
-  | { kind: "ports"; ports: ListeningPort[] }
+  | { kind: "ports"; ports: ListeningPort[]; readable?: boolean }
   | { kind: "reset"; reason: string };
 
 /** Browser → bridge control messages on /ws/terminal (JSON text frames). Output arrives as binary frames of raw ANSI bytes. */

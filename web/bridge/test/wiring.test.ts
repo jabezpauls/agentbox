@@ -23,9 +23,13 @@ class FakeWatcher implements PortsWatcher {
   starts = 0;
   stops = 0;
   private ports: ListeningPort[] = [];
+  private _readable = true;
   private listeners = new Set<(p: ListeningPort[]) => void>();
   current(): ListeningPort[] {
     return this.ports;
+  }
+  readable(): boolean {
+    return this._readable;
   }
   on(listener: (p: ListeningPort[]) => void): () => void {
     this.listeners.add(listener);

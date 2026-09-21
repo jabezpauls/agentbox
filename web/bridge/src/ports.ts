@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import type { ListeningPort } from "@workbench/shared";
 
 /** A raw LISTEN row from `/proc/net/tcp` or `/proc/net/tcp6`. */
@@ -135,38 +136,106 @@ function readComm(pid: number): string | null {
   return raw ? raw.trim() || null : null;
 }
 
+/** The working directory of a pid, or null when `/proc` will not reveal it. */
+function readCwd(pid: number): string | null {
+  try {
+    return fs.readlinkSync(`/proc/${pid}/cwd`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ports belonging to host daemons that share the sandbox's network namespace
+ * (systemd-resolved on :53, DHCP, NTP, mDNS, CUPS…). They are listening, but
+ * they are never the dev server a person wants to preview, so they are flagged
+ * as infrastructure regardless of who is asked to own them.
+ */
+const WELL_KNOWN_INFRA = new Set([53, 67, 68, 123, 631, 5353]);
+
+/** Does `child` sit at or beneath `root`? Used to spot workspace processes. */
+function underRoot(child: string, root: string): boolean {
+  const rel = path.relative(root, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+export interface PortClassification {
+  port: number;
+  systemPorts: Set<number>;
+  /** The owning process's cwd, or null when it could not be determined. */
+  cwd: string | null;
+  /** Workspace root; when set, only ports opened under it may auto-preview. */
+  workspaceRoot: string | null;
+}
+
+/**
+ * Decide whether a listening port is infrastructure rather than a previewable
+ * dev server. A port is infrastructure when it is a configured system port, a
+ * well-known host-daemon port, or — once a workspace root is known — when its
+ * owning process is not demonstrably running under that root (a host daemon, or
+ * a socket `/proc` would not attribute). This is what keeps auto-preview off
+ * `:53` and friends on a real box.
+ */
+export function isSystemPort(c: PortClassification): boolean {
+  if (c.systemPorts.has(c.port)) return true;
+  if (WELL_KNOWN_INFRA.has(c.port)) return true;
+  if (c.workspaceRoot) {
+    if (c.cwd === null || !underRoot(c.cwd, c.workspaceRoot)) return true;
+  }
+  return false;
+}
+
+export interface PortScan {
+  ports: ListeningPort[];
+  /** False only when `/proc` could not be read at all, so the empty list means
+   * "unknown" rather than "nothing is listening". */
+  readable: boolean;
+}
+
 /**
  * Enumerate every locally listening TCP port (IPv4 and IPv6), resolving each to
- * its owning process where `/proc` permits. Ports named in `systemPorts` are
- * flagged as infrastructure. Results are deduped by port and sorted.
+ * its owning process where `/proc` permits and classifying infrastructure ports
+ * per {@link isSystemPort}. Results are deduped by port and sorted. `readable`
+ * distinguishes a genuinely empty machine from one whose `/proc` we could not
+ * read.
  */
 export async function listListeningPorts(opts: {
   systemPorts: number[];
-}): Promise<ListeningPort[]> {
+  workspaceRoot?: string | null;
+}): Promise<PortScan> {
   const system = new Set(opts.systemPorts);
+  const workspaceRoot = opts.workspaceRoot ?? null;
   const rows: ProcNetTcpRow[] = [];
+  let readable = false;
   for (const file of PROC_TCP_FILES) {
     const text = readFileOrNull(file);
-    if (text) rows.push(...parseProcNetTcp(text));
+    if (text !== null) {
+      readable = true;
+      rows.push(...parseProcNetTcp(text));
+    }
   }
-  if (rows.length === 0) return [];
+  if (rows.length === 0) return { ports: [], readable };
 
   const inodePid = buildInodePidMap();
   const commCache = new Map<number, string | null>();
+  const cwdCache = new Map<number, string | null>();
 
   const byPort = new Map<number, ListeningPort>();
   for (const row of rows) {
     const pid = inodePid.get(row.inode) ?? null;
     let process: string | null = null;
+    let cwd: string | null = null;
     if (pid !== null) {
       if (!commCache.has(pid)) commCache.set(pid, readComm(pid));
       process = commCache.get(pid) ?? null;
+      if (!cwdCache.has(pid)) cwdCache.set(pid, readCwd(pid));
+      cwd = cwdCache.get(pid) ?? null;
     }
     const entry: ListeningPort = {
       port: row.port,
       pid,
       process,
-      system: system.has(row.port),
+      system: isSystemPort({ port: row.port, systemPorts: system, cwd, workspaceRoot }),
       address: row.address,
     };
     const existing = byPort.get(row.port);
@@ -176,14 +245,15 @@ export async function listListeningPorts(opts: {
     }
   }
 
-  return [...byPort.values()].sort((a, b) => a.port - b.port);
+  return { ports: [...byPort.values()].sort((a, b) => a.port - b.port), readable };
 }
 
 export interface PortsWatcherOptions {
   systemPorts: number[];
+  workspaceRoot?: string | null;
   intervalMs?: number;
   /** Injectable enumerator; defaults to {@link listListeningPorts}. */
-  list?: () => Promise<ListeningPort[]>;
+  list?: () => Promise<PortScan>;
 }
 
 /**
@@ -193,20 +263,32 @@ export interface PortsWatcherOptions {
  */
 export class PortsWatcher {
   private readonly intervalMs: number;
-  private readonly list: () => Promise<ListeningPort[]>;
+  private readonly list: () => Promise<PortScan>;
   private readonly listeners = new Set<(ports: ListeningPort[]) => void>();
   private timer: NodeJS.Timeout | null = null;
   private polling = false;
   private ports: ListeningPort[] = [];
+  private _readable = true;
   private serialized = "";
 
   constructor(opts: PortsWatcherOptions) {
     this.intervalMs = opts.intervalMs ?? 2000;
-    this.list = opts.list ?? (() => listListeningPorts({ systemPorts: opts.systemPorts }));
+    this.list =
+      opts.list ??
+      (() =>
+        listListeningPorts({
+          systemPorts: opts.systemPorts,
+          workspaceRoot: opts.workspaceRoot ?? null,
+        }));
   }
 
   current(): ListeningPort[] {
     return this.ports;
+  }
+
+  /** False when the last poll could not read `/proc` at all. */
+  readable(): boolean {
+    return this._readable;
   }
 
   on(listener: (ports: ListeningPort[]) => void): () => void {
@@ -233,12 +315,15 @@ export class PortsWatcher {
     if (this.polling) return;
     this.polling = true;
     try {
-      const ports = await this.list();
-      const serialized = JSON.stringify(ports);
+      const scan = await this.list();
+      // Fold readability into the change key so flipping to/from "unreadable"
+      // is itself an event the listeners see.
+      const serialized = JSON.stringify({ r: scan.readable, p: scan.ports });
       if (serialized === this.serialized) return;
       this.serialized = serialized;
-      this.ports = ports;
-      for (const listener of this.listeners) listener(ports);
+      this.ports = scan.ports;
+      this._readable = scan.readable;
+      for (const listener of this.listeners) listener(scan.ports);
     } catch {
       // Transient /proc read failures should not tear down the watcher.
     } finally {

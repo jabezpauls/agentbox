@@ -34,8 +34,8 @@ export function registerEventsWs(
         if (socket.readyState !== socket.OPEN) return;
         send({ kind: "snapshot", snapshot });
         if (ports) {
-          send({ kind: "ports", ports: ports.current() });
-          offPorts = ports.on((p) => send({ kind: "ports", ports: p }));
+          send({ kind: "ports", ports: ports.current(), readable: ports.readable() });
+          offPorts = ports.on((p) => send({ kind: "ports", ports: p, readable: ports.readable() }));
         }
         off = hub.on(send);
       })

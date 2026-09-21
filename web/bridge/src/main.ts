@@ -24,7 +24,10 @@ async function main(argv: string[]): Promise<void> {
   // Ports that belong to the sandbox's own services, flagged so the UI can tell
   // infrastructure apart from the dev servers an agent starts.
   const systemPorts = [config.port, 8080, 7681, 7682, 7683];
-  const ports = new PortsWatcher({ systemPorts });
+  // Only ports opened by a process running under the workspace root auto-preview;
+  // host daemons sharing the namespace (systemd-resolved on :53, etc.) are
+  // classified as infrastructure so the app does not open onto them.
+  const ports = new PortsWatcher({ systemPorts, workspaceRoot: config.workspaceRoot });
 
   // Review sessions persist on the home volume; make the root up front so the
   // first `agentbox-review open` is not also the first mkdir.
