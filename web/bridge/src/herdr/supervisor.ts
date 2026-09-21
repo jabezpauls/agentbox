@@ -7,6 +7,31 @@ export interface Server {
   stop(): void;
 }
 
+/**
+ * Exponential respawn backoff with a cap and a reset. `next()` returns the delay
+ * to wait before the next respawn and then grows it toward the cap; `reset()`
+ * drops it back to the floor, which the supervisor calls once a server has run
+ * long enough to be considered healthy so a later isolated crash restarts fast.
+ */
+export class Backoff {
+  private delay: number;
+  constructor(
+    private readonly initial: number,
+    private readonly max: number,
+  ) {
+    this.delay = initial;
+  }
+  get value(): number {
+    return this.delay;
+  }
+  grow(): void {
+    this.delay = Math.min(this.delay * 2, this.max);
+  }
+  reset(): void {
+    this.delay = this.initial;
+  }
+}
+
 function log(msg: string): void {
   console.log(`[workbench] ${msg}`);
 }
@@ -49,36 +74,61 @@ export async function ensureServer(socketPath: string, env: NodeJS.ProcessEnv): 
     // No server answered; we start and supervise one below.
   }
 
+  const INITIAL_DELAY = 1000;
+  const MAX_DELAY = 30_000;
+  // A server that has stayed up this long is considered healthy: the next crash
+  // should retry promptly rather than inherit the delay a crash loop had climbed
+  // to. Without this, a server that runs for hours then dies waits out the
+  // capped backoff before coming back.
+  const STABLE_MS = 60_000;
+
   let stopped = false;
   let child: ChildProcess | null = null;
-  let respawnDelay = 1000;
+  const backoff = new Backoff(INITIAL_DELAY, MAX_DELAY);
   let respawnTimer: NodeJS.Timeout | null = null;
+  let stableTimer: NodeJS.Timeout | null = null;
+
+  const clearStable = (): void => {
+    if (stableTimer) {
+      clearTimeout(stableTimer);
+      stableTimer = null;
+    }
+  };
 
   const startChild = (): void => {
     log("starting herdr server");
     child = spawn("herdr", ["server"], { env, stdio: ["ignore", "inherit", "inherit"] });
+    // Arm the stability reset the moment we spawn; a run that outlasts STABLE_MS
+    // clears the accumulated backoff so an isolated later crash restarts fast.
+    stableTimer = setTimeout(() => {
+      stableTimer = null;
+      backoff.reset();
+    }, STABLE_MS);
+    stableTimer.unref?.();
     child.once("exit", (code, signal) => {
       child = null;
+      clearStable();
       if (stopped) return;
-      log(`herdr server exited (code=${code ?? "null"} signal=${signal ?? "null"}); respawning in ${respawnDelay}ms`);
+      log(`herdr server exited (code=${code ?? "null"} signal=${signal ?? "null"}); respawning in ${backoff.value}ms`);
       respawnTimer = setTimeout(() => {
         respawnTimer = null;
         if (stopped) return;
-        respawnDelay = Math.min(respawnDelay * 2, 30_000);
+        backoff.grow();
         startChild();
-      }, respawnDelay);
+      }, backoff.value);
     });
   };
 
   startChild();
   await waitForSocket(socketPath, 15_000);
-  respawnDelay = 1000;
+  backoff.reset();
   log("herdr server ready");
 
   return {
     spawned: true,
     stop: () => {
       stopped = true;
+      clearStable();
       if (respawnTimer) {
         clearTimeout(respawnTimer);
         respawnTimer = null;
