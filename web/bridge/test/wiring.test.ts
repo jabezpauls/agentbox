@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
 import type { FastifyInstance } from "fastify";
-import type { ListeningPort, LavishState, EventsMessage } from "@workbench/shared";
+import type { ListeningPort, EventsMessage } from "@workbench/shared";
 import { buildApp, type PortsWatcher } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import type { SessionHub } from "../src/herdr/session.js";
@@ -48,12 +48,6 @@ let app: FastifyInstance;
 let config: Config;
 let watcher: FakeWatcher;
 let baseUrl: string;
-const lavishState: LavishState = {
-  configured: true,
-  url: "https://lavish.example.com",
-  running: false,
-  sessions: [],
-};
 
 beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "wb-wire-"));
@@ -66,11 +60,7 @@ beforeAll(async () => {
     WORKBENCH_STATIC_DIR: "/does/not/exist-wire-static",
     WORKBENCH_WORKSPACE_ROOT: root,
   });
-  app = await buildApp(config, {
-    hub: stubHub,
-    ports: watcher,
-    lavish: async () => lavishState,
-  });
+  app = await buildApp(config, { hub: stubHub, ports: watcher });
   await app.listen({ host: "127.0.0.1", port: 0 });
   const addr = app.server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
@@ -92,11 +82,6 @@ describe("wired read endpoints", () => {
     expect(res.json()).toEqual([
       { port: 3000, pid: 10, process: "node", system: false, address: "0.0.0.0" },
     ]);
-  });
-
-  it("serves lavish state", async () => {
-    const res = await app.inject({ method: "GET", url: "/workbench/api/lavish" });
-    expect(res.json()).toEqual(lavishState);
   });
 
   it("lists workspace directories and rejects escapes with 400", async () => {

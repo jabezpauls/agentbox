@@ -2,7 +2,7 @@ import fs from "node:fs";
 import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
-import type { LavishState, ListeningPort } from "@workbench/shared";
+import type { ListeningPort } from "@workbench/shared";
 import type { Config } from "./config.js";
 import type { SessionHub } from "./herdr/session.js";
 import { TerminalStreams } from "./herdr/terminal.js";
@@ -10,6 +10,8 @@ import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
 import { registerPreviewRoutes } from "./routes/preview.js";
+import { registerReviewRoutes } from "./routes/review.js";
+import { ReviewStore } from "./review/store.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -25,7 +27,8 @@ export interface PortsWatcher {
 export interface AppDeps {
   hub: SessionHub;
   ports?: PortsWatcher;
-  lavish?: () => Promise<LavishState>;
+  /** Review session store; defaults to one rooted at the configured directory. */
+  review?: ReviewStore;
   /** Terminal stream registry; defaults to one bound to herdr's socket. */
   streams?: TerminalStreams;
 }
@@ -39,11 +42,14 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     new TerminalStreams({ ...process.env, HERDR_SOCKET_PATH: config.socketPath });
   app.addHook("onClose", async () => streams.stop());
 
+  const review = deps.review ?? new ReviewStore(config.reviewDir);
+
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
   await app.register(
     async (scope) => {
-      registerApiRoutes(scope, config, deps.hub, { ports: deps.ports, lavish: deps.lavish });
+      registerApiRoutes(scope, config, deps.hub, { ports: deps.ports });
+      registerReviewRoutes(scope, config, review);
       registerEventsWs(scope, deps.hub, deps.ports);
       registerTerminalWs(scope, streams);
       await registerPreviewRoutes(scope, config);

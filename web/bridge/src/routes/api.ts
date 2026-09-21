@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import type { LavishState } from "@workbench/shared";
 import type { Config } from "../config.js";
 import { request, HerdrError } from "../herdr/socket.js";
 import { isAllowed } from "../rpc-allowlist.js";
@@ -9,11 +8,10 @@ import { listDirs } from "../fs.js";
 
 export interface ApiDeps {
   ports?: PortsWatcher | undefined;
-  lavish?: (() => Promise<LavishState>) | undefined;
 }
 
 /** Register health, session snapshot, the allowlisted RPC forwarder, and the
- * ports, filesystem, and lavish read endpoints. */
+ * ports and filesystem read endpoints. */
 export function registerApiRoutes(
   app: FastifyInstance,
   config: Config,
@@ -24,20 +22,14 @@ export function registerApiRoutes(
     ok: true,
     herdr: { connected: hub.connected, version: hub.version, protocol: hub.protocol },
     // Surfaced to the app: the directory picker composes absolute cwds under
-    // the workspace root, preview full-screen needs the preview domain, and the
-    // lavish panel shows a setup card unless a public URL is configured.
+    // the workspace root, and preview full-screen needs the preview domain.
     workspaceRoot: config.workspaceRoot,
     previewDomain: config.previewDomain,
-    lavishConfigured: config.lavishUrl !== null,
   }));
 
   app.get("/api/session", () => hub.snapshot());
 
   app.get("/api/ports", () => (deps.ports ? deps.ports.current() : []));
-
-  app.get("/api/lavish", async () =>
-    deps.lavish ? deps.lavish() : { configured: false, url: null, running: false, sessions: [] },
-  );
 
   app.get<{ Querystring: { path?: string } }>("/api/fs/dirs", async (req, reply) => {
     const rel = typeof req.query.path === "string" ? req.query.path : "";

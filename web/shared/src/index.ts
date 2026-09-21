@@ -67,7 +67,20 @@ export type TerminalClientMessage =
   | { type: "focus" };
 export type TerminalServerMessage = { type: "closed"; reason: string } | { type: "size"; cols: number; rows: number };
 
-export interface LavishSession { key: string; label: string; file: string | null; status: string; url: string | null; active: boolean }
-export interface LavishState { configured: boolean; url: string | null; running: boolean; sessions: LavishSession[] }
+/** Review: an artifact an agent published, and the comments a human anchored to it. */
+export type ReviewStatus = "open" | "ended";
+export type ReviewEndedBy = "agent" | "human";
+export type ReviewCommentKind = "element" | "selection" | "note";
+/** One comment. `anchor` is a CSS path into the artifact; `quote` the text it refers to. */
+export interface ReviewComment { kind: ReviewCommentKind; anchor?: string; quote?: string; note: string; at?: string }
+export interface ReviewSession {
+  key: string; label: string; file: string; created: string; updated: string;
+  status: ReviewStatus; endedBy?: ReviewEndedBy; pending: number;
+}
+export interface ReviewSessionDetail { session: ReviewSession; comments: ReviewComment[] }
+/** What an anchor picked inside the sandboxed artifact frame looks like. */
+export type AnnotatorMessage =
+  | { source: "agentbox-review"; kind: "element"; selector: string; text: string; rect: Rect }
+  | { source: "agentbox-review"; kind: "selection"; selector: string; text: string };
 export interface DirEntry { name: string; path: string }
 export interface RpcRequest { method: string; params?: Record<string, unknown> }
