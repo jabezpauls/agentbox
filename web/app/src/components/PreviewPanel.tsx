@@ -4,6 +4,7 @@ import { useApp } from "../store/app.ts";
 import type { PreviewDevice } from "../store/app.ts";
 import { basePath } from "../api/base.ts";
 import { previewTarget } from "../preview/url.ts";
+import { Dialog } from "./dialogs/Dialog.tsx";
 
 const DEVICES: { id: PreviewDevice; label: string }[] = [
   { id: "auto", label: "Auto" },
@@ -27,6 +28,12 @@ const DEVICES: { id: PreviewDevice; label: string }[] = [
  * cookies, storage and same-origin fetches. Configure a preview domain and the
  * page is loaded from its own origin instead, where the browser's own origin
  * separation does the work and no sandbox is needed.
+ *
+ * Full screen is the hole in that reasoning: a top-level window has no sandbox
+ * attribute, so in path mode the ↗ button would hand the agent's page the
+ * Workbench's own origin — its storage, its API and its terminals. It therefore
+ * asks first in that mode, and opens straight away when a preview domain makes
+ * the page a separate origin anyway.
  */
 export function PreviewPanel() {
   const ports = useApp((s) => s.ports);
@@ -37,6 +44,7 @@ export function PreviewPanel() {
   const setInspector = useApp((s) => s.setInspector);
 
   const [showSystem, setShowSystem] = useState(false);
+  const [confirmFullScreen, setConfirmFullScreen] = useState(false);
   const [pathDraft, setPathDraft] = useState(path);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -62,6 +70,10 @@ export function PreviewPanel() {
   }
 
   const src = previewTarget(port, path, previewDomain, base);
+  const openFullScreen = () => {
+    setConfirmFullScreen(false);
+    window.open(src, "_blank", "noopener,noreferrer");
+  };
   const frameWidth = device === "auto" ? "100%" : `${device}px`;
   const sandboxed = !previewDomain;
 
@@ -85,7 +97,7 @@ export function PreviewPanel() {
         <button
           className="icon-btn"
           aria-label="Open full screen"
-          onClick={() => window.open(previewTarget(port, path, previewDomain, base), "_blank", "noopener,noreferrer")}
+          onClick={() => (previewDomain ? openFullScreen() : setConfirmFullScreen(true))}
         >
           <ExternalLink size={15} />
         </button>
@@ -106,9 +118,24 @@ export function PreviewPanel() {
 
       {sandboxed && (
         <p className="prev-note">
-          Sandboxed: this preview runs without cookies or storage because it shares the Workbench's origin. Set a preview
-          domain for full fidelity.
+          Sandboxed: this preview runs without cookies, storage or live reload because it shares the Workbench's
+          origin. Set a preview domain for full fidelity.
         </p>
+      )}
+
+      {confirmFullScreen && (
+        <Dialog
+          title="Open outside the sandbox?"
+          onClose={() => setConfirmFullScreen(false)}
+          onSubmit={openFullScreen}
+          submitLabel="Open anyway"
+          danger
+        >
+          <p className="dialog-text">
+            This page was written by an agent. Opening it full screen gives it the same access to Workbench that you
+            have. A preview domain avoids this.
+          </p>
+        </Dialog>
       )}
 
       <div className={`prev-frame-wrap${device === "auto" ? " is-auto" : ""}`}>
