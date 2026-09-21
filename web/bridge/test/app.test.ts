@@ -67,7 +67,7 @@ describe("bridge app", () => {
   });
 
   it("streams a snapshot then live events on /ws/events", async () => {
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`);
+    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`, { origin: `http://${baseUrl}` });
     const messages: EventsMessage[] = [];
     const first = new Promise<void>((resolve, reject) => {
       ws.once("error", reject);

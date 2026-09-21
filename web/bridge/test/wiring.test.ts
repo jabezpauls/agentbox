@@ -111,7 +111,7 @@ describe("wired read endpoints", () => {
 describe("events websocket ports push", () => {
   it("sends a ports message on connect and on change, and ref-counts the watcher", async () => {
     const startsBefore = watcher.starts;
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`);
+    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`, { origin: `http://${baseUrl}` });
     const kinds: string[] = [];
     const gotPorts = new Promise<EventsMessage>((resolve, reject) => {
       ws.once("error", reject);

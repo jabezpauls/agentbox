@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { WebSocket } from "ws";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "../config.js";
+import { wsOriginGuard } from "../ws-origin.js";
 
 interface PreviewParams {
   port: string;
@@ -31,6 +32,12 @@ const WS_HANDSHAKE_HEADERS = new Set([
   "upgrade",
   "host",
 ]);
+
+// The user's credentials for the appliance itself must never reach a port an
+// agent opened. Caddy's `basic_auth` leaves `Authorization` on the request, so
+// without this every preview would hand the previewed process the plaintext
+// login for the whole box; `Cookie` is stripped for the same reason.
+const CREDENTIAL_HEADERS = new Set(["authorization", "cookie"]);
 
 const MAX_PENDING_BYTES = 1024 * 1024;
 
@@ -142,7 +149,7 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
 
       const requestHeaders: IncomingHttpHeaders = {};
       for (const [key, value] of Object.entries(clientReq.headers)) {
-        if (value === undefined || HOP_BY_HOP.has(key)) continue;
+        if (value === undefined || HOP_BY_HOP.has(key) || CREDENTIAL_HEADERS.has(key)) continue;
         requestHeaders[key] = value;
       }
       requestHeaders.host = `127.0.0.1:${port}`;
@@ -203,6 +210,8 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
     preview.route<{ Params: PreviewParams }>({
       method: "GET",
       url: "/preview/:port/*",
+      // Plain requests pass through; only the websocket upgrade is origin-checked.
+      onRequest: wsOriginGuard,
       handler: httpHandler,
       wsHandler: (socket, req) => {
         const port = parsePort((req.params as PreviewParams).port);
@@ -222,6 +231,7 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
         const headers: Record<string, string> = {};
         for (const [key, value] of Object.entries(req.headers)) {
           if (value === undefined || WS_HANDSHAKE_HEADERS.has(key)) continue;
+          if (CREDENTIAL_HEADERS.has(key)) continue;
           if (key === "origin") {
             headers.origin = `http://127.0.0.1:${port}`;
             continue;

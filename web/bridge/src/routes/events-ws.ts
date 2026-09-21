@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { EventsMessage } from "@workbench/shared";
 import type { SessionHub } from "../herdr/session.js";
 import type { PortsWatcher } from "../app.js";
+import { wsOriginGuard } from "../ws-origin.js";
 
 /**
  * `/ws/events`: on open send a fresh snapshot and the current listening ports,
@@ -16,7 +17,7 @@ export function registerEventsWs(
 ): void {
   let clientCount = 0;
 
-  app.get("/ws/events", { websocket: true }, (socket) => {
+  app.get("/ws/events", { websocket: true, onRequest: wsOriginGuard }, (socket) => {
     let off: (() => void) | null = null;
     let offPorts: (() => void) | null = null;
 

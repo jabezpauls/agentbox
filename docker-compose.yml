@@ -60,7 +60,12 @@ services:
   # panes as a TUI (handy on a phone).
   terminal:
     <<: *sandbox
-    command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--writable", "herdr"]
+    # --check-origin: a ttyd websocket is a live shell, and websocket
+    # handshakes are not covered by the same-origin policy, so any page in
+    # another tab could otherwise attach on the browser's cached credentials.
+    # ttyd compares the Origin against the Host the proxy forwards, which is
+    # the same hostname the page was served from.
+    command: ["ttyd", "--port", "7681", "--base-path", "/terminal", "--check-origin", "--writable", "herdr"]
     # Same localhost and process table as the editor: a dev server started in
     # one is reachable from all, and the proxy reaches every port via `code`.
     network_mode: "service:code"
@@ -71,7 +76,8 @@ services:
   # A plain shell, for when you want bash rather than the herdr client.
   shell:
     <<: *sandbox
-    command: ["ttyd", "--port", "7683", "--base-path", "/shell", "--writable", "bash", "-l"]
+    # --check-origin for the same reason as `terminal`.
+    command: ["ttyd", "--port", "7683", "--base-path", "/shell", "--check-origin", "--writable", "bash", "-l"]
     network_mode: "service:code"
     pid: "service:code"
     depends_on:
@@ -80,7 +86,8 @@ services:
   # Live resource usage for the sandbox itself.
   monitor:
     <<: *sandbox
-    command: ["ttyd", "--port", "7682", "--base-path", "/monitor", "btop"]
+    # --check-origin for the same reason as `terminal`.
+    command: ["ttyd", "--port", "7682", "--base-path", "/monitor", "--check-origin", "btop"]
     # Same localhost and process table as the editor: a dev server started in
     # one is reachable from all, and the proxy reaches every port via `code`.
     network_mode: "service:code"

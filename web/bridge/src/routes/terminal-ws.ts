@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { TerminalClientMessage } from "@workbench/shared";
 import type { TerminalStreams, Viewer } from "../herdr/terminal.js";
+import { wsOriginGuard } from "../ws-origin.js";
 
 const PANE_RE = /^w\d+:p\d+$/;
 
@@ -16,7 +17,7 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
 export function registerTerminalWs(app: FastifyInstance, streams: TerminalStreams): void {
   app.get<{ Querystring: { pane?: string; cols?: string; rows?: string } }>(
     "/ws/terminal",
-    { websocket: true },
+    { websocket: true, onRequest: wsOriginGuard },
     (socket, req) => {
       const pane = req.query.pane;
       if (typeof pane !== "string" || !PANE_RE.test(pane)) {

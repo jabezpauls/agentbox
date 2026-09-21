@@ -66,6 +66,11 @@ beforeAll(async () => {
       res.end();
       return;
     }
+    if (url.startsWith("/headers")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(req.headers));
+      return;
+    }
     if (url.startsWith("/setcookie")) {
       res.writeHead(200, { "set-cookie": "a=1; Path=/" });
       res.end("ok");
@@ -76,6 +81,10 @@ beforeAll(async () => {
   });
   const wss = new WebSocketServer({ server: upstream });
   wss.on("connection", (ws, req) => {
+    if (req.url?.includes("headers")) {
+      ws.send(JSON.stringify(req.headers));
+      return;
+    }
     if (req.url?.includes("close4001")) {
       ws.close(4001, "bye");
       return;
@@ -131,9 +140,9 @@ describe("preview proxy", () => {
   });
 
   it("echoes a websocket message through the proxy", async () => {
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/socket`,
-    );
+    const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/socket`, {
+      origin: `http://127.0.0.1:${bridgePort}`,
+    });
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
@@ -204,11 +213,51 @@ describe("preview proxy", () => {
     });
   });
 
+  describe("credentials", () => {
+    // Caddy's basic_auth leaves Authorization on the request; forwarding it
+    // would hand the appliance's plaintext login to whatever an agent started
+    // on that port.
+    it("does not forward Authorization or Cookie to the upstream", async () => {
+      const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/headers`, {
+        headers: {
+          authorization: "Basic dXNlcjpwYXNzd29yZA==",
+          cookie: "session=secret",
+          "x-keep-me": "yes",
+        },
+      });
+      const headers = (await res.json()) as Record<string, string>;
+      expect(headers.authorization).toBeUndefined();
+      expect(headers.cookie).toBeUndefined();
+      expect(headers["x-keep-me"]).toBe("yes");
+    });
+
+    it("does not forward Authorization or Cookie on a websocket upgrade", async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/headers`, {
+        origin: `http://127.0.0.1:${bridgePort}`,
+        headers: {
+          authorization: "Basic dXNlcjpwYXNzd29yZA==",
+          cookie: "session=secret",
+          "x-keep-me": "yes",
+        },
+      });
+      const headers = await new Promise<Record<string, string>>((resolve, reject) => {
+        ws.once("message", (raw) => resolve(JSON.parse(raw.toString()) as Record<string, string>));
+        ws.once("error", reject);
+      });
+      expect(headers.authorization).toBeUndefined();
+      expect(headers.cookie).toBeUndefined();
+      expect(headers["x-keep-me"]).toBe("yes");
+      ws.close();
+      await new Promise<void>((resolve) => ws.once("close", () => resolve()));
+    });
+  });
+
   describe("websocket subprotocols", () => {
     it("negotiates the client subprotocol end to end", async () => {
       const ws = new WebSocket(
         `ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/socket`,
         ["vite-hmr"],
+        { origin: `http://127.0.0.1:${bridgePort}` },
       );
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => resolve());
@@ -228,6 +277,7 @@ describe("preview proxy", () => {
     it("propagates the upstream close code to the client", async () => {
       const ws = new WebSocket(
         `ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/close4001`,
+        { origin: `http://127.0.0.1:${bridgePort}` },
       );
       const code = await new Promise<number>((resolve, reject) => {
         ws.once("close", (closeCode) => resolve(closeCode));

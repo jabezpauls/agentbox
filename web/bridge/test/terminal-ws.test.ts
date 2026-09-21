@@ -47,7 +47,9 @@ afterAll(async () => {
 });
 
 function open(pane: string): WebSocket {
-  return new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=${pane}&cols=80&rows=24`);
+  return new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=${pane}&cols=80&rows=24`, {
+    origin: `http://${baseUrl}`,
+  });
 }
 
 describe("terminal ws route", () => {
@@ -93,7 +95,9 @@ describe("terminal ws route", () => {
   });
 
   it("rejects an invalid pane id with close code 1008", async () => {
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=not-a-pane&cols=80&rows=24`);
+    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=not-a-pane&cols=80&rows=24`, {
+      origin: `http://${baseUrl}`,
+    });
     const code = await new Promise<number>((resolve, reject) => {
       ws.once("close", (c) => resolve(c));
       ws.once("error", reject);
