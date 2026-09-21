@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+// agentbox-review — show a human an HTML artifact and get their comments back.
+//
+// The agent writes a page, runs `open`, and then blocks in `poll` until the
+// person reviewing it in the Workbench presses Send. Comments come back
+// anchored to the element or the phrase they refer to, as JSON on stdout.
+//
+// Deliberately dependency-free plain Node: it is installed into the sandbox
+// image next to the agent CLIs, where an npm install at runtime would be both
+// slow and a thing to keep in step with the bridge it talks to.
+//
+//   agentbox-review open <file.html> [--label <text>]
+//   agentbox-review poll <key|file> [--timeout <sec>]
+//   agentbox-review end  <key|file>
+//   agentbox-review list [--json]
+//
+// Exit codes: 0 feedback (or success), 1 usage/transport error, 2 no such
+// session, 3 the poll timed out and may be retried, 4 the session has ended.
+
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const BASE = (process.env.AGENTBOX_REVIEW_URL || "http://127.0.0.1:7800/workbench").replace(/\/+$/, "");
+// One HTTP request never parks for longer than this, so a proxy or a container
+// restart in the middle cannot strand a long wait; `poll` loops until its own
+// deadline instead.
+const CHUNK_MS = 60_000;
+const DEFAULT_TIMEOUT_S = 1800;
+
+const USAGE = `agentbox-review — publish an HTML artifact for review and collect the comments
+
+  agentbox-review open <file.html> [--label <text>]   publish, print the URL and key
+  agentbox-review poll <key|file> [--timeout <sec>]   block until comments arrive
+  agentbox-review end  <key|file>                     end the session
+  agentbox-review list [--json]                       show every session
+
+Exit codes: 0 comments, 1 error, 2 unknown session, 3 timed out, 4 session ended.
+The bridge is found at AGENTBOX_REVIEW_URL (default ${BASE}).`;
+
+class Fail extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function die(err) {
+  const code = err instanceof Fail ? err.code : 1;
+  process.stderr.write(`agentbox-review: ${err.message}\n`);
+  process.exit(code);
+}
+
+/** The key for an artifact path — the same short hash the bridge derives. */
+function keyForFile(file) {
+  return createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 8);
+}
+
+/** A session argument is either the key itself or the file it was opened from. */
+function resolveKey(arg) {
+  if (/^[0-9a-f]{8}$/.test(arg)) return arg;
+  return keyForFile(arg);
+}
+
+async function call(method, urlPath, body) {
+  let res;
+  try {
+    res = await fetch(`${BASE}${urlPath}`, {
+      method,
+      headers: body === undefined ? { accept: "application/json" } : { accept: "application/json", "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new Fail(`cannot reach the Workbench bridge at ${BASE} (${err.message})`);
+  }
+  const text = await res.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+  if (res.status === 404) throw new Fail(parsed?.error ?? "no such review session", 2);
+  if (!res.ok) throw new Fail(parsed?.error ?? `${urlPath} → ${res.status}`);
+  return parsed;
+}
+
+/** Pull `--flag value` pairs out of the argument list, leaving the positionals. */
+function options(argv, names) {
+  const out = {};
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (names.includes(arg)) {
+      const value = argv[++i];
+      if (value === undefined) throw new Fail(`${arg} needs a value`);
+      out[arg.replace(/^--/, "")] = value;
+    } else if (arg === "--json") {
+      out.json = true;
+    } else {
+      rest.push(arg);
+    }
+  }
+  return { opts: out, rest };
+}
+
+async function cmdOpen(argv) {
+  const { opts, rest } = options(argv, ["--label"]);
+  const file = rest[0];
+  if (!file) throw new Fail("usage: agentbox-review open <file.html> [--label <text>]");
+  // Read it here as well as in the bridge, so a typo fails with a plain message
+  // rather than an HTTP status.
+  try {
+    readFileSync(file);
+  } catch {
+    throw new Fail(`cannot read ${file}`);
+  }
+  const body = { file: path.resolve(file) };
+  if (opts.label) body.label = opts.label;
+  const res = await call("POST", "/api/review/sessions", body);
+  process.stdout.write(`${res.url}\n`);
+  process.stdout.write(`key: ${res.key}${res.resumed ? " (resumed)" : ""}\n`);
+  process.stdout.write(`Waiting for comments: agentbox-review poll ${res.key}\n`);
+}
+
+async function cmdPoll(argv) {
+  const { opts, rest } = options(argv, ["--timeout"]);
+  const arg = rest[0];
+  if (!arg) throw new Fail("usage: agentbox-review poll <key|file> [--timeout <sec>]");
+  const timeoutS = opts.timeout === undefined ? DEFAULT_TIMEOUT_S : Number(opts.timeout);
+  if (!Number.isFinite(timeoutS) || timeoutS < 0) throw new Fail("--timeout must be seconds");
+  const key = resolveKey(arg);
+  const deadline = Date.now() + timeoutS * 1000;
+
+  for (;;) {
+    const remaining = Math.max(0, deadline - Date.now());
+    const wait = Math.min(remaining, CHUNK_MS);
+    const res = await call("GET", `/api/review/${key}/feedback?wait=${wait}`);
+    if (!res.timedOut) {
+      // The documented shape, and only that: a caller can parse it blind.
+      process.stdout.write(`${JSON.stringify({ key: res.key, status: res.status, comments: res.comments }, null, 2)}\n`);
+      process.exit(res.status === "ended" ? 4 : 0);
+    }
+    if (Date.now() >= deadline) {
+      process.stdout.write(`${JSON.stringify({ key, status: res.status, comments: [] }, null, 2)}\n`);
+      process.exit(3);
+    }
+  }
+}
+
+async function cmdEnd(argv) {
+  const arg = argv[0];
+  if (!arg) throw new Fail("usage: agentbox-review end <key|file>");
+  const key = resolveKey(arg);
+  const session = await call("POST", `/api/review/${key}/end`, { by: "agent" });
+  process.stdout.write(`ended ${session.key} (${session.label})\n`);
+}
+
+async function cmdList(argv) {
+  const { opts } = options(argv, []);
+  const sessions = await call("GET", "/api/review/sessions");
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(sessions, null, 2)}\n`);
+    return;
+  }
+  if (sessions.length === 0) {
+    process.stdout.write("no review sessions — agentbox-review open <file.html>\n");
+    return;
+  }
+  for (const s of sessions) {
+    const pending = s.pending > 0 ? `  ${s.pending} comment${s.pending === 1 ? "" : "s"}` : "";
+    process.stdout.write(`${s.key}  ${s.status.padEnd(5)}  ${s.label}  (${path.basename(s.file)})${pending}\n`);
+  }
+}
+
+const [command, ...argv] = process.argv.slice(2);
+
+if (!command || command === "--help" || command === "-h" || command === "help") {
+  process.stdout.write(`${USAGE}\n`);
+  process.exit(command ? 0 : 1);
+}
+
+const commands = { open: cmdOpen, poll: cmdPoll, end: cmdEnd, list: cmdList };
+const run = commands[command];
+if (!run) die(new Fail(`unknown command: ${command} (try --help)`));
+
+run(argv).catch(die);
