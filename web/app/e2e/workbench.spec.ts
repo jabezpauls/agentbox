@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,23 @@ const REVIEW_CLI = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../images/workspace/agentbox-review",
 );
+
+/**
+ * A currently-free TCP port on loopback. Binding :0 lets the kernel pick one
+ * that is actually available, so the preview step never fails misleadingly just
+ * because a fixed port was already taken on the box the suite runs on.
+ */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 function review(...args: string[]): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve) => {
@@ -81,15 +99,16 @@ test("the Workbench drives herdr end to end", async ({ page }) => {
   });
 
   await test.step("a server started in a pane can be previewed", async () => {
-    await runCommand(page, "python3 -m http.server 3055 --bind 127.0.0.1");
+    const devPort = await freePort();
+    await runCommand(page, `python3 -m http.server ${devPort} --bind 127.0.0.1`);
     await waitForOutput(page, "Serving HTTP");
 
-    const portRow = page.getByRole("button", { name: /:3055/ });
+    const portRow = page.getByRole("button", { name: new RegExp(`:${devPort}\\b`) });
     await expect(portRow).toBeVisible({ timeout: 30_000 });
     await portRow.click();
 
     const frame = page.locator("iframe.prev-frame");
-    await expect(frame).toHaveAttribute("src", /\/preview\/3055\//);
+    await expect(frame).toHaveAttribute("src", new RegExp(`/preview/${devPort}/`));
     // Without a preview domain the path proxy is same-origin, so the frame
     // must be sandboxed without allow-same-origin.
     const sandbox = await frame.getAttribute("sandbox");
