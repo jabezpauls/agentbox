@@ -165,3 +165,48 @@ describe("feedback queue", () => {
     expect(detail.comments).toEqual([]);
   });
 });
+
+describe("pruning", () => {
+  /** Backdate a session's `updated` so the TTL sweep considers it old. */
+  function age(key: string, daysAgo: number, status: "open" | "ended" = "ended"): void {
+    const file = path.join(root, key, "session.json");
+    const s = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    s.status = status;
+    if (status === "ended") s.endedBy = "agent";
+    s.updated = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+    fs.writeFileSync(file, JSON.stringify(s, null, 2));
+  }
+
+  it("deletes ended sessions older than the TTL on the next open", async () => {
+    const old = await store.open(artifact("old.html"));
+    age(old.key, 8); // older than the 7-day TTL, and ended
+    const recent = await store.open(artifact("recent.html"));
+    age(recent.key, 1); // ended yesterday, still inside the TTL
+
+    // Opening a fresh session triggers the sweep.
+    await store.open(artifact("trigger.html"));
+
+    const keys = (await store.list()).map((s) => s.key);
+    expect(keys).not.toContain(old.key);
+    expect(keys).toContain(recent.key);
+  });
+
+  it("keeps an old but still-open session", async () => {
+    const openOld = await store.open(artifact("live.html"));
+    age(openOld.key, 30, "open"); // ancient, but never ended
+
+    await store.open(artifact("trigger.html"));
+
+    expect((await store.list()).map((s) => s.key)).toContain(openOld.key);
+  });
+
+  it("never prunes the session just opened, even if it looks aged", async () => {
+    // Re-opening resets status to open and updated to now, so a resume is safe.
+    const file = artifact("resumed.html");
+    const first = await store.open(file);
+    age(first.key, 100);
+    const again = await store.open(file);
+    expect(again.resumed).toBe(true);
+    expect((await store.list()).map((s) => s.key)).toContain(first.key);
+  });
+});

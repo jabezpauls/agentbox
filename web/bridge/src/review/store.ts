@@ -39,6 +39,11 @@ const KINDS = new Set(["element", "selection", "note"]);
 const MAX_QUOTE = 400;
 const MAX_NOTE = 4000;
 
+/** Ended sessions older than this are pruned on the next open. */
+const ENDED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Hard cap on stored sessions; the oldest ended ones are dropped past it. */
+const MAX_SESSIONS = 200;
+
 function str(v: unknown, max: number): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
@@ -157,7 +162,7 @@ export class ReviewStore {
     const dir = path.join(this.root, key);
     await fsp.mkdir(dir, { recursive: true });
 
-    return this.lock(key, async () => {
+    const result = await this.lock(key, async () => {
       let existing: StoredSession | null = null;
       try {
         existing = await this.readSession(key);
@@ -185,6 +190,63 @@ export class ReviewStore {
       this.wake(key);
       return { key, resumed: existing !== null, session: { ...session, pending } };
     });
+    // Keep the store from growing without bound. Pruning runs after the create
+    // so a slow sweep never delays the open, and it never touches `key` (just
+    // written as `open`, so neither TTL- nor cap-eligible).
+    await this.prune(key);
+    return result;
+  }
+
+  /**
+   * Bound the store: delete `ended` sessions older than {@link ENDED_TTL_MS},
+   * then, if still over {@link MAX_SESSIONS}, drop the oldest ended sessions
+   * until under the cap. Active (`open`) sessions are never pruned, and neither
+   * is `keep` (the session the caller just opened). Best-effort: any error on a
+   * single session is ignored so pruning never fails an open.
+   */
+  private async prune(keep: string): Promise<void> {
+    let names: string[];
+    try {
+      names = await fsp.readdir(this.root);
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    const sessions: { key: string; ended: boolean; updatedMs: number }[] = [];
+    for (const name of names) {
+      if (!KEY_PATTERN.test(name) || name === keep) continue;
+      try {
+        const s = await this.readSession(name);
+        sessions.push({ key: name, ended: s.status === "ended", updatedMs: Date.parse(s.updated) || 0 });
+      } catch {
+        // A corrupt session is left for the list() to skip, not force-deleted.
+      }
+    }
+
+    const doomed = new Set<string>();
+    for (const s of sessions) {
+      if (s.ended && now - s.updatedMs > ENDED_TTL_MS) doomed.add(s.key);
+    }
+    // +1 accounts for `keep`, which is not in `sessions` but is in the store.
+    let total = sessions.length + 1 - doomed.size;
+    if (total > MAX_SESSIONS) {
+      const oldestEndedFirst = sessions
+        .filter((s) => s.ended && !doomed.has(s.key))
+        .sort((a, b) => a.updatedMs - b.updatedMs);
+      for (const s of oldestEndedFirst) {
+        if (total <= MAX_SESSIONS) break;
+        doomed.add(s.key);
+        total--;
+      }
+    }
+
+    for (const key of doomed) {
+      try {
+        await fsp.rm(path.join(this.root, key), { recursive: true, force: true });
+      } catch {
+        // Another process may have removed it already; nothing to do.
+      }
+    }
   }
 
   /** Every session, newest first. A corrupt session.json is skipped, not fatal. */
