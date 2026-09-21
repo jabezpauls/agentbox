@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import path from "node:path";
 import { request, subscribe, HerdrError } from "../src/herdr/socket.js";
 import { startTestHerdr, TestHerdr } from "./helpers/herdr.js";
 import { waitFor } from "./helpers/wait.js";
@@ -67,5 +68,22 @@ describe("socket", () => {
     await other.stop();
     await waitFor(() => closed, 5_000);
     expect(closed).toBe(true);
+  });
+});
+
+describe("a socket that is not there", () => {
+  it("rejects instead of crashing the process on an uncaught readline error", async () => {
+    // The cold-start case: the bridge pings before any herdr server exists.
+    // readline mirrors its input's errors, so without a listener there this
+    // used to surface as an uncaught 'error' event rather than a rejection.
+    await expect(
+      request(path.join(h.dir, "definitely-not-a-socket"), "ping", {}, { timeoutMs: 1000 }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a subscription to a missing socket the same way", async () => {
+    await expect(
+      subscribe(path.join(h.dir, "definitely-not-a-socket"), [{ type: "agent_status" }], () => {}, () => {}),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

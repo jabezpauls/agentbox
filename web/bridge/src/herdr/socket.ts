@@ -28,6 +28,11 @@ export function request<T = unknown>(
     const id = `wb_${++seq}`;
     const sock = net.connect(socketPath);
     const rl = readline.createInterface({ input: sock });
+    // readline re-emits its input's errors as its own. With nothing listening
+    // there, a socket that cannot connect at all — no herdr server yet, which
+    // is exactly the cold-start case — becomes an uncaught 'error' event and
+    // takes the process down. The socket handler below does the rejecting.
+    rl.on("error", () => {});
     const timer = setTimeout(() => {
       rl.close();
       sock.destroy();
@@ -86,6 +91,8 @@ export function subscribe(
     // unexpected disconnects/errors).
     let closing = false;
     const rl = readline.createInterface({ input: sock });
+    // As in request(): the socket's own handler decides what an error means.
+    rl.on("error", () => {});
     sock.once("connect", () => {
       sock.write(JSON.stringify({ id: "sub", method: "events.subscribe", params: { subscriptions } }) + "\n");
     });
