@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 export type Theme = "system" | "light" | "dark";
 export type Resolved = "light" | "dark";
@@ -34,7 +34,11 @@ export function useTheme(): { theme: Theme; resolved: Resolved; cycle: () => voi
   const [theme, setTheme] = useState<Theme>(readStored);
   const [systemDark, setSystemDark] = useState<boolean>(systemPrefersDark);
 
-  useEffect(() => {
+  // A layout effect, not a passive one: a parent's layout effect runs before
+  // every child's passive effect, so the terminals — which re-read the palette
+  // off the document in a passive effect — see the new theme rather than the
+  // one it replaced.
+  useLayoutEffect(() => {
     apply(theme);
     try {
       localStorage.setItem(STORAGE_KEY, theme);

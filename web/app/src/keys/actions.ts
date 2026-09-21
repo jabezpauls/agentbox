@@ -99,11 +99,11 @@ export const BINDINGS: Binding[] = [
   { combo: "shift+w", id: "workspace.rename", label: "Rename workspace", keys: "⇧W", group: "Workspaces" },
   { combo: "shift+d", id: "workspace.close", label: "Close workspace", keys: "⇧D", group: "Workspaces" },
 
-  { combo: "w", id: "palette.workspaces", label: "Palette: workspaces", keys: "W", group: "View" },
+  { combo: "w", id: "palette.workspaces", label: "Jump to a workspace", keys: "W", group: "View" },
   { combo: "g", id: "palette.all", label: "Command palette", keys: "G", group: "View" },
   { combo: "b", id: "sidebar.toggle", label: "Toggle sidebar", keys: "B", group: "View" },
-  { combo: "q", id: "terminal.blur", label: "Blur terminal", keys: "Q", group: "View" },
-  { combo: "?", id: "keymap.show", label: "Show this keymap", keys: "?", group: "View" },
+  { combo: "q", id: "terminal.blur", label: "Leave the terminal", keys: "Q", group: "View" },
+  { combo: "?", id: "keymap.show", label: "Show these shortcuts", keys: "?", group: "View" },
 ];
 
 export const DEFAULT_BINDINGS: Record<string, ActionId> = Object.fromEntries(
