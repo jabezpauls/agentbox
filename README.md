@@ -2,8 +2,8 @@
 
 A sandboxed coding environment for a VPS, reachable from any browser.
 
-Editor, terminal, process monitor and your coding agents — behind a login, in
-containers that cannot reach the host.
+Editor, terminal, process monitor, a control room for your coding agents —
+behind a login, in containers that cannot reach the host.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
@@ -18,14 +18,32 @@ certificate and starts the stack. It prints the password once.
 | Path | What it is |
 | --- | --- |
 | `/` | VS Code in the browser — files, editor, integrated terminal, extensions |
-| `/terminal` | A full-screen shell, pleasant on a phone |
+| `/workbench` | The Workbench: many agents, live terminals, previews |
+| `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
+| `/shell` | A plain bash shell, pleasant on a phone |
 | `/monitor` | Live CPU, memory and process usage for the sandbox |
+| `lavish.<domain>` | lavish-axi review sessions (its own hostname; see below) |
+| `PORT.<preview-domain>` | Optional: each listening port on its own hostname |
+
+## The Workbench
+
+`/workbench` is a browser client for [herdr](https://github.com/herdrdev/herdr),
+the agent multiplexer in the image. It shows every agent across every
+workspace at once, each in a live terminal, with the web apps they build
+previewable beside them and the same `Ctrl+B` keymap the TUI uses. herdr owns
+the session, so closing the tab detaches instead of killing, and `/terminal`
+is the same session seen from a keyboard.
+
+![The Workbench](docs/images/workbench-dark.png)
+
+See [docs/workbench.md](docs/workbench.md).
 
 ## Coding agents
 
 [Claude Code](https://github.com/anthropics/claude-code) and
 [Codex](https://github.com/openai/codex) are installed and on the `PATH`. Run
-them from the editor's integrated terminal, or full-screen at `/terminal`.
+them from the editor's integrated terminal, from a pane in `/workbench`, or
+full-screen in the TUI at `/terminal`.
 
 Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` to skip the interactive
 login. Otherwise sign in once inside the sandbox; credentials persist in a
@@ -49,7 +67,7 @@ This is the point of the project, so it is enforced rather than asserted:
 - **No Docker socket.** Mounting it would make the container root on the host.
 - **No host bind mounts in the sandbox.** `/workspace` is a named volume; `/`,
   `/home` and `/etc` are not visible. The proxy — a separate container, not the
-  sandbox — mounts only its own config file, read-only.
+  sandbox — mounts only its own configuration files, read-only.
 - **No privileges.** Every process runs as UID 1000 with all capabilities
   dropped and `no-new-privileges` set.
 - **Bounded.** CPU, memory and PID ceilings stop a runaway agent from taking
@@ -69,6 +87,16 @@ address — no ports are opened and Cloudflare terminates TLS:
 ```
 code.example.com  →  http://127.0.0.1:8443
 ```
+
+Give `lavish.code.example.com` a route to the same address — the Workbench's
+lavish panel needs it.
+
+**Wildcards and certificates.** Cloudflare's Universal SSL covers one wildcard
+level, so `*.example.com` is certified and `*.preview.code.example.com` is not.
+If you want per-port preview hostnames through a tunnel, the preview domain has
+to sit where a covered wildcard reaches it — the zone apex — or you need
+Advanced Certificate Manager. The Workbench's path previews need none of this,
+which is why they are the default.
 
 **Order matters.** `cloudflared` matches ingress rules top to bottom, so a
 route placed below a wildcard such as `*.example.com` never runs. The symptom
@@ -96,6 +124,7 @@ root.
 ./scripts/agentbox status
 ./scripts/agentbox logs code
 ./scripts/agentbox shell            # a shell inside the sandbox
+./scripts/agentbox workbench        # follow the Workbench bridge's log
 ./scripts/agentbox password         # rotate the login
 ./scripts/agentbox backup           # archive workspace and home
 ./scripts/agentbox update           # pull, rebuild, restart

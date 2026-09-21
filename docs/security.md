@@ -20,12 +20,40 @@ over the host.
   package managers need it to install dependencies. If you want to restrict this,
   see "Egress filtering" below.
 - Its own named volume, which persists across restarts and updates.
-- The other sandbox services. `terminal`, `monitor` and the Workbench services
-  share the `code` container's network and PID namespaces, so `localhost` and
-  the process table are common to all of them. This is deliberate: a dev server
-  an agent starts in one pane is previewable from the others. The shared
-  namespaces belong to sandbox containers only; nothing about the host boundary
-  changes.
+- The other sandbox services. `terminal`, `shell`, `monitor`, `workbench` and
+  `lavish` share the `code` container's network and PID namespaces, so
+  `localhost` and the process table are common to all of them. This is
+  deliberate: a dev server an agent starts in one pane is previewable from the
+  others. The shared namespaces belong to sandbox containers only; nothing
+  about the host boundary changes.
+
+## The Workbench's own surface
+
+- **The bridge is not published.** `workbench` listens on :7800 inside the
+  shared namespace. Only the proxy can reach it, and only after authenticating.
+- **The RPC forwarder is an allowlist, not a passthrough.** The browser can
+  call the herdr methods the app needs and nothing else; anything outside the
+  list is refused before it reaches herdr.
+- **Previews only reach loopback.** `/workbench/preview/<port>/` proxies to
+  `127.0.0.1:<port>` inside the sandbox, with the port validated as a number in
+  range. It cannot be pointed at another host, and it reaches nothing the
+  sandbox could not already reach.
+- **A path preview is sandboxed.** Served under the Workbench's own origin, an
+  agent-written page could otherwise script the app, read its storage and call
+  its API as you, so the iframe deliberately omits `allow-same-origin`. A
+  configured preview domain puts the page on its own origin instead, where the
+  browser's origin separation does the same job without the restriction.
+- **The directory picker is confined** to the workspace root; paths that
+  escape it are rejected rather than resolved.
+- **lavish binds the internal network.** lavish-axi is unauthenticated and
+  serves local files, so it binds one address on `agentbox_internal` — not a
+  wildcard. That network carries only agentbox's own containers, and the proxy
+  is the only way in.
+- **On-demand certificates are gated.** In standalone mode the preview
+  wildcard's certificates are issued on demand; the permission endpoint answers
+  only for numeric subdomains of the configured preview domain, comparing that
+  suffix literally, so the box cannot be made to mint certificates for names it
+  does not serve.
 
 ## Verifying the boundary yourself
 
@@ -37,8 +65,10 @@ docker inspect $(docker compose ps -q) \
   --format '{{.Name}}: {{range .Mounts}}{{.Source}} {{end}}'
 
 # The sandbox runs unprivileged with no capabilities.
-docker inspect agentbox-code-1 \
-  --format 'user={{.Config.User}} caps={{.HostConfig.CapDrop}} priv={{.HostConfig.Privileged}}'
+for c in agentbox-code-1 agentbox-workbench-1 agentbox-lavish-1; do
+  docker inspect "$c" \
+    --format '{{.Name}} user={{.Config.User}} caps={{.HostConfig.CapDrop}} priv={{.HostConfig.Privileged}}'
+done
 ```
 
 Expect `User=1000:1000`, `CapDrop=[ALL]`, `Privileged=false`, and only
@@ -52,9 +82,13 @@ strongest configuration and is what the project recommends for shared hosts.
 
 ## Authentication
 
-The proxy demands credentials before any request reaches the editor, terminal,
-or metrics. Passwords are stored only as bcrypt hashes. In `standalone` mode the
-proxy also obtains and renews a TLS certificate automatically.
+The proxy demands credentials before any request reaches the editor, the
+Workbench, the terminal, the metrics, lavish or a preview. Basic authentication
+is scoped per origin, so the lavish hostname and each preview hostname prompt
+separately with the same credentials.
+
+Passwords are stored only as bcrypt hashes. In `standalone` mode the proxy also
+obtains and renews TLS certificates automatically.
 
 ## Threat model, honestly stated
 
