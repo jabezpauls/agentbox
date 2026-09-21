@@ -30,10 +30,13 @@ for (const [what, p] of [["bridge build", bridgeEntry], ["app build", staticDir]
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-e2e-"));
 const home = path.join(root, "home");
 const workspaces = path.join(root, "workspaces");
+const reviewDir = path.join(root, "review");
 fs.mkdirSync(path.join(home, ".config"), { recursive: true });
 // Two subdirectories so the new-workspace picker has something to show.
 fs.mkdirSync(path.join(workspaces, "demo"), { recursive: true });
 fs.mkdirSync(path.join(workspaces, "other"), { recursive: true });
+// Review sessions land here rather than in the developer's own ~/.agentbox.
+fs.mkdirSync(reviewDir, { recursive: true });
 
 const socketPath = path.join(root, "herdr.sock");
 const env = {
@@ -96,6 +99,7 @@ const bridge = spawn(process.execPath, [bridgeEntry], {
     WORKBENCH_BASE_PATH: "/workbench",
     WORKBENCH_STATIC_DIR: staticDir,
     WORKBENCH_WORKSPACE_ROOT: workspaces,
+    WORKBENCH_REVIEW_DIR: reviewDir,
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
