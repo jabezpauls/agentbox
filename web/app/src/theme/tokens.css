@@ -44,6 +44,35 @@
   --st-idle: #9aa1ad;
   --st-unknown: #c3c8d1;
 
+  /* The ground behind an iframe of arbitrary web content: the browser's own
+     default page colour in both themes, so a preview of a page that sets no
+     background looks the way it would in a normal tab. */
+  --frame-bg: #ffffff;
+
+  /* terminal surface + ANSI palette (xterm reads these through themes.ts) */
+  --term-bg: #ffffff;
+  --term-fg: #171a1f;
+  --term-cursor: #4c63e6;
+  --term-cursor-accent: #ffffff;
+  --term-selection: rgba(76, 99, 230, 0.22);
+  --term-selection-inactive: rgba(76, 99, 230, 0.12);
+  --ansi-black: #1f232b;
+  --ansi-red: #c0392b;
+  --ansi-green: #2e9e5b;
+  --ansi-yellow: #a5730a;
+  --ansi-blue: #4c63e6;
+  --ansi-magenta: #9b3dcf;
+  --ansi-cyan: #0e7c86;
+  --ansi-white: #d7dae1;
+  --ansi-bright-black: #838a97;
+  --ansi-bright-red: #e05545;
+  --ansi-bright-green: #37b56a;
+  --ansi-bright-yellow: #c9971f;
+  --ansi-bright-blue: #6478f0;
+  --ansi-bright-magenta: #b45ae0;
+  --ansi-bright-cyan: #1596a2;
+  --ansi-bright-white: #171a1f;
+
   /* type */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji";
@@ -129,6 +158,29 @@
   --st-idle: #6d7482;
   --st-unknown: #464c57;
 
+  --term-bg: #171a20;
+  --term-fg: #e8eaef;
+  --term-cursor: #7f92f7;
+  --term-cursor-accent: #171a20;
+  --term-selection: rgba(127, 146, 247, 0.30);
+  --term-selection-inactive: rgba(127, 146, 247, 0.16);
+  --ansi-black: #272c36;
+  --ansi-red: #e06c6c;
+  --ansi-green: #45c07d;
+  --ansi-yellow: #d8b25a;
+  --ansi-blue: #7f92f7;
+  --ansi-magenta: #c58af0;
+  --ansi-cyan: #4fd0d8;
+  --ansi-white: #a3aab8;
+  --ansi-bright-black: #6d7482;
+  --ansi-bright-red: #ef8686;
+  --ansi-bright-green: #5fd695;
+  --ansi-bright-yellow: #eac26a;
+  --ansi-bright-blue: #93a3ff;
+  --ansi-bright-magenta: #d4a3f5;
+  --ansi-bright-cyan: #6fe0e8;
+  --ansi-bright-white: #e8eaef;
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
   --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.6);
@@ -164,6 +216,29 @@
     --st-done: #45c07d;
     --st-idle: #6d7482;
     --st-unknown: #464c57;
+
+    --term-bg: #171a20;
+    --term-fg: #e8eaef;
+    --term-cursor: #7f92f7;
+    --term-cursor-accent: #171a20;
+    --term-selection: rgba(127, 146, 247, 0.30);
+    --term-selection-inactive: rgba(127, 146, 247, 0.16);
+    --ansi-black: #272c36;
+    --ansi-red: #e06c6c;
+    --ansi-green: #45c07d;
+    --ansi-yellow: #d8b25a;
+    --ansi-blue: #7f92f7;
+    --ansi-magenta: #c58af0;
+    --ansi-cyan: #4fd0d8;
+    --ansi-white: #a3aab8;
+    --ansi-bright-black: #6d7482;
+    --ansi-bright-red: #ef8686;
+    --ansi-bright-green: #5fd695;
+    --ansi-bright-yellow: #eac26a;
+    --ansi-bright-blue: #93a3ff;
+    --ansi-bright-magenta: #d4a3f5;
+    --ansi-bright-cyan: #6fe0e8;
+    --ansi-bright-white: #e8eaef;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);

@@ -12,11 +12,12 @@ export function previewUrl(base: string, port: number, path: string): string {
 }
 
 /**
- * Where "open full screen" points. With a preview domain the port becomes a
- * subdomain (its own origin, so it escapes the proxy path); without one it is
- * the proxied path, opened in a new tab against the current origin.
+ * Where a preview is actually loaded from — both the panel's iframe and "open
+ * full screen". With a preview domain the port becomes a subdomain, which is a
+ * separate origin: the page gets its cookies and storage back and the iframe
+ * needs no sandbox. Without one it is the bridge's proxied path on this origin.
  */
-export function fullScreenUrl(port: number, path: string, previewDomain: string | null, base: string): string {
+export function previewTarget(port: number, path: string, previewDomain: string | null, base: string): string {
   if (previewDomain) return `https://${port}.${previewDomain}/${stripLeadingSlashes(path)}`;
   return previewUrl(base, port, path);
 }

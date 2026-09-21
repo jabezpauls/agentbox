@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { CornerDownLeft } from "lucide-react";
 import { useApp } from "../store/app.ts";
-import { rpc } from "../api/client.ts";
+import { call } from "../api/call.ts";
 import { paneTitle } from "../store/session.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { focusTerminal } from "../terminal/registry.ts";
 
 /**
  * A single-line (growing to four) composer shown under the grid when the
@@ -38,7 +39,7 @@ export function Composer() {
   const send = () => {
     const value = text.trim();
     if (!value || blocked) return;
-    rpc("agent.prompt", { target: focusedPaneId, text: value }).catch(() => {});
+    void call("agent.prompt", { target: focusedPaneId, text: value });
     setText("");
     if (ref.current) ref.current.style.height = "auto";
   };
@@ -49,7 +50,7 @@ export function Composer() {
       send();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      document.querySelector<HTMLTextAreaElement>(".pane-cell.is-focused textarea.xterm-helper-textarea")?.focus();
+      focusTerminal(focusedPaneId);
     }
   };
 

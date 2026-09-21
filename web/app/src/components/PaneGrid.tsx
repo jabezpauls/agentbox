@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { Resolved } from "../theme/useTheme.ts";
 import { useApp } from "../store/app.ts";
-import { rpc } from "../api/client.ts";
+import { call } from "../api/call.ts";
 import { rectsToPercent, splitHandles, splitPath } from "../layout/scale.ts";
 import { TerminalCell } from "../terminal/TerminalCell.tsx";
 import { PaneHeader } from "./PaneHeader.tsx";
@@ -46,7 +46,7 @@ export function PaneGrid({ resolved }: Props) {
   const commitSplit = (splitId: string, ratio: number) => {
     const path = splitPath(layout, splitId);
     if (!path) return;
-    rpc("layout.set_split_ratio", { tab_id: layout.tab_id, path, ratio }).catch(() => {});
+    void call("layout.set_split_ratio", { tab_id: layout.tab_id, path, ratio });
   };
 
   return (

@@ -33,12 +33,16 @@ export function Inspector() {
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging.current) return;
     const next = Math.min(maxWidth(), Math.max(MIN_WIDTH, window.innerWidth - e.clientX));
-    setInspector({ width: next });
+    // Live feedback only: writing localStorage on every pointermove would do
+    // hundreds of synchronous writes per drag. The release below persists.
+    setInspector({ width: next }, { persist: false });
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    const wasDragging = dragging.current;
     dragging.current = false;
     const el = e.target as HTMLElement;
     if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    if (wasDragging) setInspector({});
   };
 
   return (
@@ -51,6 +55,7 @@ export function Inspector() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
       />
       <header className="inspector-head">
         <div className="segmented" role="tablist" aria-label="Inspector panel">

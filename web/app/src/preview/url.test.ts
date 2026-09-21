@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fullScreenUrl, previewUrl } from "./url.ts";
+import { previewTarget, previewUrl } from "./url.ts";
 
 describe("previewUrl", () => {
   it("builds a proxied path under the base with the leading slash removed", () => {
@@ -16,14 +16,14 @@ describe("previewUrl", () => {
   });
 });
 
-describe("fullScreenUrl", () => {
+describe("previewTarget", () => {
   it("uses the preview domain as a subdomain when configured", () => {
-    expect(fullScreenUrl(3005, "/app?q=1", "preview.example.com", "/workbench")).toBe(
+    expect(previewTarget(3005, "/app?q=1", "preview.example.com", "/workbench")).toBe(
       "https://3005.preview.example.com/app?q=1",
     );
   });
 
   it("falls back to the proxied path when no domain is configured", () => {
-    expect(fullScreenUrl(3005, "/app", null, "/workbench")).toBe("/workbench/preview/3005/app");
+    expect(previewTarget(3005, "/app", null, "/workbench")).toBe("/workbench/preview/3005/app");
   });
 });

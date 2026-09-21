@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { ChevronRight, Folder } from "lucide-react";
 import type { DirEntry } from "@workbench/shared";
 import { useApp } from "../../store/app.ts";
-import { listDirs, rpc } from "../../api/client.ts";
+import { listDirs } from "../../api/client.ts";
+import { call } from "../../api/call.ts";
 import { Dialog } from "./Dialog.tsx";
 
 /** Join the workspace root with a picker-relative path into an absolute cwd. */
@@ -61,9 +62,9 @@ export function NewWorkspaceDialog() {
   const submit = () => {
     const name = label.trim();
     if (worktree) {
-      rpc("worktree.create", { cwd, branch: branch.trim() || undefined, base: base.trim() || undefined, label: name || undefined, focus: true }).catch(() => {});
+      void call("worktree.create", { cwd, branch: branch.trim() || undefined, base: base.trim() || undefined, label: name || undefined, focus: true });
     } else {
-      rpc("workspace.create", { cwd, label: name || undefined, focus: true }).catch(() => {});
+      void call("workspace.create", { cwd, label: name || undefined, focus: true });
     }
     close();
   };
@@ -94,6 +95,8 @@ export function NewWorkspaceDialog() {
           {entries.length === 0 && <li className="dir-empty">{error ?? "No subfolders"}</li>}
           {entries.map((e) => (
             <li key={e.path}>
+              {/* Double-click descends with the mouse; Enter/Space on the
+                  focused row (detail 0) does the same from the keyboard. */}
               <button className="dir-item" onDoubleClick={() => setRel(e.path)} onClick={(ev) => ev.detail === 0 && setRel(e.path)}>
                 <Folder size={14} />
                 <span>{e.name}</span>
@@ -101,9 +104,9 @@ export function NewWorkspaceDialog() {
             </li>
           ))}
         </ul>
-        <p className="dir-current">
-          Use <code>{cwd}</code>
-        </p>
+        <button type="button" className="dir-current" onClick={submit}>
+          Use this folder: <code>{cwd}</code>
+        </button>
       </div>
 
       <label className="check">

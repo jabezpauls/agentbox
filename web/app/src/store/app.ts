@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { EventsMessage, HerdrEvent, LavishState, ListeningPort } from "@workbench/shared";
 import type { ConnStatus } from "../api/events.ts";
-import { getSession, rpc, type HealthInfo } from "../api/client.ts";
+import { getSession, rpc, RpcError, type HealthInfo } from "../api/client.ts";
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
 import { blockedCount, notifyTransitions, type Toast } from "../notify.ts";
 import type { Theme } from "../theme/useTheme.ts";
@@ -83,13 +83,25 @@ export interface AppState {
   setStatus(s: ConnStatus): void;
   setHealth(h: HealthInfo): void;
   setUi(partial: Partial<UiState>): void;
-  setInspector(partial: Partial<InspectorState>): void;
+  /**
+   * Update the inspector. `persist: false` is for the live phase of a resize
+   * drag, which would otherwise write localStorage on every pointermove.
+   */
+  setInspector(partial: Partial<InspectorState>, opts?: { persist?: boolean }): void;
+  pushToast(toast: Toast): void;
+  reportRpcError(method: string, err: unknown): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
   focusWorkspace(id: string): void;
   markSeen(paneId: string): void;
   dismissToast(id: string): void;
   setThemeCycle(fn: (() => void) | null): void;
+}
+
+// Toast ids only need to be unique within a session; the pane and kind make
+// duplicates from a burst distinguishable in React's reconciliation.
+function toastId(t: Toast): string {
+  return `${t.paneId}:${t.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`;
 }
 
 // Reflect the blocked count in the document title so a background tab shows it.
@@ -163,7 +175,7 @@ export const useApp = create<AppState>((set, get) => ({
         const fresh = notifyTransitions(prev, next, prev.focusedPaneId);
         set({ session: next });
         if (fresh.length) {
-          const stored = fresh.map((t) => ({ ...t, id: `${t.paneId}:${t.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}` }));
+          const stored = fresh.map((t) => ({ ...t, id: toastId(t) }));
           set((s) => ({ toasts: [...s.toasts, ...stored] }));
           systemNotify(fresh, (id) => get().focusPane(id));
         }
@@ -191,7 +203,7 @@ export const useApp = create<AppState>((set, get) => ({
             set({ session });
             syncTitle(session);
           })
-          .catch(() => {});
+          .catch((err) => get().reportRpcError("session", err));
         break;
       }
     }
@@ -209,12 +221,21 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({ ui: { ...s.ui, ...partial } }));
   },
 
-  setInspector(partial) {
+  setInspector(partial, opts) {
     set((s) => {
       const inspector = { ...s.ui.inspector, ...partial };
-      persistInspector(inspector);
+      if (opts?.persist !== false) persistInspector(inspector);
       return { ui: { ...s.ui, inspector } };
     });
+  },
+
+  pushToast(toast) {
+    set((s) => ({ toasts: [...s.toasts, { ...toast, id: toastId(toast) }] }));
+  },
+
+  reportRpcError(method, err) {
+    const detail = err instanceof RpcError ? err.message : err instanceof Error ? err.message : String(err);
+    get().pushToast({ kind: "error", paneId: "", title: `${method} failed`, detail });
   },
 
   focusWorkspace(id) {
@@ -227,7 +248,7 @@ export const useApp = create<AppState>((set, get) => ({
         focusedTabId: ws?.active_tab_id ?? session.focusedTabId,
       },
     });
-    rpc("workspace.focus", { workspace_id: id }).catch(() => {});
+    rpc("workspace.focus", { workspace_id: id }).catch((err) => get().reportRpcError("workspace.focus", err));
   },
 
   focusTab(id) {
@@ -240,7 +261,7 @@ export const useApp = create<AppState>((set, get) => ({
         focusedWorkspaceId: tab?.workspace_id ?? session.focusedWorkspaceId,
       },
     });
-    rpc("tab.focus", { tab_id: id }).catch(() => {});
+    rpc("tab.focus", { tab_id: id }).catch((err) => get().reportRpcError("tab.focus", err));
   },
 
   focusPane(id) {
@@ -254,7 +275,7 @@ export const useApp = create<AppState>((set, get) => ({
         focusedWorkspaceId: pane?.workspace_id ?? session.focusedWorkspaceId,
       },
     });
-    rpc("pane.focus", { pane_id: id }).catch(() => {});
+    rpc("pane.focus", { pane_id: id }).catch((err) => get().reportRpcError("pane.focus", err));
   },
 
   markSeen(paneId) {

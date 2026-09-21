@@ -3,7 +3,7 @@ import { ExternalLink, RotateCw } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import type { PreviewDevice } from "../store/app.ts";
 import { basePath } from "../api/base.ts";
-import { fullScreenUrl, previewUrl } from "../preview/url.ts";
+import { previewTarget } from "../preview/url.ts";
 
 const DEVICES: { id: PreviewDevice; label: string }[] = [
   { id: "auto", label: "Auto" },
@@ -18,6 +18,15 @@ const DEVICES: { id: PreviewDevice; label: string }[] = [
  * own services) are hidden behind a toggle; the address bar edits the path
  * within the app; device widths mimic phones and tablets; full-screen opens the
  * app on its own hostname when a preview domain is configured.
+ *
+ * The trade-off in the two preview modes is a security one. Through the path
+ * proxy the previewed page is served from the Workbench's own origin, so
+ * without a sandbox an agent-written dev server could script this document,
+ * read its storage and POST to /api/rpc as the signed-in user. The iframe below
+ * therefore drops `allow-same-origin` in that mode, which costs the page its
+ * cookies, storage and same-origin fetches. Configure a preview domain and the
+ * page is loaded from its own origin instead, where the browser's own origin
+ * separation does the work and no sandbox is needed.
  */
 export function PreviewPanel() {
   const ports = useApp((s) => s.ports);
@@ -52,8 +61,9 @@ export function PreviewPanel() {
     );
   }
 
-  const src = previewUrl(base, port, path);
+  const src = previewTarget(port, path, previewDomain, base);
   const frameWidth = device === "auto" ? "100%" : `${device}px`;
+  const sandboxed = !previewDomain;
 
   return (
     <div className="prev">
@@ -75,7 +85,7 @@ export function PreviewPanel() {
         <button
           className="icon-btn"
           aria-label="Open full screen"
-          onClick={() => window.open(fullScreenUrl(port, path, previewDomain, base), "_blank", "noopener,noreferrer")}
+          onClick={() => window.open(previewTarget(port, path, previewDomain, base), "_blank", "noopener,noreferrer")}
         >
           <ExternalLink size={15} />
         </button>
@@ -94,6 +104,13 @@ export function PreviewPanel() {
         ))}
       </div>
 
+      {sandboxed && (
+        <p className="prev-note">
+          Sandboxed: this preview runs without cookies or storage because it shares the Workbench's origin. Set a preview
+          domain for full fidelity.
+        </p>
+      )}
+
       <div className={`prev-frame-wrap${device === "auto" ? " is-auto" : ""}`}>
         <iframe
           key={reloadKey}
@@ -101,6 +118,7 @@ export function PreviewPanel() {
           style={{ width: frameWidth }}
           src={src}
           title={`Preview on port ${port}`}
+          sandbox={sandboxed ? "allow-scripts allow-forms allow-popups allow-modals" : undefined}
         />
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useApp } from "../store/app.ts";
 import type { Resolved, Theme } from "../theme/useTheme.ts";
-import { rpc } from "../api/client.ts";
+import { actionCtx } from "../api/call.ts";
 import { runAction } from "../keys/actions.ts";
+import { feedGlobal } from "../keys/machine.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { TabBar } from "./TabBar.tsx";
 import { PaneGrid } from "./PaneGrid.tsx";
@@ -32,15 +33,22 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
 
   // ⌘/Ctrl+K opens the command palette from anywhere outside a terminal
   // (inside a terminal it is intercepted in the xterm key handler). Escape
-  // dismisses the palette.
+  // dismisses the palette. The same prefix layer the terminals use is armed
+  // from here too, so ⌃B bindings keep working once focus leaves a terminal —
+  // after prefix+q, say — as long as the keystroke is not going into a text
+  // field (xterm's helper textarea included; that cell handles its own keys).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
-        runAction("palette.all", { store: useApp, rpc });
-      } else if (e.key === "Escape" && useApp.getState().ui.palette) {
-        setUi({ palette: null });
+        runAction("palette.all", actionCtx());
+        return;
       }
+      if (e.key === "Escape" && useApp.getState().ui.palette) {
+        setUi({ palette: null });
+        return;
+      }
+      feedGlobal(e);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

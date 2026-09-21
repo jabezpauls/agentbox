@@ -1,4 +1,4 @@
-import type { rpc as rpcFn } from "../api/client.ts";
+import type { call as callFn } from "../api/call.ts";
 import type { useApp } from "../store/app.ts";
 import { agentsSorted, panesOf, paneTitle, tabsOf } from "../store/session.ts";
 
@@ -29,6 +29,7 @@ export type ActionId =
   | "tab.goto7"
   | "tab.goto8"
   | "tab.goto9"
+  | "pane.rename"
   | "workspace.new"
   | "workspace.rename"
   | "workspace.close"
@@ -45,7 +46,8 @@ export type ActionId =
 
 export interface ActionCtx {
   store: typeof useApp;
-  rpc: typeof rpcFn;
+  /** The toasting caller from api/call.ts: failures surface, never vanish. */
+  rpc: typeof callFn;
 }
 
 export interface Binding {
@@ -162,7 +164,7 @@ function closePane(ctx: ActionCtx, paneId: string): void {
   if (agent && BUSY.has(agent.agent_status)) {
     s.setUi({ dialog: { kind: "confirm.close-pane", paneId, title: paneTitle(s.session.panes[paneId], agent) } });
   } else {
-    ctx.rpc("pane.close", { pane_id: paneId }).catch(() => {});
+    void ctx.rpc("pane.close", { pane_id: paneId });
   }
 }
 
@@ -178,7 +180,7 @@ function closeTab(ctx: ActionCtx, tabId: string): void {
     const tab = s.session.tabs.find((t) => t.tab_id === tabId);
     s.setUi({ dialog: { kind: "confirm.close-tab", tabId, title: tab?.label ?? "tab" } });
   } else {
-    ctx.rpc("tab.close", { tab_id: tabId }).catch(() => {});
+    void ctx.rpc("tab.close", { tab_id: tabId });
   }
 }
 
@@ -198,11 +200,11 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
   const wid = session.focusedWorkspaceId;
 
   if (id in FOCUS_DIRECTION) {
-    rpc("pane.focus_direction", { direction: FOCUS_DIRECTION[id] }).catch(() => {});
+    void rpc("pane.focus_direction", { direction: FOCUS_DIRECTION[id] });
     return;
   }
   if (id in SWAP_DIRECTION) {
-    rpc("pane.swap", { direction: SWAP_DIRECTION[id] }).catch(() => {});
+    void rpc("pane.swap", { direction: SWAP_DIRECTION[id] });
     return;
   }
   if (id.startsWith("tab.goto")) {
@@ -212,7 +214,7 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
 
   switch (id) {
     case "tab.new":
-      if (wid) rpc("tab.create", { workspace_id: wid, focus: true }).catch(() => {});
+      if (wid) void rpc("tab.create", { workspace_id: wid, focus: true });
       break;
     case "tab.next":
       stepTab(ctx, 1);
@@ -224,16 +226,22 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
       if (tabId) closeTab(ctx, tabId);
       break;
     case "pane.splitRight":
-      if (paneId) rpc("pane.split", { direction: "right", target_pane_id: paneId, focus: true }).catch(() => {});
+      if (paneId) void rpc("pane.split", { direction: "right", target_pane_id: paneId, focus: true });
       break;
     case "pane.splitDown":
-      if (paneId) rpc("pane.split", { direction: "down", target_pane_id: paneId, focus: true }).catch(() => {});
+      if (paneId) void rpc("pane.split", { direction: "down", target_pane_id: paneId, focus: true });
       break;
     case "pane.zoom":
-      rpc("pane.zoom", { mode: "toggle" }).catch(() => {});
+      void rpc("pane.zoom", { mode: "toggle" });
       break;
     case "pane.close":
       if (paneId) closePane(ctx, paneId);
+      break;
+    case "pane.rename":
+      if (paneId) {
+        const pane = session.panes[paneId];
+        setUi({ dialog: { kind: "rename", target: "pane", id: paneId, label: pane?.label ?? "" } });
+      }
       break;
     case "workspace.new":
       setUi({ dialog: { kind: "workspace.new" } });
@@ -248,7 +256,12 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
       }
       break;
     case "workspace.close":
-      if (wid) rpc("workspace.close", { workspace_id: wid }).catch(() => {});
+      // Closing a workspace ends every agent in it, so it confirms like the
+      // pane and tab closers rather than firing on a single keystroke.
+      if (wid) {
+        const ws = session.workspaces.find((w) => w.workspace_id === wid);
+        setUi({ dialog: { kind: "confirm.close-workspace", workspaceId: wid, title: ws?.label ?? "workspace" } });
+      }
       break;
     case "palette.all":
       setUi({ palette: { mode: "all" } });

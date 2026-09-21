@@ -18,9 +18,8 @@ const NAMED: Record<string, string> = {
 
 function baseToken(key: string): string {
   if (key in NAMED) return NAMED[key]!;
-  // Single printable characters normalise to lower case so "N" and "n" match
-  // the same binding; shift is carried separately (see below).
-  if (key.length === 1) return key.toLowerCase();
+  // Everything else lower-cases, so "N" and "n" match the same binding and
+  // "F5"/"f5" agree; shift is carried separately (see below).
   return key.toLowerCase();
 }
 

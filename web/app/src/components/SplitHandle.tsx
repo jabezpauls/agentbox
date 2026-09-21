@@ -78,6 +78,14 @@ export function SplitHandle({ handle, split, area, containerRef, onCommit }: Pro
     setLivePct(null);
   };
 
+  // A cancelled pointer (a touch turned into a scroll, a lost capture) never
+  // sends pointerup, so without this the handle would stay "dragging" for good
+  // and the live offset would never be cleared.
+  const onPointerCancel = () => {
+    draggingRef.current = false;
+    setLivePct(null);
+  };
+
   const style: React.CSSProperties = vertical
     ? { left: `${boundaryPct}%`, top: `${handle.y}%`, height: `${handle.length}%` }
     : { top: `${boundaryPct}%`, left: `${handle.x}%`, width: `${handle.length}%` };
@@ -92,6 +100,7 @@ export function SplitHandle({ handle, split, area, containerRef, onCommit }: Pro
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       <span className="split-handle-grip" aria-hidden="true" />
     </div>

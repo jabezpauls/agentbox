@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -9,43 +9,30 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/700.css";
 import type { Resolved } from "../theme/useTheme.ts";
 import { useApp } from "../store/app.ts";
-import { rpc } from "../api/client.ts";
+import { actionCtx } from "../api/call.ts";
 import { comboFromEvent } from "../keys/combo.ts";
-import { PrefixMachine } from "../keys/prefix.ts";
-import { DEFAULT_BINDINGS, runAction } from "../keys/actions.ts";
-import { TerminalSocket } from "./stream.ts";
+import { runAction } from "../keys/actions.ts";
+import { machine, reflectHud } from "../keys/machine.ts";
+import { TerminalSocket, type ConnState } from "./stream.ts";
 import { terminalTheme } from "./themes.ts";
-
-// One prefix machine for the whole app: arming is global, so a prefix pressed
-// in one pane and its follow-up (even after focus moves) resolve together, and
-// the HUD reflects a single armed state.
-const machine = new PrefixMachine("ctrl+b", DEFAULT_BINDINGS);
-let hudTimer: ReturnType<typeof setTimeout> | null = null;
-
-function reflectHud(): void {
-  const { ui, setUi } = useApp.getState();
-  if (ui.prefixArmed !== machine.armed) setUi({ prefixArmed: machine.armed });
-  if (hudTimer) clearTimeout(hudTimer);
-  if (machine.armed) {
-    // Clear the pill if the armed prefix simply times out with no follow-up.
-    hudTimer = setTimeout(() => {
-      if (!machine.armed && useApp.getState().ui.prefixArmed) useApp.getState().setUi({ prefixArmed: false });
-    }, 3100);
-  }
-}
+import { registerTerminal } from "./registry.ts";
 
 interface Props {
   paneId: string;
   resolved: Resolved;
 }
 
+const NOTICE: Partial<Record<ConnState, string>> = {
+  reconnecting: "Reconnecting…",
+  lost: "Disconnected",
+};
+
 export function TerminalCell({ paneId, resolved }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const socketRef = useRef<TerminalSocket | null>(null);
-  // Keep the latest resolved theme reachable from the mount-once effect.
-  const resolvedRef = useRef(resolved);
-  resolvedRef.current = resolved;
+  const [conn, setConn] = useState<ConnState>("connecting");
+  const [gone, setGone] = useState<string | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -58,7 +45,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
       fontSize: 13,
       lineHeight: 1.2,
       cursorBlink: true,
-      theme: terminalTheme(resolvedRef.current),
+      theme: terminalTheme(),
     });
     termRef.current = term;
 
@@ -74,6 +61,8 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // WebGL unavailable (headless, blocklisted GPU): xterm's DOM renderer
       // stays in place, which is correct, just slower.
     }
+
+    const unregister = registerTerminal(paneId, () => term.focus());
 
     let disposed = false;
     let socket: TerminalSocket | null = null;
@@ -106,7 +95,13 @@ export function TerminalCell({ paneId, resolved }: Props) {
       socket = new TerminalSocket(paneId, { cols: term.cols, rows: term.rows });
       socketRef.current = socket;
       socket.onData((bytes) => term.write(bytes));
-      socket.onClose((reason) => term.write(`\r\n\x1b[2m[${reason}]\x1b[0m\r\n`));
+      socket.onState(setConn);
+      socket.onGone(setGone);
+      // Another viewer resized or focused this pane: herdr's geometry is
+      // authoritative for everyone attached, so follow it.
+      socket.onSize(({ cols, rows }) => {
+        if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+      });
 
       // Keystrokes: run the prefix layer first; anything it consumes is
       // swallowed from xterm (return false), so the terminal only sees input.
@@ -128,7 +123,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
         e.preventDefault();
         e.stopPropagation();
         if (r.passthrough) socket?.input(r.passthrough);
-        if (r.action) runAction(r.action, { store: useApp, rpc });
+        if (r.action) runAction(r.action, actionCtx());
         return false;
       });
       term.onData((d) => socket?.input(d)); // real input and pastes
@@ -151,6 +146,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      unregister();
       ro?.disconnect();
       host.removeEventListener("wheel", onWheel);
       host.removeEventListener("mouseup", onMouseUp);
@@ -163,13 +159,29 @@ export function TerminalCell({ paneId, resolved }: Props) {
     // Mount once per pane; theme changes are handled by the effect below.
   }, [paneId]);
 
-  // Re-theme live terminals when the app theme switches.
+  // Re-theme live terminals when the app theme switches. `resolved` is the
+  // trigger; the colours themselves come from the tokens now on :root.
   useEffect(() => {
     const term = termRef.current;
-    if (term) term.options.theme = terminalTheme(resolved);
+    if (term) term.options.theme = terminalTheme();
   }, [resolved]);
 
-  return <div className="term-host" ref={hostRef} />;
+  const notice = gone ?? NOTICE[conn] ?? null;
+
+  return (
+    <div className="term-host" ref={hostRef}>
+      {notice && (
+        <div className="term-notice" role="status">
+          <span className="term-notice-text">{notice}</span>
+          {conn === "lost" && !gone && (
+            <button className="btn btn-small" onClick={() => socketRef.current?.retry()}>
+              Reconnect
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** localhost links open the inspector's preview; everything else opens a tab. */

@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store/app.ts";
-import { rpc } from "../api/client.ts";
+import { actionCtx } from "../api/call.ts";
 import { agentsSorted, paneTitle, tabsOf, type Session } from "../store/session.ts";
 import { runAction, type ActionId } from "../keys/actions.ts";
 import { searchItems, type PaletteItem } from "../palette/search.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
-
-const ctx = () => ({ store: useApp, rpc });
 
 /** The standing action list (id + label), independent of the session. */
 const ACTIONS: { id: ActionId; label: string }[] = [
@@ -17,7 +15,9 @@ const ACTIONS: { id: ActionId; label: string }[] = [
   { id: "pane.splitDown", label: "Split down" },
   { id: "pane.zoom", label: "Zoom pane" },
   { id: "pane.close", label: "Close pane" },
+  { id: "pane.rename", label: "Rename pane" },
   { id: "tab.close", label: "Close tab" },
+  { id: "workspace.rename", label: "Rename workspace" },
   { id: "workspace.close", label: "Close workspace" },
   { id: "agent.nextBlocked", label: "Next blocked agent" },
   { id: "sidebar.toggle", label: "Toggle sidebar" },
@@ -73,7 +73,7 @@ function buildItems(session: Session, mode: string, query: string): PaletteItem[
     });
   }
   for (const a of ACTIONS) {
-    items.push({ id: `action:${a.id}`, kind: "action", label: a.label, run: () => runAction(a.id, ctx()) });
+    items.push({ id: `action:${a.id}`, kind: "action", label: a.label, run: () => runAction(a.id, actionCtx()) });
   }
   // "Open preview on port N" when the query mentions a number.
   const m = query.match(/\d{2,5}/);
@@ -157,6 +157,9 @@ export function CommandPalette() {
     } else if (e.key === "Escape") {
       e.preventDefault();
       close();
+    } else if (e.key === "Tab") {
+      // The palette is a single focus stop: Tab must not walk behind the scrim.
+      e.preventDefault();
     }
   };
 
@@ -171,12 +174,17 @@ export function CommandPalette() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
           aria-label="Command palette query"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-list"
+          aria-activedescendant={results[active] ? `palette-opt-${active}` : undefined}
         />
-        <ul className="palette-list" role="listbox" ref={listRef}>
+        <ul className="palette-list" id="palette-list" role="listbox" aria-label="Results" ref={listRef}>
           {results.length === 0 && <li className="palette-empty">No matches</li>}
           {results.map((item, i) => (
             <li
               key={item.id}
+              id={`palette-opt-${i}`}
               data-i={i}
               role="option"
               aria-selected={i === active}

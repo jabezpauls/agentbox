@@ -21,7 +21,11 @@ export function Dialog({ title, onClose, onSubmit, submitLabel, submitDisabled, 
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Remember where focus came from and hand it back on close, so dismissing
+    // a dialog returns the keyboard to the control that opened it.
+    const invoker = document.activeElement as HTMLElement | null;
     ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    return () => invoker?.focus?.();
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -30,7 +34,11 @@ export function Dialog({ title, onClose, onSubmit, submitLabel, submitDisabled, 
       onClose();
       return;
     }
-    if (e.key === "Enter" && onSubmit && (e.target as HTMLElement).tagName !== "TEXTAREA" && !submitDisabled) {
+    // Enter submits — except in a textarea, and except on a button, which must
+    // be allowed to activate itself (the directory picker is all buttons, and
+    // stealing Enter here made it keyboard-inaccessible).
+    const tag = (e.target as HTMLElement).tagName;
+    if (e.key === "Enter" && onSubmit && tag !== "TEXTAREA" && tag !== "BUTTON" && !submitDisabled) {
       e.preventDefault();
       onSubmit();
       return;

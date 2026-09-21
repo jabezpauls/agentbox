@@ -728,6 +728,27 @@
 .term-host .xterm {
   height: 100%;
 }
+/* The reconnect banner floats over the terminal rather than replacing it: the
+   last frame herdr sent stays readable while the stream is being re-established. */
+.term-notice {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--overlay);
+  backdrop-filter: blur(var(--blur));
+  box-shadow: var(--shadow-sm);
+}
+.term-notice-text {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
 /* herdr renders the viewport server-side (scrollback: 0), so the local
    scrollbar is inert; hide it rather than show a dead track. */
 .term-host .xterm-viewport {
@@ -1025,6 +1046,10 @@
 .btn-danger {
   background: var(--st-blocked);
 }
+.btn-small {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-xs);
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1126,9 +1151,22 @@
   color: var(--text-3);
 }
 .dir-current {
+  display: block;
+  width: 100%;
   margin: var(--sp-1) 0 0;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
   font-size: var(--fs-xs);
   color: var(--text-3);
+  text-align: left;
+  cursor: pointer;
+}
+.dir-current:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
 }
 .dir-current code {
   font-family: var(--font-mono);
@@ -1235,6 +1273,12 @@
 }
 .toast.is-done {
   --st: var(--st-done);
+}
+.toast.is-error {
+  --st: var(--st-blocked);
+}
+.toast-body.is-static {
+  cursor: default;
 }
 .toast-icon {
   flex: none;
@@ -1525,6 +1569,13 @@
   background: var(--accent);
   color: var(--on-accent);
 }
+.prev-note {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
 .prev-frame-wrap {
   flex: 1;
   min-height: 0;
@@ -1540,7 +1591,7 @@
   height: 100%;
   min-height: 480px;
   border: 0;
-  background: #fff;
+  background: var(--frame-bg);
   box-shadow: var(--shadow-sm);
 }
 .prev-frame-wrap.is-auto .prev-frame {
@@ -1665,7 +1716,7 @@
   flex: 1;
   min-height: 0;
   border: 0;
-  background: #fff;
+  background: var(--frame-bg);
 }
 
 @media (max-width: 900px) {

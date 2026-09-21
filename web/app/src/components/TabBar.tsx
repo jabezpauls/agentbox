@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal, PanelLeftOpen, PanelRight, Pencil, Plus, X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
-import { rpc } from "../api/client.ts";
+import { call } from "../api/call.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 interface Props {
@@ -66,17 +66,17 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
     const label = draft.trim();
     const current = tabs.find((t) => t.tab_id === editing);
     if (label && current && label !== current.label) {
-      rpc("tab.rename", { tab_id: editing, label }).catch(() => {});
+      void call("tab.rename", { tab_id: editing, label });
     }
     setEditing(null);
   };
 
   const newTab = () => {
-    if (wid) rpc("tab.create", { workspace_id: wid }).catch(() => {});
+    if (wid) void call("tab.create", { workspace_id: wid });
   };
 
   const closeTab = (tabId: string) => {
-    rpc("tab.close", { tab_id: tabId }).catch(() => {});
+    void call("tab.close", { tab_id: tabId });
     setMenu(null);
   };
 

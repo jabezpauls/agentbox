@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../../store/app.ts";
-import { rpc } from "../../api/client.ts";
+import { call } from "../../api/call.ts";
 import { Dialog } from "./Dialog.tsx";
 
 type Target = "workspace" | "tab" | "pane";
@@ -30,7 +30,7 @@ export function RenameDialog() {
   const submit = () => {
     const label = value.trim();
     const { method, key } = METHOD[target];
-    if (label) rpc(method, { [key]: id, label }).catch(() => {});
+    if (label) void call(method, { [key]: id, label });
     close();
   };
 

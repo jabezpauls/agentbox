@@ -1,12 +1,16 @@
 import type { AgentStatus } from "@workbench/shared";
 import { paneTitle, type Session } from "./store/session.ts";
 
-export type ToastKind = "blocked" | "done";
+/** `error` carries an RPC failure; the others are agent state transitions. */
+export type ToastKind = "blocked" | "done" | "error";
 
 export interface Toast {
   kind: ToastKind;
+  /** The pane a click should focus; empty for toasts with no pane. */
   paneId: string;
   title: string;
+  /** Secondary line — the server's message on an error toast. */
+  detail?: string;
 }
 
 export interface NotifyOpts {

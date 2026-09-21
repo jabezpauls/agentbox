@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Columns2, MoreHorizontal, Pencil, Rows2, Maximize2, X } from "lucide-react";
 import type { PaneInfo } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
-import { rpc } from "../api/client.ts";
+import { call } from "../api/call.ts";
 import { paneTitle } from "../store/session.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
@@ -28,6 +28,7 @@ export function PaneHeader({ pane }: Props) {
   const [draft, setDraft] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   const title = paneTitle(pane, agent);
   const cwd = pane.foreground_cwd ?? pane.cwd ?? "";
@@ -47,16 +48,38 @@ export function PaneHeader({ pane }: Props) {
     return () => window.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
+  // Same menu model as the tab bar's: focus moves into the menu on open and
+  // back to its trigger on close, with arrows to walk it and Escape to leave.
+  useEffect(() => {
+    if (menuOpen) menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    else menuBtnRef.current?.focus();
+  }, [menuOpen]);
+
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMenuOpen(false);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      items[(i + 1) % items.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      items[(i - 1 + items.length) % items.length]?.focus();
+    }
+  };
+
   const split = (direction: "right" | "down") => {
-    rpc("pane.split", { direction, target_pane_id: pane.pane_id, focus: true }).catch(() => {});
+    void call("pane.split", { direction, target_pane_id: pane.pane_id, focus: true });
     setMenuOpen(false);
   };
   const zoom = () => {
-    rpc("pane.zoom", { mode: "toggle", pane_id: pane.pane_id }).catch(() => {});
+    void call("pane.zoom", { mode: "toggle", pane_id: pane.pane_id });
     setMenuOpen(false);
   };
   const close = () => {
-    rpc("pane.close", { pane_id: pane.pane_id }).catch(() => {});
+    void call("pane.close", { pane_id: pane.pane_id });
     setMenuOpen(false);
   };
   const startRename = () => {
@@ -66,7 +89,7 @@ export function PaneHeader({ pane }: Props) {
   };
   const commitRename = () => {
     const label = draft.trim();
-    if (label && label !== pane.label) rpc("pane.rename", { pane_id: pane.pane_id, label }).catch(() => {});
+    if (label && label !== pane.label) void call("pane.rename", { pane_id: pane.pane_id, label });
     setEditing(false);
   };
 
@@ -98,10 +121,12 @@ export function PaneHeader({ pane }: Props) {
       )}
 
       <button
+        ref={menuBtnRef}
         className="pane-menu-btn"
         aria-label={`Pane actions for ${title}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
+        aria-controls={menuOpen ? menuId : undefined}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setMenuOpen((v) => !v)}
       >
@@ -109,7 +134,7 @@ export function PaneHeader({ pane }: Props) {
       </button>
 
       {menuOpen && (
-        <div className="ctx-menu pane-ctx" role="menu" id={menuId} ref={menuRef}>
+        <div className="ctx-menu pane-ctx" role="menu" id={menuId} ref={menuRef} onKeyDown={onMenuKeyDown}>
           <button className="ctx-item" role="menuitem" onClick={() => split("right")}>
             <Columns2 size={14} /> Split right
           </button>

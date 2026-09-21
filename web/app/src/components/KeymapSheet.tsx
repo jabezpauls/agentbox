@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { BINDINGS, type Binding } from "../keys/actions.ts";
@@ -13,6 +13,13 @@ const GROUPS: Binding["group"][] = ["Panes", "Tabs", "Workspaces", "View"];
 export function KeymapSheet() {
   const isOpen = useApp((s) => s.ui.dialog?.kind === "keymap");
   const setUi = useApp((s) => s.setUi);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // Take focus on open so the sheet is reachable (and dismissible) by keyboard
+  // straight away, instead of leaving focus behind the scrim.
+  useEffect(() => {
+    if (isOpen) closeRef.current?.focus();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -46,7 +53,7 @@ export function KeymapSheet() {
               Press <kbd className="kbd">⌃B</kbd> to arm the prefix, then a key. Twice sends a literal ⌃B.
             </p>
           </div>
-          <button className="icon-btn" onClick={close} aria-label="Close">
+          <button ref={closeRef} className="icon-btn" onClick={close} aria-label="Close">
             <X size={16} />
           </button>
         </header>
