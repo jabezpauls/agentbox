@@ -7,8 +7,11 @@
 # docker-compose.behind-proxy.yml) rather than here.
 
 x-sandbox: &sandbox
+  # The context is the repository root, not images/workspace: the Dockerfile's
+  # first stage compiles the Workbench out of web/ so the image carries it.
   build:
-    context: ./images/workspace
+    context: .
+    dockerfile: images/workspace/Dockerfile
     args:
       NODE_MAJOR: "22"
   image: agentbox/workspace:latest
@@ -85,6 +88,60 @@ services:
     depends_on:
       - code
 
+  # The Workbench: a browser client for herdr — agents, live terminals,
+  # previews of the servers they start, and lavish review sessions. Shares the
+  # editor's network and process namespaces, so it sees the same localhost
+  # ports and the same process table.
+  workbench:
+    <<: *sandbox
+    command: ["agentbox-workbench"]
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
+    # `environment` is a mapping, so the anchor's copy is replaced rather than
+    # merged: every key this service needs is restated here.
+    environment:
+      TZ: ${TZ:-UTC}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Blank means path previews only; set it and each port also gets its own
+      # hostname, which is a separate origin and needs no iframe sandbox.
+      WORKBENCH_PREVIEW_DOMAIN: ${AGENTBOX_PREVIEW_DOMAIN:-}
+      WORKBENCH_LAVISH_URL: ${AGENTBOX_LAVISH_URL:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7800/workbench/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Review surface for agent-written HTML. lavish-axi cannot be served under a
+  # path prefix, so it needs its own hostname; see docs/workbench.md.
+  lavish:
+    <<: *sandbox
+    command: ["lavish-axi", "server"]
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
+    environment:
+      TZ: ${TZ:-UTC}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # The session outlives the browser tab that opened it.
+      LAVISH_AXI_IDLE_TIMEOUT_MS: "0"
+      LAVISH_AXI_ALLOWED_HOSTS: ${AGENTBOX_LAVISH_DOMAIN:-}
+      LAVISH_AXI_LINK_HOST: ${AGENTBOX_LAVISH_DOMAIN:-}
+    healthcheck:
+      # lavish-axi serves its own routes; a TCP connect is the check that does
+      # not depend on which path happens to answer.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/4387"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -98,6 +155,9 @@ services:
       AGENTBOX_DOMAIN: ${AGENTBOX_DOMAIN:-localhost}
       AGENTBOX_USER: ${AGENTBOX_USER:-admin}
       AGENTBOX_PASSWORD_HASH: ${AGENTBOX_PASSWORD_HASH:?run install.sh to generate a password hash}
+      # Always defined so the Caddyfile's placeholders resolve; when it is
+      # empty the preview hostname rules can never match anything.
+      AGENTBOX_PREVIEW_DOMAIN: ${AGENTBOX_PREVIEW_DOMAIN:-}
     volumes:
       - caddy_data:/data
       - caddy_config:/config

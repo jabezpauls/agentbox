@@ -1,0 +1,17 @@
+# The build context is the repository root so the Dockerfile can compile the
+# web workspace. Everything the image does not need stays out of the context,
+# which keeps the build fast and stops a stale local dist or node_modules from
+# being copied in over the ones the build stage produces.
+.git
+.github
+.superpowers
+docs
+*.md
+!images/workspace/welcome.md
+.env
+node_modules
+**/node_modules
+**/dist
+proxy
+docker-compose*.yml
+install.sh

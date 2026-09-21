@@ -1,12 +1,28 @@
-# The sandbox image: an editor, a shell, a process monitor, and the coding
-# agents — all runnable as an unprivileged user.
+# The sandbox image: an editor, a shell, a process monitor, the Workbench, and
+# the coding agents — all runnable as an unprivileged user.
+#
+# Built from the repository root (see docker-compose.yml) so the web workspace
+# can be compiled here: one image carries everything, and an update is a single
+# rebuild rather than a separate artefact to keep in step.
+
+# The Workbench: its React app and the bridge that serves it, compiled once and
+# copied into the sandbox image below. Nothing from this stage but the build
+# output survives, so Node's build tooling never ships.
+FROM node:22-bookworm-slim AS web
+WORKDIR /src
+COPY web/package.json web/package-lock.json ./
+COPY web/shared/package.json shared/
+COPY web/bridge/package.json bridge/
+COPY web/app/package.json app/
+RUN npm ci
+COPY web/ .
+RUN npm run build && npm prune --omit=dev
+
 FROM debian:bookworm-slim
 
 ARG NODE_MAJOR=22
 # ttyd is not packaged by Debian; pin the upstream static build.
 ARG TTYD_VERSION=1.7.7
-# herdr keeps agent panes alive in a background server; pin and checksum it too.
-ARG HERDR_VERSION=0.9.1
 # Set to "false" to build without the coding agents (smaller image).
 ARG INSTALL_AGENTS=true
 
@@ -56,19 +72,11 @@ RUN arch="$(dpkg --print-architecture)" \
     && ttyd --version
 
 # herdr keeps agent panes alive in a background server; the Workbench and the
-# full-screen terminal are both clients of it. Pinned and checksum-verified.
-# Release assets are plain static binaries, not archives.
-RUN arch="$(dpkg --print-architecture)" \
-    && case "$arch" in \
-         amd64) herdr_asset=herdr-linux-x86_64; herdr_sha=2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7 ;; \
-         arm64) herdr_asset=herdr-linux-aarch64; herdr_sha=f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e ;; \
-         *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
-       esac \
-    && curl -fsSL -o /usr/local/bin/herdr \
-         "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/${herdr_asset}" \
-    && echo "${herdr_sha}  /usr/local/bin/herdr" | sha256sum -c - \
-    && chmod 0755 /usr/local/bin/herdr \
-    && herdr --version
+# full-screen terminal are both clients of it. The version and its checksums
+# live in the install script, which CI runs too, so the image and the
+# end-to-end tests cannot drift onto different herdr releases.
+COPY scripts/install-herdr.sh /tmp/install-herdr.sh
+RUN sh /tmp/install-herdr.sh /usr/local/bin && rm -f /tmp/install-herdr.sh
 
 # Node, for the agent CLIs and most workspace tooling.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
@@ -119,8 +127,16 @@ WORKDIR /workspace
 RUN code-server --install-extension anthropic.claude-code \
     || echo "note: Claude Code editor extension unavailable; use the CLI or /terminal"
 
-COPY --chown=1000:1000 entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chown=1000:1000 welcome.md /home/coder/welcome.md
+# The Workbench, from the build stage above. `npm prune --omit=dev` left the
+# workspace's node_modules hoisted at the root, so the bridge's dependencies
+# come from there.
+COPY --from=web /src/bridge/dist /usr/local/lib/agentbox-workbench/bridge
+COPY --from=web /src/node_modules /usr/local/lib/agentbox-workbench/node_modules
+COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
+
+COPY --chown=1000:1000 images/workspace/agentbox-workbench /usr/local/bin/agentbox-workbench
+COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["code-server", "--bind-addr=0.0.0.0:8080", "--auth=none", "/workspace"]

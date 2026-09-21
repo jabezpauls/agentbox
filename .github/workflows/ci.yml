@@ -14,7 +14,8 @@ jobs:
       - name: Check shell scripts
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck install.sh scripts/agentbox images/workspace/entrypoint.sh
+          shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
+            images/workspace/entrypoint.sh images/workspace/agentbox-workbench
 
       - name: Validate Compose files
         run: |
@@ -24,6 +25,8 @@ jobs:
           sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholderplaceholderplaceholderplaceholder|' .env
           for mode in standalone behind-proxy; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
+            docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" \
+              -f docker-compose.previews.yml config -q
           done
 
   proxy-config:
@@ -34,13 +37,22 @@ jobs:
         # Compose validation cannot catch a malformed Caddyfile; an undefined
         # snippet or a renamed directive only fails when the proxy starts.
         run: |
-          for f in proxy/Caddyfile.standalone proxy/Caddyfile.behind-proxy; do
-            docker run --rm -v "$PWD/proxy:/p:ro" \
+          # A real bcrypt-shaped hash: basic_auth rejects anything else, so a
+          # literal "placeholder" fails validation rather than standing in.
+          hash='$2a$14$abcdefghijklmnopqrstuuKO0DUaDUZ9L.Qq0OZ9nZ5tQmZ6q1pO'
+          validate() {
+            docker run --rm -v "$PWD/proxy:/p:ro" "$@" \
               -e AGENTBOX_DOMAIN=example.com \
               -e AGENTBOX_USER=ci \
-              -e AGENTBOX_PASSWORD_HASH='placeholder' \
-              caddy:2-alpine caddy validate --adapter caddyfile \
-              --config "/p/$(basename "$f")"
+              -e AGENTBOX_PASSWORD_HASH="$hash" \
+              caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+          }
+          # Without a preview domain, and with one plus the previews file
+          # mounted the way docker-compose.previews.yml mounts it.
+          for file in Caddyfile.standalone Caddyfile.behind-proxy; do
+            validate -e AGENTBOX_PREVIEW_DOMAIN=
+            validate -e AGENTBOX_PREVIEW_DOMAIN=preview.example.com \
+              -v "$PWD/proxy/Caddyfile.previews:/etc/caddy/previews/previews.caddyfile:ro"
           done
 
   build:
@@ -48,7 +60,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the sandbox image
-        run: docker build -t agentbox/workspace:ci images/workspace
+        # The context is the repository root: the Dockerfile's first stage
+        # compiles the Workbench out of web/.
+        run: docker build -t agentbox/workspace:ci -f images/workspace/Dockerfile .
       - name: The agents must actually be present
         run: |
-          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v lavish-axi'
+          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v lavish-axi && command -v agentbox-workbench'
+      - name: The Workbench bridge must actually run
+        run: |
+          docker run --rm agentbox/workspace:ci \
+            node /usr/local/lib/agentbox-workbench/bridge/bridge/src/main.js --help

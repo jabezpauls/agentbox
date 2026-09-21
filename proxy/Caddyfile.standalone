@@ -2,6 +2,28 @@
 # request before it reaches the sandbox.
 {
 	admin off
+
+	# Certificates for hostnames that are not known at start-up: the preview
+	# wildcard's PORT.<preview-domain> names. Caddy asks the gate below before
+	# it will issue one, so an attacker pointing any DNS name at this box
+	# cannot make it mint certificates on demand.
+	on_demand_tls {
+		ask http://localhost:9444/ask
+	}
+}
+
+# The on-demand gate. Answers 200 only for a numeric preview subdomain, and 404
+# for everything else, which is what stops unbounded issuance. Bound to
+# loopback inside the proxy container, so nothing outside can reach it.
+:9444 {
+	# The suffix is compared literally rather than folded into the regular
+	# expression, where the domain's own dots would have matched any character
+	# and let a lookalike name through.
+	@allowed expression {query.domain}.matches("^[0-9]{1,5}[.]") && {query.domain}.endsWith(".{$AGENTBOX_PREVIEW_DOMAIN}")
+	handle @allowed {
+		respond 200
+	}
+	respond 404
 }
 
 # Shared routing, defined before use: Caddy resolves snippets in file order.
@@ -10,6 +32,12 @@
 	# agents as a TUI. Shares the editor's network namespace.
 	handle /terminal* {
 		reverse_proxy code:7681
+	}
+
+	# The Workbench: the browser client for herdr, served under its own base
+	# path (the app is built with that prefix, so no rewriting is needed).
+	handle /workbench* {
+		reverse_proxy code:7800
 	}
 
 	# Live CPU, memory and process usage for the sandbox.
@@ -38,3 +66,19 @@
 
 	import routes
 }
+
+# lavish-axi renders agent-written HTML for review. It cannot be served under a
+# path prefix, so it gets a hostname of its own. Same login as everything else.
+lavish.{$AGENTBOX_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
+	}
+
+	reverse_proxy code:4387
+}
+
+# Optional per-port preview hostnames, mounted only when a preview domain is
+# configured (see docker-compose.previews.yml). Each file here is a site block.
+import /etc/caddy/previews/*

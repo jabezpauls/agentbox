@@ -14,6 +14,12 @@
 		reverse_proxy code:7681
 	}
 
+	# The Workbench: the browser client for herdr, served under its own base
+	# path (the app is built with that prefix, so no rewriting is needed).
+	handle /workbench* {
+		reverse_proxy code:7800
+	}
+
 	# Live CPU, memory and process usage for the sandbox.
 	handle /monitor* {
 		reverse_proxy code:7682
@@ -36,6 +42,28 @@
 
 	basic_auth {
 		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
+	}
+
+	# Separate hostnames arrive on the same listener here, because the fronting
+	# proxy terminates TLS for all of them and forwards to this one port. They
+	# are matched by Host rather than split into their own site blocks.
+
+	# lavish-axi cannot be served under a path prefix, so it has a hostname.
+	@lavish host lavish.{$AGENTBOX_DOMAIN}
+	handle @lavish {
+		reverse_proxy code:4387
+	}
+
+	# PORT.<preview-domain>: the port is taken from the hostname and the
+	# request is rewritten onto the bridge's preview proxy. Only numeric
+	# subdomains match, so nothing else on the preview domain is reachable.
+	@preview {
+		host *.{$AGENTBOX_PREVIEW_DOMAIN}
+		header_regexp port Host ^([0-9]{1,5})\.
+	}
+	handle @preview {
+		rewrite * /workbench/preview/{re.port.1}{uri}
+		reverse_proxy code:7800
 	}
 
 	import routes

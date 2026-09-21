@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Start the Workbench bridge against the sandbox's herdr server.
+#
+# The bridge serves the compiled React app itself, so this is the whole
+# service: one process, no separate static file server.
+set -euo pipefail
+export WORKBENCH_STATIC_DIR="${WORKBENCH_STATIC_DIR:-/usr/local/lib/agentbox-workbench/app}"
+exec node /usr/local/lib/agentbox-workbench/bridge/bridge/src/main.js "$@"

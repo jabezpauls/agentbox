@@ -1,0 +1,15 @@
+# Optional add-on, independent of the mode overlay: serve each listening port
+# on its own hostname, PORT.<AGENTBOX_PREVIEW_DOMAIN>. A preview on its own
+# origin gets its cookies, storage and same-origin requests back, which the
+# sandboxed path preview cannot offer.
+#
+# Requires a wildcard DNS record for *.<preview domain>. In standalone mode
+# Caddy issues the certificates on demand; behind a proxy, that proxy needs the
+# wildcard certificate and forwards those hostnames to AGENTBOX_BIND.
+#
+# `scripts/agentbox` composes this in automatically when AGENTBOX_PREVIEW_DOMAIN
+# is set in .env.
+services:
+  proxy:
+    volumes:
+      - ./proxy/Caddyfile.previews:/etc/caddy/previews/previews.caddyfile:ro

@@ -6,6 +6,10 @@ cd "$(dirname "$0")/.."
 [ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
 MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
 DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
+# The per-port preview hostnames are an add-on to either mode; compose them in
+# whenever a preview domain is configured, so every command sees the same stack.
+PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
+[ -n "$PREVIEW_DOMAIN" ] && DC+=(-f docker-compose.previews.yml)
 
 case "${1:-help}" in
     start)   shift; "${DC[@]}" up -d "$@" ;;
@@ -13,7 +17,8 @@ case "${1:-help}" in
     restart) shift; "${DC[@]}" restart "$@" ;;
     status)  "${DC[@]}" ps ;;
     logs)    shift; "${DC[@]}" logs -f --tail=100 "$@" ;;
-    shell)   "${DC[@]}" exec code bash -l ;;
+    shell)     "${DC[@]}" exec code bash -l ;;
+    workbench) "${DC[@]}" logs -f --tail=100 workbench ;;
     update)
         git pull --ff-only
         "${DC[@]}" build --pull
@@ -58,6 +63,7 @@ agentbox <command>
 
   start | stop | restart | status | logs [service]
   shell                 a shell inside the sandbox
+  workbench             follow the Workbench bridge's logs
   update                pull, rebuild, restart
   password [new]        rotate the login password
   backup [file]         archive the workspace and home volumes

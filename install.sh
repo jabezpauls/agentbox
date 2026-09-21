@@ -17,6 +17,8 @@ USERNAME="admin"
 PASSWORD=""
 CPUS="2"
 MEMORY="4g"
+PREVIEW_DOMAIN=""
+LAVISH_DOMAIN=""
 ASSUME_YES="false"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -33,6 +35,9 @@ Usage: install.sh [options]
   --bind <addr:port>   behind-proxy listen address (default 127.0.0.1:8443)
   --user <name>        Login username (default admin)
   --password <pass>    Login password (default: generated and printed once)
+  --preview-domain <h> Serve each port at PORT.<h> (needs a wildcard DNS record)
+  --lavish-domain <h>  Hostname for lavish review sessions
+                       (default lavish.<domain>)
   --cpus <n>           CPU ceiling per service (default 2)
   --memory <size>      Memory ceiling per service (default 4g)
   --dir <path>         Install directory (default ~/agentbox)
@@ -48,6 +53,8 @@ while [ $# -gt 0 ]; do
         --bind)     BIND="${2:-}"; shift 2 ;;
         --user)     USERNAME="${2:-}"; shift 2 ;;
         --password) PASSWORD="${2:-}"; shift 2 ;;
+        --preview-domain) PREVIEW_DOMAIN="${2:-}"; shift 2 ;;
+        --lavish-domain)  LAVISH_DOMAIN="${2:-}"; shift 2 ;;
         --cpus)     CPUS="${2:-}"; shift 2 ;;
         --memory)   MEMORY="${2:-}"; shift 2 ;;
         --dir)      INSTALL_DIR="${2:-}"; shift 2 ;;
@@ -63,6 +70,10 @@ case "$MODE" in
 esac
 [ "$MODE" = "standalone" ] && [ -z "$DOMAIN" ] && die "--domain is required for standalone mode"
 [ -z "$DOMAIN" ] && DOMAIN="localhost"
+
+# lavish needs a hostname of its own; derive one from the main domain unless
+# told otherwise. It is always https: behind a proxy, that proxy terminates TLS.
+[ -z "$LAVISH_DOMAIN" ] && LAVISH_DOMAIN="lavish.$DOMAIN"
 
 # --- Docker -----------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
@@ -124,6 +135,9 @@ AGENTBOX_MODE=$MODE
 AGENTBOX_BIND=$BIND
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
+AGENTBOX_PREVIEW_DOMAIN=$PREVIEW_DOMAIN
+AGENTBOX_LAVISH_DOMAIN=$LAVISH_DOMAIN
+AGENTBOX_LAVISH_URL=https://$LAVISH_DOMAIN
 AGENTBOX_CPUS=$CPUS
 AGENTBOX_MEMORY=$MEMORY
 TZ=$(cat /etc/timezone 2>/dev/null || echo UTC)
@@ -133,10 +147,15 @@ ENVFILE
 chmod 600 .env
 
 # --- Launch -----------------------------------------------------------------
+# The preview overlay is an add-on, independent of the mode: it is composed in
+# only when a preview domain was configured.
+COMPOSE=(-f docker-compose.yml -f "docker-compose.$MODE.yml")
+[ -n "$PREVIEW_DOMAIN" ] && COMPOSE+=(-f docker-compose.previews.yml)
+
 log "Building the sandbox image (first run takes a few minutes)"
-docker compose -f docker-compose.yml -f "docker-compose.$MODE.yml" build
+docker compose "${COMPOSE[@]}" build
 log "Starting"
-docker compose -f docker-compose.yml -f "docker-compose.$MODE.yml" up -d
+docker compose "${COMPOSE[@]}" up -d
 
 printf '\n\033[1;32magentbox is up.\033[0m\n\n'
 if [ "$MODE" = "standalone" ]; then
@@ -155,4 +174,9 @@ elif [ "$KEPT" = "true" ]; then
 else
     printf '  Password  (the one you passed with --password)\n'
 fi
-printf '\n  Editor /   Terminal /terminal   Monitor /monitor\n\n'
+printf '\n  Editor /   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
+printf '  Lavish     https://%s\n' "$LAVISH_DOMAIN"
+if [ -n "$PREVIEW_DOMAIN" ]; then
+    printf '  Previews   https://PORT.%s  (needs a wildcard DNS record)\n' "$PREVIEW_DOMAIN"
+fi
+printf '\n'
