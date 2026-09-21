@@ -20,12 +20,42 @@ export interface DialogState { kind: string; [k: string]: unknown }
  * localhost link click writes here (Task 8); Task 10 renders the drawer and
  * adds device-width and lavish selection.
  */
+export type PreviewDevice = "auto" | 390 | 768 | 1024;
+
 export interface InspectorState {
   open: boolean;
   tab: InspectorTab;
   width: number;
   port: number | null;
   path: string;
+  device: PreviewDevice;
+  lavishKey: string | null;
+}
+
+const INSPECTOR_KEY = "workbench.inspector";
+
+// Remember the inspector's open state, width and tab across reloads.
+function readInspector(): Partial<InspectorState> {
+  try {
+    const raw = localStorage.getItem(INSPECTOR_KEY);
+    if (!raw) return {};
+    const v = JSON.parse(raw) as Partial<InspectorState>;
+    const out: Partial<InspectorState> = {};
+    if (typeof v.open === "boolean") out.open = v.open;
+    if (v.tab === "preview" || v.tab === "lavish") out.tab = v.tab;
+    if (typeof v.width === "number") out.width = v.width;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistInspector(i: InspectorState): void {
+  try {
+    localStorage.setItem(INSPECTOR_KEY, JSON.stringify({ open: i.open, tab: i.tab, width: i.width }));
+  } catch {
+    // Private mode or blocked storage; the choice holds for this session only.
+  }
 }
 
 export interface UiState {
@@ -95,9 +125,12 @@ function systemNotify(toasts: Toast[], focus: (paneId: string) => void): void {
 // shown first; on a wider screen it is a persistent column.
 const wideViewport = typeof window === "undefined" || window.innerWidth >= 900;
 
+// The inspector auto-opens on the first non-system port of a session, once.
+let previewAutoOpened = false;
+
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
-  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/" },
+  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/", device: "auto", lavishKey: null, ...readInspector() },
   palette: null,
   dialog: null,
   theme: "system",
@@ -137,9 +170,19 @@ export const useApp = create<AppState>((set, get) => ({
         syncTitle(next);
         break;
       }
-      case "ports":
+      case "ports": {
         set({ ports: m.ports });
+        // The first time a real (non-system) port appears while the inspector
+        // is closed, open it on that port — once per session.
+        if (!previewAutoOpened) {
+          const port = m.ports.find((p) => !p.system);
+          if (port && !get().ui.inspector.open) {
+            previewAutoOpened = true;
+            get().setInspector({ open: true, tab: "preview", port: port.port, path: "/" });
+          }
+        }
         break;
+      }
       case "reset": {
         // herdr reconnected: take a fresh snapshot rather than trust our mirror.
         getSession()
@@ -167,7 +210,11 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setInspector(partial) {
-    set((s) => ({ ui: { ...s.ui, inspector: { ...s.ui.inspector, ...partial } } }));
+    set((s) => {
+      const inspector = { ...s.ui.inspector, ...partial };
+      persistInspector(inspector);
+      return { ui: { ...s.ui, inspector } };
+    });
   },
 
   focusWorkspace(id) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, PanelLeftOpen, Pencil, Plus, X } from "lucide-react";
+import { MoreHorizontal, PanelLeftOpen, PanelRight, Pencil, Plus, X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
 import { rpc } from "../api/client.ts";
@@ -19,6 +19,8 @@ interface Menu {
 export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
   const session = useApp((s) => s.session);
   const focusTab = useApp((s) => s.focusTab);
+  const inspectorOpen = useApp((s) => s.ui.inspector.open);
+  const setInspector = useApp((s) => s.setInspector);
   const wid = session.focusedWorkspaceId;
   const tabs = wid ? tabsOf(session, wid) : [];
 
@@ -199,6 +201,16 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
           </button>
         )}
       </div>
+
+      <button
+        className={`icon-btn tabbar-inspector${inspectorOpen ? " is-active" : ""}`}
+        onClick={() => setInspector({ open: !inspectorOpen })}
+        title="Toggle inspector"
+        aria-label="Toggle inspector"
+        aria-pressed={inspectorOpen}
+      >
+        <PanelRight size={16} />
+      </button>
 
       {menu && (
         <div

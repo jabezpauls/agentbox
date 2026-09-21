@@ -9,6 +9,7 @@ import { PaneGrid } from "./PaneGrid.tsx";
 import { KeymapSheet } from "./KeymapSheet.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Composer } from "./Composer.tsx";
+import { Inspector } from "./Inspector.tsx";
 import { Toasts } from "./Toasts.tsx";
 import { NewWorkspaceDialog } from "./dialogs/NewWorkspaceDialog.tsx";
 import { RenameDialog } from "./dialogs/RenameDialog.tsx";
@@ -22,6 +23,8 @@ interface Props {
 
 export function Shell({ theme, resolved, onCycleTheme }: Props) {
   const sidebarOpen = useApp((s) => s.ui.sidebarOpen);
+  const inspectorOpen = useApp((s) => s.ui.inspector.open);
+  const inspectorWidth = useApp((s) => s.ui.inspector.width);
   const setUi = useApp((s) => s.setUi);
 
   const openSidebar = () => setUi({ sidebarOpen: true });
@@ -44,7 +47,12 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
   }, [setUi]);
 
   return (
-    <div className="shell" data-sidebar={sidebarOpen ? "open" : "closed"}>
+    <div
+      className="shell"
+      data-sidebar={sidebarOpen ? "open" : "closed"}
+      data-inspector={inspectorOpen ? "open" : "closed"}
+      style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
+    >
       {sidebarOpen && (
         <button
           className="sidebar-scrim"
@@ -62,6 +70,8 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
         <PaneGrid resolved={resolved} />
         <Composer />
       </main>
+
+      <Inspector />
 
       <KeymapSheet />
       <CommandPalette />
