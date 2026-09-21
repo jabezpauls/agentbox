@@ -25,6 +25,8 @@ export function registerApiRoutes(
     // the workspace root, and preview full-screen needs the preview domain.
     workspaceRoot: config.workspaceRoot,
     previewDomain: config.previewDomain,
+    // Whether the panel may offer a Share action; off hides it entirely.
+    previewSharing: config.previewSharing,
   }));
 
   app.get("/api/session", () => hub.snapshot());

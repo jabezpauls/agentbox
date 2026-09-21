@@ -84,4 +84,6 @@ export type AnnotatorMessage =
   | { source: "agentbox-review"; kind: "selection"; selector: string; text: string }
   | { source: "agentbox-review"; kind: "scrolled"; selector: string; ok: boolean };
 export interface DirEntry { name: string; path: string }
+/** A minted public preview share, as the owner's API returns it. */
+export interface PreviewShare { id: string; token: string; port: number; created: string; expires: string; url: string }
 export interface RpcRequest { method: string; params?: Record<string, unknown> }

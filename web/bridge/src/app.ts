@@ -11,7 +11,9 @@ import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
 import { registerPreviewRoutes } from "./routes/preview.js";
 import { registerReviewRoutes } from "./routes/review.js";
+import { registerPublicShareRoutes, registerShareApiRoutes } from "./routes/share.js";
 import { ReviewStore } from "./review/store.js";
+import { ShareStore } from "./share/store.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -31,6 +33,8 @@ export interface AppDeps {
   ports?: PortsWatcher;
   /** Review session store; defaults to one rooted at the configured directory. */
   review?: ReviewStore;
+  /** Public preview share store; defaults to one rooted at the configured dir. */
+  shares?: ShareStore;
   /** Terminal stream registry; defaults to one bound to herdr's socket. */
   streams?: TerminalStreams;
 }
@@ -45,13 +49,20 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   app.addHook("onClose", async () => streams.stop());
 
   const review = deps.review ?? new ReviewStore(config.reviewDir);
+  const shares = deps.shares ?? new ShareStore(config.sharesDir);
 
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
+
+  // The public share route lives at the server root, outside the base-path
+  // scope: Caddy's `handle /s/*` block carries no basic auth and reaches the
+  // bridge at `/s/…` directly, so it must not sit under `/workbench`.
+  registerPublicShareRoutes(app, config, shares);
 
   await app.register(
     async (scope) => {
       registerApiRoutes(scope, config, deps.hub, { ports: deps.ports });
       registerReviewRoutes(scope, config, review);
+      registerShareApiRoutes(scope, config, shares);
       registerEventsWs(scope, deps.hub, deps.ports);
       registerTerminalWs(scope, streams);
       await registerPreviewRoutes(scope, config);

@@ -4,6 +4,7 @@ import { SessionHub } from "./herdr/session.js";
 import { buildApp } from "./app.js";
 import { PortsWatcher } from "./ports.js";
 import { ensureReviewRoot } from "./review/store.js";
+import { ensureSharesRoot } from "./share/store.js";
 
 const USAGE = "Usage: workbench-bridge [--help]\n\nRuns the Workbench bridge server that proxies browser clients to herdr.";
 
@@ -32,6 +33,8 @@ async function main(argv: string[]): Promise<void> {
   // Review sessions persist on the home volume; make the root up front so the
   // first `agentbox-review open` is not also the first mkdir.
   ensureReviewRoot(config.reviewDir);
+  // Minted public share links persist here too, for the same reason.
+  ensureSharesRoot(config.sharesDir);
 
   const app = await buildApp(config, { hub, ports });
   await app.listen({ host: "0.0.0.0", port: config.port });
