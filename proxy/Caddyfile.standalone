@@ -66,8 +66,19 @@
 {$AGENTBOX_DOMAIN} {
 	encode zstd gzip
 
-	basic_auth {
+	# Every path but the public share prefix requires the login. `/s/<token>`
+	# is the one route meant to be opened by anyone the owner hands the link
+	# to, so it is deliberately excluded from authentication here.
+	@protected not path /s/*
+	basic_auth @protected {
 		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
+	}
+
+	# Public preview shares, forwarded to the bridge with no auth. The bridge
+	# resolves the token to a loopback port and 404s an unknown, expired or
+	# revoked one; it is a fixed proxy to one mapped port, never a general one.
+	handle /s/* {
+		reverse_proxy code:7800
 	}
 
 	import routes

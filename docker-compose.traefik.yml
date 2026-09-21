@@ -47,6 +47,22 @@ services:
       - traefik.http.middlewares.agentbox-headers.headers.stsincludesubdomains=false
       - traefik.http.middlewares.agentbox-headers.headers.referrerpolicy=no-referrer
       - traefik.http.middlewares.agentbox-headers.headers.contenttypenosniff=true
+      # Public preview shares (/s/<token>) are the one unauthenticated path, so
+      # they get their own rate limit rather than sharing the login's. Same
+      # ceiling and client-IP criterion — well above a real viewer loading a
+      # dev server's assets, ruinous to anyone probing tokens. A higher-priority
+      # router carries it; it reuses the same backend service.
+      - traefik.http.routers.agentbox-shares.rule=Host(`${AGENTBOX_DOMAIN}`) && PathPrefix(`/s/`)
+      - traefik.http.routers.agentbox-shares.priority=100
+      - traefik.http.routers.agentbox-shares.entrypoints=websecure
+      - traefik.http.routers.agentbox-shares.tls=true
+      - traefik.http.routers.agentbox-shares.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.agentbox-shares.service=agentbox
+      - traefik.http.routers.agentbox-shares.middlewares=agentbox-shares-ratelimit,agentbox-headers
+      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.average=60
+      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.burst=120
+      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.period=1s
+      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.sourcecriterion.requestheadername=${AGENTBOX_CLIENT_IP_HEADER:-CF-Connecting-IP}
 
 networks:
   edge:

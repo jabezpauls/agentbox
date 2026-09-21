@@ -115,6 +115,9 @@ services:
       # Blank means path previews only; set it and each port also gets its own
       # hostname, which is a separate origin and needs no iframe sandbox.
       WORKBENCH_PREVIEW_DOMAIN: ${AGENTBOX_PREVIEW_DOMAIN:-}
+      # `path` (default) allows opt-in public shares under /s/<token>; `off`
+      # refuses to mint or serve them and hides the panel's Share action.
+      WORKBENCH_PREVIEW_MODE: ${AGENTBOX_PREVIEW_MODE:-path}
       # Only used to print a clickable link from `agentbox-review open`; unset,
       # the bridge falls back to whatever Host the request arrived with.
       WORKBENCH_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
