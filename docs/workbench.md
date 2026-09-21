@@ -17,8 +17,9 @@ are two views of one session rather than two sessions.
 Everything it shows comes from herdr over a local socket. The bridge that
 serves the app holds one connection to herdr and fans its events out to every
 open tab, so two browsers, a phone and the TUI all stay in step. Nothing is
-stored in the browser except your theme and the inspector's own shape — whether
-it is open, which tab it shows and how wide it is.
+stored in the browser except your theme, the sidebar's width and the
+inspector's own shape — whether it is open, which tab it shows and how wide it
+is.
 
 ![The Workbench in dark mode](images/workbench-dark.png)
 
@@ -26,15 +27,17 @@ it is open, which tab it shows and how wide it is.
 
 - **Sidebar** — workspaces, their tabs, and a flat list of every agent with its
   status. A workspace rolls up the worst status inside it, so a blocked agent
-  is visible without expanding anything. `prefix+b` hides it.
+  is visible without expanding anything. `prefix+b` or `⌘B` hides it, and the
+  edge between it and the grid can be dragged to resize it.
 - **Tab bar** — the tabs of the focused workspace. Rename in place with `F2`,
   close with `Delete`, walk them with the arrow keys.
 - **Pane grid** — herdr's layout, rendered as live terminals. Drag a split to
   resize it; the new ratio is sent to herdr, which is authoritative, so every
   other viewer follows.
 - **Composer** — appears under the grid when the focused pane holds an agent.
-  `⌘/Ctrl+Enter` sends; `Escape` puts focus back in the terminal.
-- **Inspector** — a drawer on the right with two panels: **Preview** for the
+  `Enter` sends, `Shift+Enter` starts a new line, and `Escape` puts focus back
+  in the terminal.
+- **Inspector** — a column on the right with two panels: **Preview** for the
   ports something is listening on, and **Review** for the pages agents publish
   for you to comment on.
 
@@ -79,7 +82,7 @@ field takes precedence.
 | `prefix+n` / `prefix+p` / `prefix+1…9` | next / previous / nth tab |
 | `prefix+⇧N` / `prefix+⇧W` / `prefix+⇧D` | workspace: new / rename / close |
 | `prefix+w` / `prefix+g` | palette, filtered to workspaces / everything |
-| `prefix+b` | toggle the sidebar |
+| `prefix+b` or `⌘B` | toggle the sidebar |
 | `prefix+q` | blur the terminal (the browser's equivalent of detach) |
 | `prefix+Ctrl+B` | send a literal `Ctrl+B` to the program in the pane |
 | `prefix+?` | show this keymap |
@@ -88,7 +91,7 @@ field takes precedence.
 
 The bridge watches which TCP ports are listening inside the sandbox and lists
 them in the Preview panel, hiding agentbox's own services behind a toggle. Pick
-one and it loads in the drawer, with device widths and an editable path.
+one and it loads in the panel, with device widths and an editable path.
 
 There are two ways to reach it, and the difference matters.
 
