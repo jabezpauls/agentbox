@@ -44,16 +44,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    // Seed from the REST snapshot so the UI has content before the socket opens.
+    // Seed from the REST snapshot so the UI has content before the socket opens,
+    // but never let a slow REST response land *after* the socket's own snapshot
+    // and overwrite live data with a staler mirror. The socket's snapshot is
+    // authoritative the moment it arrives, so its arrival cancels the seed.
     let cancelled = false;
+    let socketSeeded = false;
     getSession()
       .then((snap) => {
-        if (!cancelled) useApp.setState({ session: fromSnapshot(snap) });
+        if (!cancelled && !socketSeeded) useApp.setState({ session: fromSnapshot(snap) });
       })
       .catch(() => {});
 
     const dispose = connectEvents({
-      onMessage: applyMessage,
+      onMessage: (m) => {
+        if (m.kind === "snapshot") socketSeeded = true;
+        applyMessage(m);
+      },
       onStatus: setStatus,
     });
     return () => {
