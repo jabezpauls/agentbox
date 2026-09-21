@@ -120,7 +120,7 @@ services:
   # path prefix, so it needs its own hostname; see docs/workbench.md.
   lavish:
     <<: *sandbox
-    command: ["lavish-axi", "server"]
+    command: ["agentbox-lavish"]
     network_mode: "service:code"
     pid: "service:code"
     depends_on:

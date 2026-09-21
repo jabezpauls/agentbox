@@ -135,6 +135,7 @@ COPY --from=web /src/node_modules /usr/local/lib/agentbox-workbench/node_modules
 COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
 
 COPY --chown=1000:1000 images/workspace/agentbox-workbench /usr/local/bin/agentbox-workbench
+COPY --chown=1000:1000 images/workspace/agentbox-lavish /usr/local/bin/agentbox-lavish
 COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 
