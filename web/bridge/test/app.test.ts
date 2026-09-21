@@ -44,6 +44,11 @@ describe("bridge app", () => {
     expect(body.ok).toBe(true);
     expect(body.herdr.connected).toBe(true);
     expect(body.herdr.version).toMatch(/^\d+\./);
+    // The app reads these from health: the picker's root, and the preview /
+    // lavish configuration used by the inspector.
+    expect(typeof body.workspaceRoot).toBe("string");
+    expect(body).toHaveProperty("previewDomain");
+    expect(body.lavishConfigured).toBe(false);
   });
 
   it("refuses non-allowlisted RPC methods with 403", async () => {

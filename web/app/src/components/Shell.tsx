@@ -7,6 +7,12 @@ import { Sidebar } from "./Sidebar.tsx";
 import { TabBar } from "./TabBar.tsx";
 import { PaneGrid } from "./PaneGrid.tsx";
 import { KeymapSheet } from "./KeymapSheet.tsx";
+import { CommandPalette } from "./CommandPalette.tsx";
+import { Composer } from "./Composer.tsx";
+import { Toasts } from "./Toasts.tsx";
+import { NewWorkspaceDialog } from "./dialogs/NewWorkspaceDialog.tsx";
+import { RenameDialog } from "./dialogs/RenameDialog.tsx";
+import { ConfirmDialog } from "./dialogs/ConfirmDialog.tsx";
 
 interface Props {
   theme: Theme;
@@ -21,9 +27,9 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
   const openSidebar = () => setUi({ sidebarOpen: true });
   const closeSidebar = () => setUi({ sidebarOpen: false });
 
-  // Global shortcuts outside a terminal. ⌘/Ctrl+K is reserved for Task 9's
-  // command palette; the hook fires palette.all (a no-op for now) so the key is
-  // already claimed. Escape dismisses the palette.
+  // ⌘/Ctrl+K opens the command palette from anywhere outside a terminal
+  // (inside a terminal it is intercepted in the xterm key handler). Escape
+  // dismisses the palette.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -54,9 +60,15 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
       <main className="main">
         <TabBar sidebarOpen={sidebarOpen} onOpenSidebar={openSidebar} />
         <PaneGrid resolved={resolved} />
+        <Composer />
       </main>
 
       <KeymapSheet />
+      <CommandPalette />
+      <NewWorkspaceDialog />
+      <RenameDialog />
+      <ConfirmDialog />
+      <Toasts />
     </div>
   );
 }

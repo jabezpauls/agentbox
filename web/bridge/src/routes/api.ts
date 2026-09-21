@@ -23,6 +23,12 @@ export function registerApiRoutes(
   app.get("/api/health", () => ({
     ok: true,
     herdr: { connected: hub.connected, version: hub.version, protocol: hub.protocol },
+    // Surfaced to the app: the directory picker composes absolute cwds under
+    // the workspace root, preview full-screen needs the preview domain, and the
+    // lavish panel shows a setup card unless a public URL is configured.
+    workspaceRoot: config.workspaceRoot,
+    previewDomain: config.previewDomain,
+    lavishConfigured: config.lavishUrl !== null,
   }));
 
   app.get("/api/session", () => hub.snapshot());

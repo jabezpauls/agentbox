@@ -270,6 +270,12 @@ export function tabsOf(s: Session, workspaceId: string): TabInfo[] {
   return s.tabs.filter((t) => t.workspace_id === workspaceId);
 }
 
+/** The best human title for a pane: agent name, else terminal title, else label. */
+export function paneTitle(pane: PaneInfo | undefined, agent?: AgentInfo): string {
+  const name = agent?.display_agent ?? agent?.agent ?? pane?.display_agent ?? pane?.agent;
+  return name || pane?.terminal_title_stripped || pane?.label || "shell";
+}
+
 export function panesOf(s: Session, tabId: string): PaneInfo[] {
   return Object.values(s.panes).filter((p) => p.tab_id === tabId);
 }

@@ -28,6 +28,18 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
   return body.result as T;
 }
 
+export interface HealthInfo {
+  ok: boolean;
+  herdr: { connected: boolean; version: string | null; protocol: number | null };
+  workspaceRoot: string;
+  previewDomain: string | null;
+  lavishConfigured: boolean;
+}
+
+export function getHealth(): Promise<HealthInfo> {
+  return getJson<HealthInfo>("/api/health");
+}
+
 export function getSession(): Promise<SessionSnapshot> {
   return getJson<SessionSnapshot>("/api/session");
 }

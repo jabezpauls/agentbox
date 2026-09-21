@@ -1,6 +1,6 @@
 import type { rpc as rpcFn } from "../api/client.ts";
 import type { useApp } from "../store/app.ts";
-import { tabsOf } from "../store/session.ts";
+import { agentsSorted, panesOf, paneTitle, tabsOf } from "../store/session.ts";
 
 /** Every keyboard-driven action, shared by the prefix map and the palette. */
 export type ActionId =
@@ -36,7 +36,12 @@ export type ActionId =
   | "palette.all"
   | "sidebar.toggle"
   | "terminal.blur"
-  | "keymap.show";
+  | "keymap.show"
+  // Palette-only actions (no default prefix binding).
+  | "worktree.new"
+  | "inspector.toggle"
+  | "theme.toggle"
+  | "agent.nextBlocked";
 
 export interface ActionCtx {
   store: typeof useApp;
@@ -138,6 +143,45 @@ function stepTab(ctx: ActionCtx, delta: number): void {
   if (next) s.focusTab(next.tab_id);
 }
 
+const BUSY = new Set(["working", "blocked"]);
+
+/** Focus the next blocked agent after the current focus, wrapping around. */
+function focusNextBlocked(ctx: ActionCtx): void {
+  const s = ctx.store.getState();
+  const blocked = agentsSorted(s.session).filter((a) => a.agent_status === "blocked");
+  if (blocked.length === 0) return;
+  const cur = blocked.findIndex((a) => a.pane_id === s.session.focusedPaneId);
+  const next = blocked[(cur + 1) % blocked.length];
+  if (next) s.focusPane(next.pane_id);
+}
+
+/** Close a pane, first confirming when it hosts a working or blocked agent. */
+function closePane(ctx: ActionCtx, paneId: string): void {
+  const s = ctx.store.getState();
+  const agent = s.session.agents[paneId];
+  if (agent && BUSY.has(agent.agent_status)) {
+    s.setUi({ dialog: { kind: "confirm.close-pane", paneId, title: paneTitle(s.session.panes[paneId], agent) } });
+  } else {
+    ctx.rpc("pane.close", { pane_id: paneId }).catch(() => {});
+  }
+}
+
+/** Close a tab, confirming when any of its panes hosts a working/blocked agent. */
+function closeTab(ctx: ActionCtx, tabId: string): void {
+  const s = ctx.store.getState();
+  const panes = panesOf(s.session, tabId);
+  const busy = panes.some((p) => {
+    const a = s.session.agents[p.pane_id];
+    return a && BUSY.has(a.agent_status);
+  });
+  if (busy) {
+    const tab = s.session.tabs.find((t) => t.tab_id === tabId);
+    s.setUi({ dialog: { kind: "confirm.close-tab", tabId, title: tab?.label ?? "tab" } });
+  } else {
+    ctx.rpc("tab.close", { tab_id: tabId }).catch(() => {});
+  }
+}
+
 /**
  * Run one action. Direct pane/tab/layout effects go to herdr through `rpc`;
  * herdr's resulting events flow back and update the mirror, so we do not mutate
@@ -177,7 +221,7 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
       stepTab(ctx, -1);
       break;
     case "tab.close":
-      if (tabId) rpc("tab.close", { tab_id: tabId }).catch(() => {});
+      if (tabId) closeTab(ctx, tabId);
       break;
     case "pane.splitRight":
       if (paneId) rpc("pane.split", { direction: "right", target_pane_id: paneId, focus: true }).catch(() => {});
@@ -189,13 +233,19 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
       rpc("pane.zoom", { mode: "toggle" }).catch(() => {});
       break;
     case "pane.close":
-      if (paneId) rpc("pane.close", { pane_id: paneId }).catch(() => {});
+      if (paneId) closePane(ctx, paneId);
       break;
     case "workspace.new":
       setUi({ dialog: { kind: "workspace.new" } });
       break;
+    case "worktree.new":
+      setUi({ dialog: { kind: "workspace.new", worktree: true } });
+      break;
     case "workspace.rename":
-      if (wid) setUi({ dialog: { kind: "workspace.rename", workspaceId: wid } });
+      if (wid) {
+        const ws = session.workspaces.find((w) => w.workspace_id === wid);
+        setUi({ dialog: { kind: "rename", target: "workspace", id: wid, label: ws?.label ?? "" } });
+      }
       break;
     case "workspace.close":
       if (wid) rpc("workspace.close", { workspace_id: wid }).catch(() => {});
@@ -208,6 +258,15 @@ export function runAction(id: ActionId, ctx: ActionCtx): void {
       break;
     case "sidebar.toggle":
       setUi({ sidebarOpen: !ui.sidebarOpen });
+      break;
+    case "inspector.toggle":
+      s.setInspector({ open: !ui.inspector.open });
+      break;
+    case "theme.toggle":
+      s.themeCycle?.();
+      break;
+    case "agent.nextBlocked":
+      focusNextBlocked(ctx);
       break;
     case "terminal.blur":
       if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();

@@ -112,6 +112,12 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // swallowed from xterm (return false), so the terminal only sees input.
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true;
+        // ⌘/Ctrl+K opens the command palette even while a terminal is focused.
+        if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+          e.preventDefault();
+          useApp.getState().setUi({ palette: { mode: "all" } });
+          return false;
+        }
         const r = machine.feed(comboFromEvent(e));
         reflectHud();
         if (!r.consumed) return true;

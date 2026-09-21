@@ -3,6 +3,7 @@ import { Columns2, MoreHorizontal, Pencil, Rows2, Maximize2, X } from "lucide-re
 import type { PaneInfo } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
 import { rpc } from "../api/client.ts";
+import { paneTitle } from "../store/session.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 interface Props {
@@ -28,8 +29,7 @@ export function PaneHeader({ pane }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const agentName = agent?.display_agent ?? agent?.agent ?? pane.display_agent ?? pane.agent;
-  const title = agentName || pane.terminal_title_stripped || pane.label || "shell";
+  const title = paneTitle(pane, agent);
   const cwd = pane.foreground_cwd ?? pane.cwd ?? "";
 
   const menuId = useMemo(() => `pane-menu-${pane.pane_id}`, [pane.pane_id]);
