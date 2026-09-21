@@ -10,6 +10,15 @@ if [ ! -e /workspace/WELCOME.md ] && [ -e /home/coder/welcome.md ]; then
     cp /home/coder/welcome.md /workspace/WELCOME.md || true
 fi
 
+# Agent skills live under the home volume, which shadows whatever the image put
+# there, so they are staged outside it and copied in on every start. Copying
+# unconditionally means an image update ships an updated skill rather than
+# leaving the first-run copy in place forever.
+if [ -d /usr/local/share/agentbox/skills ]; then
+    mkdir -p /home/coder/.claude/skills
+    cp -r /usr/local/share/agentbox/skills/. /home/coder/.claude/skills/ || true
+fi
+
 # Git works out of the box inside the sandbox rather than erroring on ownership.
 git config --global --get safe.directory >/dev/null 2>&1 || \
     git config --global --add safe.directory '*'

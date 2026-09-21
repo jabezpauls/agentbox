@@ -104,10 +104,8 @@ RUN if [ "$INSTALL_AGENTS" = "true" ]; then \
         npm install -g --prefix /usr/local --no-fund --no-audit \
             @anthropic-ai/claude-code \
             @openai/codex \
-            lavish-axi \
         && claude --version \
-        && codex --version \
-        && lavish-axi --version ; \
+        && codex --version ; \
     fi
 
 # Keep user-installed npm binaries on PATH for login shells too.
@@ -134,9 +132,14 @@ COPY --from=web /src/node_modules /usr/local/lib/agentbox-workbench/node_modules
 COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
 
 COPY --chown=1000:1000 images/workspace/agentbox-workbench /usr/local/bin/agentbox-workbench
-COPY --chown=1000:1000 images/workspace/agentbox-lavish /usr/local/bin/agentbox-lavish
+COPY --chown=1000:1000 images/workspace/agentbox-review /usr/local/bin/agentbox-review
 COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
+
+# The Review skill, so an agent discovers the loop without being told. /home is
+# a volume at runtime and would shadow anything installed into it, so it is
+# staged here and the entrypoint copies it into place on every start.
+COPY --chown=1000:1000 images/workspace/skills /usr/local/share/agentbox/skills
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["code-server", "--bind-addr=0.0.0.0:8080", "--auth=none", "/workspace"]

@@ -35,6 +35,20 @@ one; the credentials persist in the `agentbox_home` volume.
 Start a dev server in any pane and it appears in the Workbench's preview
 panel — `python3 -m http.server 3000`, `npm run dev`, anything that listens.
 
+## Showing you something
+
+When an agent has a plan, a comparison or a report that reads better as a page
+than as prose, it publishes one and waits for your answer:
+
+```bash
+agentbox-review open plan.html --label "Rollout plan"
+agentbox-review poll plan.html      # blocks until you press Send
+```
+
+It appears in the Workbench's **Review** panel. Click the part you mean, say
+what you think, and send — the agent's command returns with your comments
+anchored to what they refer to.
+
 ## Getting code in
 
 ```bash
