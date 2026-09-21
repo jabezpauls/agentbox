@@ -16,6 +16,10 @@
 # for everything else, which is what stops unbounded issuance. Bound to
 # loopback inside the proxy container, so nothing outside can reach it.
 :9444 {
+	# Loopback only, inside the proxy container: Caddy asks itself, and nothing
+	# on the network can reach the gate.
+	bind 127.0.0.1
+
 	# The suffix is compared literally rather than folded into the regular
 	# expression, where the domain's own dots would have matched any character
 	# and let a lookalike name through.

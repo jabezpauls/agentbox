@@ -84,7 +84,9 @@ export async function readLavishSessions(config: Config): Promise<LavishState> {
       label: s.label ?? path.basename(s.file),
       file: s.file,
       status: s.status ?? "unknown",
-      url: `${config.lavishUrl}/session/${s.key}`,
+      // The key comes from a state file an agent can write: encode it so it
+      // cannot smuggle a path or a query into the link we hand the browser.
+      url: `${config.lavishUrl}/session/${encodeURIComponent(s.key)}`,
       active: activeKeys.has(s.key),
     }))
     .sort((a, b) => a.file.localeCompare(b.file));

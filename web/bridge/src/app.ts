@@ -49,9 +49,21 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
       await registerPreviewRoutes(scope, config);
 
       if (serveStatic) {
+        // The Workbench must not be framed by anyone else: a hostile page that
+        // could overlay it would be clicking on live terminals and agents.
+        // Previews are framed *by* the app, and they are served by the preview
+        // route rather than this one, so they are unaffected.
+        const FRAME_GUARD: Record<string, string> = {
+          "content-security-policy": "frame-ancestors 'self'",
+          "x-frame-options": "SAMEORIGIN",
+        };
+
         await scope.register(fastifyStatic, {
           root: config.staticDir as string,
           prefix: "/",
+          setHeaders: (res) => {
+            for (const [name, value] of Object.entries(FRAME_GUARD)) res.setHeader(name, value);
+          },
         });
         // SPA fallback: any GET under the prefix that is not an API, websocket,
         // or preview route serves index.html so client-side routing works.
@@ -63,7 +75,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
             !rel.startsWith("/ws") &&
             !rel.startsWith("/preview")
           ) {
-            return reply.type("text/html").sendFile("index.html");
+            return reply.headers(FRAME_GUARD).type("text/html").sendFile("index.html");
           }
           return reply.code(404).send({ error: "not found" });
         });

@@ -43,7 +43,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         btop procps htop \
         tmux \
         build-essential \
-        gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI, from its own apt repository (Debian does not package it).

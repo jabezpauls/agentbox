@@ -27,6 +27,29 @@ describe("readLavishSessions", () => {
     expect(state).toEqual({ configured: false, url: null, running: false, sessions: [] });
   });
 
+  it("escapes a session key that is not URL-safe", async () => {
+    // The state file is written by an agent's tooling, so the key is untrusted
+    // input: it must not be able to steer the link we hand the browser.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wb-lav-"));
+    fs.writeFileSync(
+      path.join(dir, "state.json"),
+      JSON.stringify({ sessions: { x: { key: "../../evil?x=1", file: "/workspace/a.html" } } }),
+    );
+    const config = configWith({
+      WORKBENCH_LAVISH_URL: "https://lavish.example.com",
+      LAVISH_AXI_STATE_DIR: dir,
+      LAVISH_AXI_PORT: "1",
+    });
+    try {
+      const state = await readLavishSessions(config);
+      expect(state.sessions[0]?.url).toBe(
+        "https://lavish.example.com/session/..%2F..%2Fevil%3Fx%3D1",
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("lists sessions from state but reports not running when nothing listens", async () => {
     const dir = stateDirWithFixture();
     // Port 1 will not be listening, so /health fails fast.
