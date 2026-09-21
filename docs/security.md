@@ -10,7 +10,8 @@ over the host.
 | --- | --- |
 | The Docker daemon | The socket is never mounted. A container with `/var/run/docker.sock` is root on the host; agentbox does not use it, and `docker compose config` will show no such mount. |
 | The host filesystem | No bind mounts. `/workspace` is a named Docker volume; nothing from `/`, `/home`, or `/etc` is exposed. |
-| Other containers | A dedicated bridge network (`agentbox_internal`). Only the proxy publishes a port. |
+| Other stacks' data | The sandbox is on its own bridge network (`agentbox_internal`) with no route to another stack's private network, so their databases and internal services are not reachable. |
+| The host itself | This is **not** automatic. `agentbox_internal` is an ordinary bridge, so by default a container can route to the host's own services (a management UI, SSH, a deploy webhook) through the bridge gateway, exactly as any Docker container can. On a shared host you must block it: see "Isolating the sandbox from the host" below. A single-purpose host with nothing else on it does not need this. |
 | Privilege escalation | `no-new-privileges:true`, `cap_drop: [ALL]`, and every process runs as UID 1000, never root. |
 | Host resources | CPU and memory ceilings per service, plus a PID limit, so a runaway agent cannot starve the host. |
 
@@ -121,10 +122,53 @@ repositories, can still push commits, spend tokens, and exfiltrate anything you
 place in the workspace. Treat the sandbox as a machine you trust exactly as much
 as the code and agents you put in it.
 
+## Isolating the sandbox from the host
+
+On a host that runs **only** agentbox, the default bridge is fine: there is
+nothing else on the host to reach. On a **shared** host — one that also runs
+other services, a management UI, or a deploy mechanism — you must stop the
+sandbox routing to the host and to other private networks, because the sandbox
+is the one place you hand an untrusted party a shell.
+
+The sandbox legitimately needs the *public* internet and nothing on RFC1918.
+So the rule is: from the sandbox's subnet, drop RFC1918 and the host, allow the
+rest. Find the subnet with `docker network inspect agentbox_internal`, then, on
+a host using nftables (adjust the subnet):
+
+```
+table inet agentbox {
+	chain forward {
+		type filter hook forward priority -10; policy accept;
+		ct state established,related accept
+		ip saddr 10.201.12.0/24 ip daddr 10.201.12.0/24 accept
+		ip saddr 10.201.12.0/24 ip daddr 10.0.0.0/8 drop
+		ip saddr 10.201.12.0/24 ip daddr 172.16.0.0/12 drop
+		ip saddr 10.201.12.0/24 ip daddr 192.168.0.0/16 drop
+		ip saddr 10.201.12.0/24 ip daddr 169.254.0.0/16 drop
+	}
+	chain input {
+		type filter hook input priority -10; policy accept;
+		ct state established,related accept
+		ip saddr 10.201.12.0/24 drop
+	}
+}
+```
+
+The `forward` chain blocks routing to other private networks; the `input` chain
+blocks the host's own services (a container reaches the host at its gateway
+address, which is delivered locally and never touches `forward`). Load it with
+`nft -f`, and make it survive a reboot with a `oneshot` systemd unit ordered
+`After=firewalld.service docker.service` that runs the same command. Verify from
+inside — `docker exec agentbox-code-1 curl` — that a host service is refused
+while `https://api.github.com` still answers.
+
+`169.254.0.0/16` is included because it carries the cloud metadata endpoint,
+which on many providers hands out instance credentials.
+
 ## Egress filtering
 
-Outbound traffic is unrestricted by default because agents and package managers
-need it. To restrict it, attach the sandbox to an `internal: true` network and
-route outbound traffic through a proxy you control. This is deliberately not the
-default: it breaks most real workflows and gives a false sense of safety when
-half-configured.
+The rules above already deny private-network egress. To restrict *public*
+egress as well — so an agent cannot exfiltrate to an arbitrary host — attach
+the sandbox to an `internal: true` network and route its outbound traffic
+through a proxy you control. This is deliberately not the default: it breaks
+most real workflows and gives a false sense of safety when half-configured.

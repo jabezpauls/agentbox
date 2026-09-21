@@ -132,6 +132,15 @@ services:
       - code
     security_opt:
       - no-new-privileges:true
+    # The proxy verifies a bcrypt hash on every authentication attempt, which
+    # is deliberately slow. Without a ceiling, an unauthenticated flood of
+    # Authorization headers turns that cost into a CPU-exhaustion attack on
+    # whatever else shares the host. A cap makes the flood the proxy's problem
+    # and no one else's; a rate limit in front of it (see the reverse-proxy
+    # overlays) keeps it from becoming even that.
+    cpus: ${AGENTBOX_PROXY_CPUS:-1}
+    mem_limit: ${AGENTBOX_PROXY_MEMORY:-256m}
+    pids_limit: 256
     networks:
       - internal
     environment:
