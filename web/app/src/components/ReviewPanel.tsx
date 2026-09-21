@@ -59,7 +59,12 @@ export function ReviewPanel() {
   const [note, setNote] = useState("");
   const [annotating, setAnnotating] = useState(false);
   const [sending, setSending] = useState(false);
+  // Draft ids whose anchor no longer resolves in the (possibly republished)
+  // artifact; for those we reveal the quoted text instead of scrolling.
+  const [unresolved, setUnresolved] = useState<Record<string, boolean>>({});
   const frame = useRef<HTMLIFrameElement | null>(null);
+  // Which draft's scroll we last requested, so a scroll result can be attributed.
+  const lastScroll = useRef<string | null>(null);
 
   // Refresh the list while the panel is mounted: sessions appear when an agent
   // runs the CLI, which this app has no event stream for.
@@ -83,6 +88,8 @@ export function ReviewPanel() {
     setDrafts([]);
     setNote("");
     setAnnotating(false);
+    setUnresolved({});
+    lastScroll.current = null;
     if (!selected) {
       setCurrent(null);
       return;
@@ -116,6 +123,13 @@ export function ReviewPanel() {
       if (!frame.current || e.source !== frame.current.contentWindow) return;
       const data = e.data as Partial<AnnotatorMessage> | null;
       if (!data || data.source !== "agentbox-review") return;
+      if (data.kind === "scrolled") {
+        // The artifact told us whether the anchor still resolves. When it does
+        // not, mark the draft so its quote is shown in place of a dead scroll.
+        const id = lastScroll.current;
+        if (id) setUnresolved((u) => ({ ...u, [id]: data.ok === false }));
+        return;
+      }
       if (data.kind !== "element" && data.kind !== "selection") return;
       const anchor = typeof data.selector === "string" ? data.selector : "";
       const quote = typeof data.text === "string" ? data.text : "";
@@ -261,12 +275,21 @@ export function ReviewPanel() {
         {drafts.map((d) => (
           <div className="review-comment" key={d.id}>
             <button
-              className="review-anchor"
-              title="Scroll the artifact to this"
-              onClick={() => tell({ scrollTo: d.anchor })}
+              className={`review-anchor${unresolved[d.id] ? " is-unresolved" : ""}`}
+              title={unresolved[d.id] ? "This anchor no longer resolves in the artifact" : "Scroll the artifact to this"}
+              onClick={() => {
+                if (!d.anchor) return;
+                lastScroll.current = d.id;
+                tell({ scrollTo: d.anchor });
+              }}
             >
               {d.quote || d.anchor || "element"}
             </button>
+            {unresolved[d.id] && (
+              <p className="review-anchor-note">
+                Couldn&apos;t find this on the page anymore{d.quote ? `; it read: “${d.quote}”` : "."}
+              </p>
+            )}
             <textarea
               className="review-note"
               rows={2}

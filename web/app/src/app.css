@@ -2181,9 +2181,21 @@
 .review-comment {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   padding: var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
+}
+.review-anchor.is-unresolved {
+  border-color: var(--warn, var(--border-strong));
+  border-style: dashed;
+  color: var(--text);
+}
+.review-anchor-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
 }
 .review-anchor {
   flex: none;

@@ -152,6 +152,47 @@ describe("ReviewPanel", () => {
     });
   });
 
+  it("reveals the quote when a comment's anchor no longer resolves in the artifact", async () => {
+    render(<ReviewPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: /Rollout plan/ }));
+    const frame = (await waitFor(() => {
+      const el = document.querySelector("iframe.review-frame");
+      if (!el) throw new Error("no frame yet");
+      return el;
+    })) as HTMLIFrameElement;
+
+    // An anchored comment whose selector points at a now-absent element.
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: frame.contentWindow,
+          data: {
+            source: "agentbox-review",
+            kind: "element",
+            selector: "body > h2:nth-of-type(9)",
+            text: "Everything at once",
+          },
+        }),
+      );
+    });
+
+    // Clicking the anchor asks the artifact to scroll; a republish moved it.
+    await userEvent.click(await screen.findByRole("button", { name: /Everything at once/ }));
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: frame.contentWindow,
+          data: { source: "agentbox-review", kind: "scrolled", selector: "body > h2:nth-of-type(9)", ok: false },
+        }),
+      );
+    });
+
+    // The panel now shows the quoted text rather than silently doing nothing:
+    // the note names the quote, and it appears on both the anchor and the note.
+    expect(await screen.findByText(/Couldn't find this on the page anymore/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Everything at once/).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("ignores a message that is not from its own frame", async () => {
     render(<ReviewPanel />);
     await userEvent.click(await screen.findByRole("button", { name: /Rollout plan/ }));

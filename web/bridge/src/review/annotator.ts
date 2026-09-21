@@ -113,6 +113,9 @@ const SCRIPT = `
     if (typeof d.scrollTo === "string" && d.scrollTo) {
       var target = null;
       try { target = document.querySelector(d.scrollTo); } catch (err) { target = null; }
+      // Report whether the anchor still resolves, so the panel can fall back to
+      // showing the quoted text when a republish moved or removed the element.
+      send({ kind: "scrolled", selector: d.scrollTo, ok: !!target });
       if (!target) return;
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       target.setAttribute("data-agentbox-flash", "");

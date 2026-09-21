@@ -81,6 +81,7 @@ export interface ReviewSessionDetail { session: ReviewSession; comments: ReviewC
 /** What an anchor picked inside the sandboxed artifact frame looks like. */
 export type AnnotatorMessage =
   | { source: "agentbox-review"; kind: "element"; selector: string; text: string; rect: Rect }
-  | { source: "agentbox-review"; kind: "selection"; selector: string; text: string };
+  | { source: "agentbox-review"; kind: "selection"; selector: string; text: string }
+  | { source: "agentbox-review"; kind: "scrolled"; selector: string; ok: boolean };
 export interface DirEntry { name: string; path: string }
 export interface RpcRequest { method: string; params?: Record<string, unknown> }
