@@ -7,7 +7,7 @@ import { useTheme } from "./theme/useTheme.ts";
 import { Shell } from "./components/Shell.tsx";
 
 export function App() {
-  const { theme, cycle } = useTheme();
+  const { theme, resolved, cycle } = useTheme();
   const applyMessage = useApp((s) => s.applyMessage);
   const setStatus = useApp((s) => s.setStatus);
   const setUi = useApp((s) => s.setUi);
@@ -37,5 +37,5 @@ export function App() {
     };
   }, [applyMessage, setStatus]);
 
-  return <Shell theme={theme} onCycleTheme={cycle} />;
+  return <Shell theme={theme} resolved={resolved} onCycleTheme={cycle} />;
 }

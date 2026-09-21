@@ -9,11 +9,23 @@ export type InspectorTab = "preview" | "lavish";
 export interface PaletteState { mode: string }
 export interface DialogState { kind: string; [k: string]: unknown }
 
+/**
+ * The inspector drawer's state, kept as one object so it can be persisted and
+ * updated atomically via `setInspector`. `port`/`path` are the preview target a
+ * localhost link click writes here (Task 8); Task 10 renders the drawer and
+ * adds device-width and lavish selection.
+ */
+export interface InspectorState {
+  open: boolean;
+  tab: InspectorTab;
+  width: number;
+  port: number | null;
+  path: string;
+}
+
 export interface UiState {
   sidebarOpen: boolean;
-  inspectorOpen: boolean;
-  inspectorTab: InspectorTab;
-  inspectorWidth: number;
+  inspector: InspectorState;
   palette: null | PaletteState;
   dialog: null | DialogState;
   theme: Theme;
@@ -30,6 +42,7 @@ export interface AppState {
   applyMessage(m: EventsMessage): void;
   setStatus(s: ConnStatus): void;
   setUi(partial: Partial<UiState>): void;
+  setInspector(partial: Partial<InspectorState>): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
   focusWorkspace(id: string): void;
@@ -42,9 +55,7 @@ const wideViewport = typeof window === "undefined" || window.innerWidth >= 900;
 
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
-  inspectorOpen: false,
-  inspectorTab: "preview",
-  inspectorWidth: 420,
+  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/" },
   palette: null,
   dialog: null,
   theme: "system",
@@ -85,6 +96,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   setUi(partial) {
     set((s) => ({ ui: { ...s.ui, ...partial } }));
+  },
+
+  setInspector(partial) {
+    set((s) => ({ ui: { ...s.ui, inspector: { ...s.ui.inspector, ...partial } } }));
   },
 
   focusWorkspace(id) {
@@ -133,3 +148,10 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({ seenDone: { ...s.seenDone, [paneId]: seq } }));
   },
 }));
+
+// Dev-only affordance: expose the store on window so the app can be inspected
+// and driven from the browser console (and from automated live checks). Never
+// included in a production build.
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { useApp?: typeof useApp }).useApp = useApp;
+}

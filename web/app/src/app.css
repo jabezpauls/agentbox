@@ -586,3 +586,299 @@
     transition: none;
   }
 }
+
+/* --- pane grid ------------------------------------------------------------- */
+
+.pane-grid {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Cells are positioned edge-to-edge in percent; the padding forms the gutter
+   between panes, so the frames never touch. */
+.pane-cell {
+  position: absolute;
+  padding: 4px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+/* Focus reads through the frame via the token ring, no heavy border. */
+.pane-cell.is-focused .pane-frame {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--ring), var(--shadow-md);
+}
+
+/* slim header */
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--overlay);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pane-title {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-cwd {
+  flex: none;
+  margin-left: auto;
+  max-width: 18ch;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-rename {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 1px var(--sp-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+.pane-rename:focus-visible {
+  outline: none;
+}
+.pane-menu-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-xs);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.pane-cwd + .pane-menu-btn {
+  margin-left: var(--sp-2);
+}
+.pane-cell:hover .pane-menu-btn,
+.pane-cell.is-focused .pane-menu-btn,
+.pane-menu-btn:focus-visible,
+.pane-menu-btn[aria-expanded="true"] {
+  opacity: 1;
+}
+.pane-menu-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.pane-ctx {
+  position: absolute;
+  top: 30px;
+  right: 6px;
+}
+
+.pane-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+  background: var(--surface);
+}
+.term-host {
+  position: absolute;
+  inset: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+}
+.term-host .xterm {
+  height: 100%;
+}
+/* herdr renders the viewport server-side (scrollback: 0), so the local
+   scrollbar is inert; hide it rather than show a dead track. */
+.term-host .xterm-viewport {
+  scrollbar-width: none;
+}
+.term-host .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/* --- split handles --------------------------------------------------------- */
+
+.split-handle {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+}
+.split-handle.is-right {
+  width: 10px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+.split-handle.is-down {
+  height: 10px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+.split-handle-grip {
+  background: transparent;
+  border-radius: var(--r-pill);
+  transition: background var(--dur-1) var(--ease);
+}
+.split-handle.is-right .split-handle-grip {
+  width: 2px;
+  height: 100%;
+}
+.split-handle.is-down .split-handle-grip {
+  width: 100%;
+  height: 2px;
+}
+.split-handle:hover .split-handle-grip,
+.split-handle.is-dragging .split-handle-grip {
+  background: var(--ring);
+}
+
+/* --- prefix HUD ------------------------------------------------------------ */
+
+.prefix-hud {
+  position: absolute;
+  z-index: var(--z-menu);
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--overlay);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  color: var(--text);
+  animation: fade-in var(--dur-1) var(--ease);
+}
+
+/* --- keymap sheet ---------------------------------------------------------- */
+
+.sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: var(--scrim);
+  animation: fade-in var(--dur-2) var(--ease);
+}
+.keymap-sheet {
+  width: min(680px, 100%);
+  max-height: 84vh;
+  overflow: auto;
+  padding: var(--sp-5);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.keymap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.keymap-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+}
+.keymap-sub {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.keymap-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-5) var(--sp-6);
+}
+.keymap-group-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.keymap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.keymap-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-1) 0;
+}
+.keymap-keys {
+  flex: none;
+  display: inline-flex;
+  gap: 3px;
+  width: 66px;
+}
+.keymap-label {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .keymap-grid {
+    grid-template-columns: 1fr;
+  }
+}
