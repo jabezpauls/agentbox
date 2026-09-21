@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ExternalLink, MousePointerClick, Trash2 } from "lucide-react";
+import { ChevronLeft, ExternalLink, MessageSquareDashed, MousePointerClick, Trash2 } from "lucide-react";
 import type { AnnotatorMessage, ReviewComment, ReviewSession } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
 import {
@@ -170,8 +170,14 @@ export function ReviewPanel() {
 
   if (sessions === null) {
     return (
+      // A layout-matching placeholder, never a bare spinner: the list settles
+      // into the shape it was already holding.
       <div className="review">
-        <p className="review-loading">Loading…</p>
+        <div className="review-loading" aria-hidden="true">
+          <span className="skeleton" />
+          <span className="skeleton" />
+          <span className="skeleton" />
+        </div>
       </div>
     );
   }
@@ -197,10 +203,13 @@ export function ReviewPanel() {
           ))}
         </ul>
         {sessions.length === 0 && (
-          <div className="review-empty">
-            <p className="review-empty-title">Nothing to review</p>
-            <p className="review-empty-sub">An agent publishes a page here with one command:</p>
-            <pre className="review-cmd">agentbox-review open plan.html</pre>
+          <div className="empty">
+            <span className="empty-glyph" aria-hidden="true">
+              <MessageSquareDashed size={22} />
+            </span>
+            <p className="empty-title">Nothing to review.</p>
+            <p className="empty-sub">An agent publishes a page here with one command:</p>
+            <pre className="empty-code">agentbox-review open plan.html</pre>
           </div>
         )}
       </div>
@@ -214,7 +223,7 @@ export function ReviewPanel() {
     <div className="review">
       <div className="review-bar">
         <button className="icon-btn" aria-label="Back to sessions" onClick={() => setInspector({ reviewKey: null })}>
-          <ChevronLeft size={16} />
+          <ChevronLeft size={15} />
         </button>
         <span className="review-title">{current.label}</span>
         {!ended && (
@@ -229,9 +238,10 @@ export function ReviewPanel() {
         <button
           className="icon-btn"
           aria-label="Open full screen"
+          title="Open full screen"
           onClick={() => window.open(artifact, "_blank", "noopener,noreferrer")}
         >
-          <ExternalLink size={15} />
+          <ExternalLink size={14} />
         </button>
       </div>
 
@@ -285,19 +295,19 @@ export function ReviewPanel() {
           <textarea
             className="review-note"
             rows={2}
-            placeholder="A note about the whole thing"
+            placeholder="A note about the whole thing…"
             aria-label="Note"
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
           <div className="review-actions">
-            <button className="btn" disabled={sending} onClick={() => void send(false)}>
+            <button className="btn btn-small btn-primary" disabled={sending} onClick={() => void send(false)}>
               Send
             </button>
-            <button className="btn" disabled={sending} onClick={() => void send(true)}>
+            <button className="btn btn-small" disabled={sending} onClick={() => void send(true)}>
               Send &amp; end
             </button>
-            <button className="btn" disabled={sending} onClick={() => void endNow()}>
+            <button className="btn btn-small" disabled={sending} onClick={() => void endNow()}>
               End
             </button>
           </div>

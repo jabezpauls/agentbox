@@ -76,7 +76,7 @@ describe("ReviewPanel", () => {
   it("explains the one command when there is nothing to review", async () => {
     sessions = [];
     render(<ReviewPanel />);
-    expect(await screen.findByText("Nothing to review")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing to review.")).toBeInTheDocument();
     expect(screen.getByText(/agentbox-review open/)).toBeInTheDocument();
   });
 

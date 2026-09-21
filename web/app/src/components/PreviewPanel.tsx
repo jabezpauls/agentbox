@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, RotateCw } from "lucide-react";
+import { ExternalLink, Radio, RotateCw } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import type { PreviewDevice } from "../store/app.ts";
 import { basePath } from "../api/base.ts";
@@ -59,12 +59,22 @@ export function PreviewPanel() {
     return (
       <div className="prev">
         <PortList ports={visible} selected={port} showSystem={showSystem} onToggleSystem={setShowSystem} onSelect={(p) => setInspector({ port: p, path: "/" })} />
-        {ports.length === 0 && (
-          <div className="prev-empty">
-            <p className="prev-empty-title">No ports yet</p>
-            <p className="prev-empty-sub">Start a dev server in any pane and it will appear here.</p>
-          </div>
-        )}
+        <div className="empty">
+          <span className="empty-glyph" aria-hidden="true">
+            <Radio size={22} />
+          </span>
+          {ports.length === 0 ? (
+            <>
+              <p className="empty-title">Nothing is listening.</p>
+              <p className="empty-sub">Start a dev server in any pane and its port shows up here.</p>
+            </>
+          ) : (
+            <>
+              <p className="empty-title">No port picked.</p>
+              <p className="empty-sub">Choose one above and the page loads in place.</p>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -91,15 +101,16 @@ export function PreviewPanel() {
           onKeyDown={(e) => e.key === "Enter" && commitPath()}
           onBlur={commitPath}
         />
-        <button className="icon-btn" aria-label="Refresh" onClick={() => setReloadKey((k) => k + 1)}>
-          <RotateCw size={15} />
+        <button className="icon-btn" aria-label="Reload" title="Reload" onClick={() => setReloadKey((k) => k + 1)}>
+          <RotateCw size={14} />
         </button>
         <button
           className="icon-btn"
           aria-label="Open full screen"
+          title="Open full screen"
           onClick={() => (previewDomain ? openFullScreen() : setConfirmFullScreen(true))}
         >
-          <ExternalLink size={15} />
+          <ExternalLink size={14} />
         </button>
       </div>
 
@@ -118,8 +129,8 @@ export function PreviewPanel() {
 
       {sandboxed && (
         <p className="prev-note">
-          Sandboxed: this preview runs without cookies, storage or live reload because it shares the Workbench's
-          origin. Set a preview domain for full fidelity.
+          Sandboxed. This preview shares the Workbench's origin, so it runs without cookies, storage or live
+          reload. Set a preview domain for full fidelity.
         </p>
       )}
 
@@ -130,10 +141,11 @@ export function PreviewPanel() {
           onSubmit={openFullScreen}
           submitLabel="Open anyway"
           danger
+          narrow
         >
           <p className="dialog-text">
-            This page was written by an agent. Opening it full screen gives it the same access to Workbench that you
-            have. A preview domain avoids this.
+            This page was written by an agent. Full screen gives it the same access to Workbench that you have —
+            its storage, its API and its terminals. Setting a preview domain avoids that.
           </p>
         </Dialog>
       )}
@@ -164,10 +176,10 @@ function PortList({ ports, selected, showSystem, onToggleSystem, onSelect }: Por
   return (
     <div className="port-list">
       <div className="port-list-head">
-        <span className="port-list-title">Ports</span>
+        <span className="section-label">Ports</span>
         <label className="port-system-toggle">
           <input type="checkbox" checked={showSystem} onChange={(e) => onToggleSystem(e.target.checked)} />
-          Show system
+          System ports
         </label>
       </div>
       <ul className="ports">
