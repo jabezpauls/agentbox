@@ -1,12 +1,12 @@
 /*
  * Workbench design tokens.
  *
- * A control room for coding agents should feel like a well-built native tool,
- * not a website: quiet neutral surfaces, one accent, and a small family of
- * status "lights" that carry the only real colour. The visual language is the
- * status system — the rollup dots and badges read like terminal status lights.
- * Everything else stays deliberately restrained so those lights are legible at
- * a glance.
+ * A control room for coding agents, in the visual language of rubl: Inter for
+ * everything, hierarchy carried by weight and colour tier rather than size,
+ * hairline borders instead of boxes, one cobalt accent, and a small family of
+ * status "lights" that carry the only other real colour. Surfaces are opaque —
+ * blur over live terminal text is unreadable — and elevation is reserved for
+ * things that genuinely float.
  *
  * Light is defined on :root; dark overrides the same tokens. `system` follows
  * prefers-color-scheme (dark tokens apply when no explicit data-theme is set),
@@ -15,80 +15,100 @@
 
 :root {
   /* neutral surfaces, back to front */
-  --bg: #f4f5f8;
+  --bg: #f8f9fc;
   --surface: #ffffff;
-  --surface-2: #eceef3;
-  --surface-3: #e2e5ec;
-  --overlay: rgba(255, 255, 255, 0.72);
-  --scrim: rgba(18, 20, 27, 0.34);
+  --surface-2: #eef1f6;
+  --surface-3: #e4e8f0;
+  --scrim: rgb(16 19 31 / 0.45);
 
-  --border: rgba(18, 22, 31, 0.1);
-  --border-strong: rgba(18, 22, 31, 0.16);
-  --ring: rgba(76, 99, 230, 0.5);
+  --border-subtle: #f0f2f7;
+  --border: #e5e8f0;
+  --border-strong: #d3d8e3;
+  --ring: #2563eb;
 
-  /* text */
-  --text: #171a1f;
-  --text-2: #545b68;
-  --text-3: #838a97;
+  /* text, in four tiers */
+  --text: #10131f;
+  --text-2: #56607a;
+  --text-3: #66708a;
+  --text-disabled: #b8bfcc;
 
   /* single accent */
-  --accent: #4c63e6;
-  --accent-2: #3d51cf;
-  --accent-tint: rgba(76, 99, 230, 0.12);
+  --accent: #2563eb;
+  --accent-2: #1d4ed8;
+  --accent-active: #1e40af;
+  --accent-tint: #dbeafe;
   --on-accent: #ffffff;
 
-  /* status lights */
-  --st-blocked: #d9772b;
+  /* semantic tones — solid ink over a soft fill, the way rubl's pills read */
+  --success: #147a52;
+  --success-soft: #e2f4ec;
+  --warning: #965a12;
+  --warning-soft: #f8ecd6;
+  --danger: #c2373c;
+  --danger-hover: #a92d32;
+  --danger-soft: #fbe9ea;
+
+  /* status lights: working / blocked / done / idle / unknown, each with the
+     soft fill its labelled pill sits on. A colour never carries meaning on its
+     own here — every dot and pill also carries a label or a title. */
   --st-working: var(--accent);
-  --st-done: #2e9e5b;
-  --st-idle: #9aa1ad;
-  --st-unknown: #c3c8d1;
+  --st-working-soft: var(--accent-tint);
+  --st-blocked: var(--warning);
+  --st-blocked-soft: var(--warning-soft);
+  --st-done: var(--success);
+  --st-done-soft: var(--success-soft);
+  --st-idle: #c3cad9;
+  --st-idle-soft: var(--surface-2);
+  --st-unknown: var(--text-disabled);
+  --st-unknown-soft: var(--surface-2);
 
   /* The ground behind an iframe of arbitrary web content: the browser's own
      default page colour in both themes, so a preview of a page that sets no
      background looks the way it would in a normal tab. */
   --frame-bg: #ffffff;
 
-  /* terminal surface + ANSI palette (xterm reads these through themes.ts) */
+  /* terminal surface + ANSI palette (xterm reads these through themes.ts).
+     --term-bg must equal --surface exactly or the seam between the pane frame
+     and the canvas shows as a hairline of the wrong colour. */
   --term-bg: #ffffff;
-  --term-fg: #171a1f;
-  --term-cursor: #4c63e6;
+  --term-fg: #10131f;
+  --term-cursor: #2563eb;
   --term-cursor-accent: #ffffff;
-  --term-selection: rgba(76, 99, 230, 0.22);
-  --term-selection-inactive: rgba(76, 99, 230, 0.12);
-  --ansi-black: #1f232b;
-  --ansi-red: #c0392b;
-  --ansi-green: #2e9e5b;
-  --ansi-yellow: #a5730a;
-  --ansi-blue: #4c63e6;
-  --ansi-magenta: #9b3dcf;
-  --ansi-cyan: #0e7c86;
-  --ansi-white: #d7dae1;
-  --ansi-bright-black: #838a97;
-  --ansi-bright-red: #e05545;
-  --ansi-bright-green: #37b56a;
-  --ansi-bright-yellow: #c9971f;
-  --ansi-bright-blue: #6478f0;
-  --ansi-bright-magenta: #b45ae0;
-  --ansi-bright-cyan: #1596a2;
-  --ansi-bright-white: #171a1f;
+  --term-selection: rgb(37 99 235 / 0.2);
+  --term-selection-inactive: rgb(37 99 235 / 0.1);
+  --ansi-black: #10131f;
+  --ansi-red: #c2373c;
+  --ansi-green: #147a52;
+  --ansi-yellow: #965a12;
+  --ansi-blue: #2563eb;
+  --ansi-magenta: #7754e8;
+  --ansi-cyan: #0c807b;
+  --ansi-white: #d3d8e3;
+  --ansi-bright-black: #66708a;
+  --ansi-bright-red: #d8474d;
+  --ansi-bright-green: #158a5b;
+  --ansi-bright-yellow: #a1660c;
+  --ansi-bright-blue: #4a86f0;
+  --ansi-bright-magenta: #8e6df0;
+  --ansi-bright-cyan: #0f9a94;
+  --ansi-bright-white: #10131f;
 
-  /* type */
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+  /* type — Inter for chrome, JetBrains Mono for terminals, ids and kbd chips */
+  --font-ui: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  --fs-micro: 0.6875rem; /* 11px — small-caps labels */
-  --fs-xs: 0.75rem; /* 12px */
-  --fs-sm: 0.8125rem; /* 13px — base UI text (native density) */
-  --fs-md: 0.875rem; /* 14px */
-  --fs-lg: 1rem; /* 16px */
-  --fs-xl: 1.25rem; /* 20px */
+  --fs-micro: 0.625rem; /* 10px — the uppercase micro-label, and nothing else */
+  --fs-2xs: 0.6875rem; /* 11px — pills, kbd chips, timestamps */
+  --fs-xs: 0.75rem; /* 12px — secondary / description */
+  --fs-sm: 0.8125rem; /* 13px — the one body size */
+  --fs-md: 0.875rem; /* 14px — card, dialog and sheet titles */
+  --fs-page: 1.125rem; /* 18px — the largest type in the product */
 
-  --lh-tight: 1.2;
-  --lh: 1.45;
-  --track-label: 0.04em; /* small text reads better with a touch more tracking */
-  --track-tight: -0.01em; /* larger text tightens */
+  --lh: 1.5;
+  /* The only tracking in the system: uppercase micro-labels. Larger type is
+     never tightened — Inter is drawn to sit at its natural width. */
+  --track-label: 0.04em;
 
   /* spacing (4px base) */
   --sp-1: 4px;
@@ -99,91 +119,105 @@
   --sp-6: 24px;
   --sp-8: 32px;
 
-  /* radii */
+  /* radii. The assignment matters as much as the values: 6px is the control
+     radius (inputs, chips, menu items), 8px belongs to buttons and tiles, and
+     12px is reserved for surfaces that float. */
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 8px;
   --r-lg: 12px;
+  --r-2xl: 16px;
   --r-pill: 999px;
 
-  /* materials */
-  --blur: 20px;
-  --shadow-sm: 0 1px 2px rgba(18, 22, 31, 0.06), 0 1px 3px rgba(18, 22, 31, 0.08);
-  --shadow-md: 0 6px 16px rgba(18, 22, 31, 0.12), 0 2px 6px rgba(18, 22, 31, 0.08);
-  --shadow-lg: 0 16px 48px rgba(18, 22, 31, 0.22);
+  /* materials. The default card is flat — a hairline, no shadow. Elevation
+     marks things that genuinely float: menus at -md, modals at -lg. */
+  --shadow-flat: none;
+  --shadow-sm: 0 1px 2px rgb(11 14 26 / 0.05), 0 1px 3px rgb(11 14 26 / 0.06);
+  --shadow-md: 0 4px 14px rgb(11 14 26 / 0.08);
+  --shadow-lg: 0 20px 44px rgb(11 14 26 / 0.12);
 
-  /* motion — one calm curve; springs would be overkill for chrome */
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-1: 120ms;
-  --dur-2: 180ms;
-  --dur-3: 260ms;
+  /* motion — two easings, three durations. --ease-spring is spent on exactly
+     one thing: a floating surface scaling in. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 75ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
 
   /* layout */
   --sidebar-w: 260px;
-  --tabbar-h: 42px;
+  --tabbar-h: 44px;
 
-  /* z-order */
-  --z-menu: 40;
-  --z-scrim: 50;
-  --z-sheet: 60;
+  /* z-order: scrim under every floating surface, which all share one plane. */
+  --z-scrim: 40;
+  --z-float: 50;
+  --z-progress: 60;
+  --z-toast: 9999;
 
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0f1115;
-  --surface: #171a20;
-  --surface-2: #1f232b;
-  --surface-3: #272c36;
-  --overlay: rgba(23, 26, 32, 0.66);
-  --scrim: rgba(0, 0, 0, 0.5);
+  --bg: #0b0e17;
+  --surface: #151a27;
+  --surface-2: #1c2234;
+  --surface-3: #232a3d;
+  --scrim: rgb(0 0 0 / 0.55);
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --ring: rgba(127, 146, 247, 0.55);
+  --border-subtle: rgb(255 255 255 / 0.06);
+  --border: #262d40;
+  --border-strong: #37405a;
+  --ring: #2f6fed;
 
-  --text: #e8eaef;
-  --text-2: #a3aab8;
-  --text-3: #6d7482;
+  --text: #eef1f7;
+  --text-2: #a2acc0;
+  --text-3: #808aa0;
+  --text-disabled: #565d70;
 
-  --accent: #7f92f7;
-  --accent-2: #93a3ff;
-  --accent-tint: rgba(127, 146, 247, 0.16);
-  --on-accent: #0f1115;
+  --accent: #2f6fed;
+  --accent-2: #4a86f0;
+  --accent-active: #60a5fa;
+  --accent-tint: #17274d;
+  --on-accent: #ffffff;
 
-  --st-blocked: #e0913f;
-  --st-working: var(--accent);
-  --st-done: #45c07d;
-  --st-idle: #6d7482;
-  --st-unknown: #464c57;
+  --success: #47c483;
+  --success-soft: #12291e;
+  --warning: #e0b165;
+  --warning-soft: #33260f;
+  --danger: #d24047;
+  --danger-hover: #e5484d;
+  --danger-soft: #38191c;
 
-  --term-bg: #171a20;
-  --term-fg: #e8eaef;
-  --term-cursor: #7f92f7;
-  --term-cursor-accent: #171a20;
-  --term-selection: rgba(127, 146, 247, 0.30);
-  --term-selection-inactive: rgba(127, 146, 247, 0.16);
-  --ansi-black: #272c36;
-  --ansi-red: #e06c6c;
-  --ansi-green: #45c07d;
-  --ansi-yellow: #d8b25a;
-  --ansi-blue: #7f92f7;
-  --ansi-magenta: #c58af0;
-  --ansi-cyan: #4fd0d8;
-  --ansi-white: #a3aab8;
-  --ansi-bright-black: #6d7482;
-  --ansi-bright-red: #ef8686;
-  --ansi-bright-green: #5fd695;
-  --ansi-bright-yellow: #eac26a;
-  --ansi-bright-blue: #93a3ff;
-  --ansi-bright-magenta: #d4a3f5;
-  --ansi-bright-cyan: #6fe0e8;
-  --ansi-bright-white: #e8eaef;
+  --st-idle: #4d5776;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
-  --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.6);
+  --frame-bg: #ffffff;
+
+  --term-bg: #151a27;
+  --term-fg: #eef1f7;
+  --term-cursor: #2f6fed;
+  --term-cursor-accent: #151a27;
+  --term-selection: rgb(47 111 237 / 0.34);
+  --term-selection-inactive: rgb(47 111 237 / 0.18);
+  --ansi-black: #262d40;
+  --ansi-red: #f07177;
+  --ansi-green: #47c483;
+  --ansi-yellow: #e0b165;
+  --ansi-blue: #5b9bff;
+  --ansi-magenta: #a595f5;
+  --ansi-cyan: #35c4bd;
+  --ansi-white: #a2acc0;
+  --ansi-bright-black: #808aa0;
+  --ansi-bright-red: #ff8f94;
+  --ansi-bright-green: #64d79a;
+  --ansi-bright-yellow: #ecc27f;
+  --ansi-bright-blue: #7fb2ff;
+  --ansi-bright-magenta: #bbaefa;
+  --ansi-bright-cyan: #58d8d1;
+  --ansi-bright-white: #eef1f7;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.55);
+  --shadow-lg: 0 22px 48px rgb(0 0 0 / 0.62);
 
   color-scheme: dark;
 }
@@ -191,58 +225,66 @@
 /* system default: apply dark unless an explicit light theme is chosen */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1115;
-    --surface: #171a20;
-    --surface-2: #1f232b;
-    --surface-3: #272c36;
-    --overlay: rgba(23, 26, 32, 0.66);
-    --scrim: rgba(0, 0, 0, 0.5);
+    --bg: #0b0e17;
+    --surface: #151a27;
+    --surface-2: #1c2234;
+    --surface-3: #232a3d;
+    --scrim: rgb(0 0 0 / 0.55);
 
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.14);
-    --ring: rgba(127, 146, 247, 0.55);
+    --border-subtle: rgb(255 255 255 / 0.06);
+    --border: #262d40;
+    --border-strong: #37405a;
+    --ring: #2f6fed;
 
-    --text: #e8eaef;
-    --text-2: #a3aab8;
-    --text-3: #6d7482;
+    --text: #eef1f7;
+    --text-2: #a2acc0;
+    --text-3: #808aa0;
+    --text-disabled: #565d70;
 
-    --accent: #7f92f7;
-    --accent-2: #93a3ff;
-    --accent-tint: rgba(127, 146, 247, 0.16);
-    --on-accent: #0f1115;
+    --accent: #2f6fed;
+    --accent-2: #4a86f0;
+    --accent-active: #60a5fa;
+    --accent-tint: #17274d;
+    --on-accent: #ffffff;
 
-    --st-blocked: #e0913f;
-    --st-working: var(--accent);
-    --st-done: #45c07d;
-    --st-idle: #6d7482;
-    --st-unknown: #464c57;
+    --success: #47c483;
+    --success-soft: #12291e;
+    --warning: #e0b165;
+    --warning-soft: #33260f;
+    --danger: #d24047;
+    --danger-hover: #e5484d;
+    --danger-soft: #38191c;
 
-    --term-bg: #171a20;
-    --term-fg: #e8eaef;
-    --term-cursor: #7f92f7;
-    --term-cursor-accent: #171a20;
-    --term-selection: rgba(127, 146, 247, 0.30);
-    --term-selection-inactive: rgba(127, 146, 247, 0.16);
-    --ansi-black: #272c36;
-    --ansi-red: #e06c6c;
-    --ansi-green: #45c07d;
-    --ansi-yellow: #d8b25a;
-    --ansi-blue: #7f92f7;
-    --ansi-magenta: #c58af0;
-    --ansi-cyan: #4fd0d8;
-    --ansi-white: #a3aab8;
-    --ansi-bright-black: #6d7482;
-    --ansi-bright-red: #ef8686;
-    --ansi-bright-green: #5fd695;
-    --ansi-bright-yellow: #eac26a;
-    --ansi-bright-blue: #93a3ff;
-    --ansi-bright-magenta: #d4a3f5;
-    --ansi-bright-cyan: #6fe0e8;
-    --ansi-bright-white: #e8eaef;
+    --st-idle: #4d5776;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
-    --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.6);
+    --frame-bg: #ffffff;
+
+    --term-bg: #151a27;
+    --term-fg: #eef1f7;
+    --term-cursor: #2f6fed;
+    --term-cursor-accent: #151a27;
+    --term-selection: rgb(47 111 237 / 0.34);
+    --term-selection-inactive: rgb(47 111 237 / 0.18);
+    --ansi-black: #262d40;
+    --ansi-red: #f07177;
+    --ansi-green: #47c483;
+    --ansi-yellow: #e0b165;
+    --ansi-blue: #5b9bff;
+    --ansi-magenta: #a595f5;
+    --ansi-cyan: #35c4bd;
+    --ansi-white: #a2acc0;
+    --ansi-bright-black: #808aa0;
+    --ansi-bright-red: #ff8f94;
+    --ansi-bright-green: #64d79a;
+    --ansi-bright-yellow: #ecc27f;
+    --ansi-bright-blue: #7fb2ff;
+    --ansi-bright-magenta: #bbaefa;
+    --ansi-bright-cyan: #58d8d1;
+    --ansi-bright-white: #eef1f7;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.55);
+    --shadow-lg: 0 22px 48px rgb(0 0 0 / 0.62);
 
     color-scheme: dark;
   }
@@ -270,7 +312,13 @@ body {
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Inter's alternate forms: a single-storey `l` that cannot be read as a `1`,
+   and disambiguated curly glyphs — worth having next to a terminal. */
+:root {
+  font-feature-settings: "cv11", "ss01", "ss03";
 }
 
 button {
@@ -283,11 +331,18 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* accessibility signals bake into every component */
+/* Text-entry controls opt out of the ring: browsers match :focus-visible on
+   them for plain mouse clicks too, which would put a hard box on every click
+   in the app. They show focus through the caret plus an accent border instead
+   (see .input, .composer-field and friends). */
+:is(input:not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable]):focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -295,28 +350,22 @@ button {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --overlay: var(--surface);
-    --blur: 0px;
+    scroll-behavior: auto !important;
   }
 }
 
 @media (prefers-contrast: more) {
   :root {
-    --border: rgba(18, 22, 31, 0.3);
-    --border-strong: rgba(18, 22, 31, 0.45);
-    --text-2: #3a4049;
-    --text-3: #545b68;
+    --border: #b9c0d0;
+    --border-strong: #8c97ad;
+    --text-2: #3a4257;
+    --text-3: #4a5268;
   }
   :root[data-theme="dark"],
   :root:not([data-theme="light"]) {
-    --border: rgba(255, 255, 255, 0.28);
-    --border-strong: rgba(255, 255, 255, 0.42);
-    --text-2: #c4c9d3;
-    --text-3: #9aa1ad;
+    --border: #46506c;
+    --border-strong: #68738f;
+    --text-2: #c4cbdb;
+    --text-3: #a8b1c4;
   }
 }
