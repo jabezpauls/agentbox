@@ -55,6 +55,48 @@ jobs:
               -v "$PWD/proxy/Caddyfile.previews:/etc/caddy/previews/previews.caddyfile:ro"
           done
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install herdr
+        # The same pinned, checksum-verified build the sandbox image installs,
+        # from the same script — the end-to-end tests and the image can never
+        # be on different herdr releases.
+        run: |
+          sudo scripts/install-herdr.sh /usr/local/bin
+
+      - run: npm ci
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+      - name: Install Chromium for the end-to-end tests
+        run: npx playwright install --with-deps chromium
+        working-directory: web/app
+      - name: End-to-end against a real herdr
+        run: npm run e2e -w app
+        working-directory: web
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/app/playwright-report
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     steps:

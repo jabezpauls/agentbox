@@ -62,7 +62,15 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // stays in place, which is correct, just slower.
     }
 
-    const unregister = registerTerminal(paneId, () => term.focus());
+    const unregister = registerTerminal(paneId, {
+      focus: () => term.focus(),
+      text: () => {
+        const buf = term.buffer.active;
+        const lines: string[] = [];
+        for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+        return lines.join("\n");
+      },
+    });
 
     let disposed = false;
     let socket: TerminalSocket | null = null;
