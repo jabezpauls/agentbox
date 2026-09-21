@@ -24,6 +24,7 @@ interface Props {
 
 export function Shell({ theme, resolved, onCycleTheme }: Props) {
   const sidebarOpen = useApp((s) => s.ui.sidebarOpen);
+  const sidebarWidth = useApp((s) => s.ui.sidebarWidth);
   const inspectorOpen = useApp((s) => s.ui.inspector.open);
   const inspectorWidth = useApp((s) => s.ui.inspector.width);
   const setUi = useApp((s) => s.setUi);
@@ -44,6 +45,13 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
         runAction("palette.all", actionCtx());
         return;
       }
+      // ⌘B hides and shows the sidebar, as it does in rubl. Only the Meta
+      // variant: Ctrl+B is the terminal prefix and must stay untouched.
+      if (e.metaKey && !e.ctrlKey && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        runAction("sidebar.toggle", actionCtx());
+        return;
+      }
       if (e.key === "Escape" && useApp.getState().ui.palette) {
         setUi({ palette: null });
         return;
@@ -59,7 +67,10 @@ export function Shell({ theme, resolved, onCycleTheme }: Props) {
       className="shell"
       data-sidebar={sidebarOpen ? "open" : "closed"}
       data-inspector={inspectorOpen ? "open" : "closed"}
-      style={{ ["--inspector-w" as string]: `${inspectorWidth}px` }}
+      style={{
+        ["--inspector-w" as string]: `${inspectorWidth}px`,
+        ["--sidebar-w" as string]: `${sidebarWidth}px`,
+      }}
     >
       {sidebarOpen && (
         <button

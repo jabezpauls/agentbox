@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { SquareTerminal } from "lucide-react";
 import type { Resolved } from "../theme/useTheme.ts";
 import { useApp } from "../store/app.ts";
 import { call } from "../api/call.ts";
@@ -29,9 +30,12 @@ export function PaneGrid({ resolved }: Props) {
   if (!layout || layout.panes.length === 0) {
     return (
       <div className="stage">
-        <div className="empty-stage">
-          <p className="empty-title">Select a pane</p>
-          <p className="empty-sub">Choose a workspace, tab, or agent to begin.</p>
+        <div className="empty">
+          <span className="empty-glyph" aria-hidden="true">
+            <SquareTerminal size={22} />
+          </span>
+          <p className="empty-title">Nothing open.</p>
+          <p className="empty-sub">Pick a workspace, tab or agent in the sidebar, and its terminals appear here.</p>
         </div>
       </div>
     );

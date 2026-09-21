@@ -33,6 +33,21 @@ export interface InspectorState {
 }
 
 const INSPECTOR_KEY = "workbench.inspector";
+const SIDEBAR_KEY = "workbench.sidebarWidth";
+
+export const SIDEBAR_MIN = 200;
+export const SIDEBAR_MAX = 420;
+
+/** The sidebar's persisted width, clamped to the drag range. */
+function readSidebarWidth(): number {
+  try {
+    const raw = Number(localStorage.getItem(SIDEBAR_KEY));
+    if (!Number.isFinite(raw) || raw === 0) return 260;
+    return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
+  } catch {
+    return 260;
+  }
+}
 
 // Remember the inspector's open state, width and tab across reloads.
 function readInspector(): Partial<InspectorState> {
@@ -60,6 +75,7 @@ function persistInspector(i: InspectorState): void {
 
 export interface UiState {
   sidebarOpen: boolean;
+  sidebarWidth: number;
   inspector: InspectorState;
   palette: null | PaletteState;
   dialog: null | DialogState;
@@ -87,6 +103,12 @@ export interface AppState {
    * drag, which would otherwise write localStorage on every pointermove.
    */
   setInspector(partial: Partial<InspectorState>, opts?: { persist?: boolean }): void;
+  /**
+   * Resize the sidebar. As with the inspector, `persist: false` is for the
+   * live phase of a drag — one localStorage write per pointermove would be
+   * hundreds of synchronous writes per gesture.
+   */
+  setSidebarWidth(width: number, opts?: { persist?: boolean }): void;
   pushToast(toast: Toast): void;
   reportRpcError(method: string, err: unknown): void;
   focusPane(id: string): void;
@@ -141,6 +163,7 @@ let previewAutoOpened = false;
 
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
+  sidebarWidth: readSidebarWidth(),
   inspector: { open: false, tab: "preview", width: 420, port: null, path: "/", device: "auto", reviewKey: null, ...readInspector() },
   palette: null,
   dialog: null,
@@ -225,6 +248,18 @@ export const useApp = create<AppState>((set, get) => ({
       if (opts?.persist !== false) persistInspector(inspector);
       return { ui: { ...s.ui, inspector } };
     });
+  },
+
+  setSidebarWidth(width, opts) {
+    const clamped = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(width)));
+    if (opts?.persist !== false) {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, String(clamped));
+      } catch {
+        // Private mode or blocked storage; the width holds for this session.
+      }
+    }
+    set((s) => ({ ui: { ...s.ui, sidebarWidth: clamped } }));
   },
 
   pushToast(toast) {

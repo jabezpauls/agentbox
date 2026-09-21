@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Monitor, Moon, PanelLeftClose, Sun } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
@@ -13,9 +13,14 @@ interface Props {
 }
 
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const;
-const THEME_LABEL = { system: "System theme", light: "Light theme", dark: "Dark theme" } as const;
+const THEME_LABEL = { system: "Follow the system theme", light: "Light theme", dark: "Dark theme" } as const;
 
 const CONN_TEXT = { connecting: "Connecting", open: "Connected", closed: "Reconnecting" } as const;
+const CONN_TITLE = {
+  connecting: "Opening the connection to herdr.",
+  open: "Connected to herdr.",
+  closed: "The connection dropped. Reconnecting.",
+} as const;
 
 export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
   const session = useApp((s) => s.session);
@@ -23,8 +28,11 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
   const focusWorkspace = useApp((s) => s.focusWorkspace);
   const focusTab = useApp((s) => s.focusTab);
   const focusPane = useApp((s) => s.focusPane);
+  const setSidebarWidth = useApp((s) => s.setSidebarWidth);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [resizing, setResizing] = useState(false);
+  const dragging = useRef(false);
   const isExpanded = (id: string) => !collapsed.has(id);
   const toggle = (id: string) =>
     setCollapsed((prev) => {
@@ -33,6 +41,27 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
       else next.add(id);
       return next;
     });
+
+  // The panel tracks the pointer 1:1 for the whole drag and only writes
+  // localStorage on release; the width transition is off while `resizing`.
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    setResizing(true);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    setSidebarWidth(e.clientX, { persist: false });
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    setResizing(false);
+    const el = e.target as HTMLElement;
+    if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    setSidebarWidth(useApp.getState().ui.sidebarWidth);
+  };
 
   const ThemeIcon = THEME_ICON[theme];
 
@@ -44,9 +73,11 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
 
       <nav className="sidebar-scroll" aria-label="Workspaces and agents">
         <section className="sb-section">
-          <h2 className="sb-heading">Workspaces</h2>
+          <div className="sb-heading">
+            <h2 className="section-label">Workspaces</h2>
+          </div>
           {session.workspaces.length === 0 ? (
-            <p className="agents-empty">No workspaces yet.</p>
+            <p className="sb-empty">No workspaces yet. Open the palette and run “New workspace”.</p>
           ) : (
             <ul className="ws-list">
               {session.workspaces.map((w) => (
@@ -67,25 +98,38 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
         </section>
 
         <section className="sb-section">
-          <h2 className="sb-heading">Agents</h2>
+          <div className="sb-heading">
+            <h2 className="section-label">Agents</h2>
+          </div>
           <AgentList session={session} onFocusPane={focusPane} />
         </section>
       </nav>
 
       <footer className="sidebar-foot">
-        <span className={`conn-pill is-${status}`} title={`herdr: ${CONN_TEXT[status]}`}>
+        <span className={`conn-pill is-${status}`} title={CONN_TITLE[status]}>
           <span className="conn-dot" aria-hidden="true" />
           {CONN_TEXT[status]}
         </span>
         <div className="foot-actions">
           <button className="icon-btn" onClick={onCycleTheme} title={THEME_LABEL[theme]} aria-label={THEME_LABEL[theme]}>
-            <ThemeIcon size={16} />
+            <ThemeIcon size={15} />
           </button>
-          <button className="icon-btn" onClick={onCollapse} title="Collapse sidebar" aria-label="Collapse sidebar">
-            <PanelLeftClose size={16} />
+          <button className="icon-btn" onClick={onCollapse} title="Hide sidebar (⌘B)" aria-label="Hide sidebar">
+            <PanelLeftClose size={15} />
           </button>
         </div>
       </footer>
+
+      <div
+        className={`sidebar-resize${resizing ? " is-dragging" : ""}`}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      />
     </div>
   );
 }

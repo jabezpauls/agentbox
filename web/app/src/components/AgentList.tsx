@@ -23,7 +23,7 @@ export function AgentList({ session, onFocusPane }: Props) {
   const wsLabel = new Map(session.workspaces.map((w) => [w.workspace_id, w.label]));
 
   if (agents.length === 0) {
-    return <p className="agents-empty">No agents detected yet.</p>;
+    return <p className="sb-empty">No agents running. Start one in any pane and it shows up here.</p>;
   }
 
   return (

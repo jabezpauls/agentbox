@@ -122,7 +122,7 @@ export function PaneHeader({ pane }: Props) {
 
       <button
         ref={menuBtnRef}
-        className="pane-menu-btn"
+        className="icon-btn is-sm pane-menu-btn"
         aria-label={`Pane actions for ${title}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
@@ -130,7 +130,7 @@ export function PaneHeader({ pane }: Props) {
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setMenuOpen((v) => !v)}
       >
-        <MoreHorizontal size={14} />
+        <MoreHorizontal size={13} />
       </button>
 
       {menuOpen && (
@@ -147,7 +147,7 @@ export function PaneHeader({ pane }: Props) {
           <button className="ctx-item" role="menuitem" onClick={startRename}>
             <Pencil size={14} /> Rename
           </button>
-          <button className="ctx-item" role="menuitem" onClick={close}>
+          <button className="ctx-item is-danger" role="menuitem" onClick={close}>
             <X size={14} /> Close pane
           </button>
         </div>

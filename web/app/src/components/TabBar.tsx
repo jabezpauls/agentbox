@@ -135,8 +135,8 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
   return (
     <div className="tabbar">
       {!sidebarOpen && (
-        <button className="icon-btn tabbar-menu" onClick={onOpenSidebar} title="Show sidebar" aria-label="Show sidebar">
-          <PanelLeftOpen size={16} />
+        <button className="icon-btn tabbar-menu" onClick={onOpenSidebar} title="Show sidebar (⌘B)" aria-label="Show sidebar">
+          <PanelLeftOpen size={15} />
         </button>
       )}
 
@@ -187,7 +187,7 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
                     aria-expanded={menu?.tabId === t.tab_id}
                     onClick={(e) => openMenuFrom(t.tab_id, e.currentTarget)}
                   >
-                    <MoreHorizontal size={14} />
+                    <MoreHorizontal size={13} />
                   </button>
                 </>
               )}
@@ -196,8 +196,8 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
         })}
 
         {wid && (
-          <button className="icon-btn tab-add" onClick={newTab} title="New tab" aria-label="New tab">
-            <Plus size={16} />
+          <button className="icon-btn tab-add" onClick={newTab} title="New tab (⌃B C)" aria-label="New tab">
+            <Plus size={15} />
           </button>
         )}
       </div>
@@ -205,11 +205,11 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
       <button
         className={`icon-btn tabbar-inspector${inspectorOpen ? " is-active" : ""}`}
         onClick={() => setInspector({ open: !inspectorOpen })}
-        title="Toggle inspector"
+        title="Inspector"
         aria-label="Toggle inspector"
         aria-pressed={inspectorOpen}
       >
-        <PanelRight size={16} />
+        <PanelRight size={15} />
       </button>
 
       {menu && (
@@ -231,7 +231,7 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
             <Pencil size={14} />
             Rename
           </button>
-          <button className="ctx-item" role="menuitem" onClick={() => closeTab(menu.tabId)}>
+          <button className="ctx-item is-danger" role="menuitem" onClick={() => closeTab(menu.tabId)}>
             <X size={14} />
             Close tab
           </button>

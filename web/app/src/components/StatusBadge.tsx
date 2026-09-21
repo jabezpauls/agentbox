@@ -22,13 +22,17 @@ interface Props {
 }
 
 /**
- * The single source of the status vocabulary. A dot for rollups, a labelled
- * pill for agent rows. `working` gets a slow, subtle pulse (respecting
- * reduced-motion) so an active agent reads as alive without shouting.
+ * The single source of the status vocabulary. A dot for rollups, a soft-tinted
+ * pill for anywhere a word fits. `working` gets a slow, subtle pulse
+ * (respecting reduced-motion) so an active agent reads as alive without
+ * shouting.
+ *
+ * Colour never carries the meaning alone: the pill states it in words, and the
+ * bare dot carries the same word as its accessible name and its tooltip.
  */
 export function StatusBadge({ status, variant = "dot", label, muted, title }: Props) {
   const cls = [
-    variant === "dot" ? "status-dot" : "status-badge",
+    variant === "dot" ? "status-dot" : "pill status-badge",
     `is-${status}`,
     status === "working" ? "is-live" : "",
     muted ? "is-muted" : "",
@@ -41,7 +45,7 @@ export function StatusBadge({ status, variant = "dot", label, muted, title }: Pr
   }
   return (
     <span className={cls} title={title}>
-      <span className="status-badge-dot" aria-hidden="true" />
+      <span className="pill-dot" aria-hidden="true" />
       {label ?? LABELS[status]}
     </span>
   );
