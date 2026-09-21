@@ -44,6 +44,34 @@ interface HerdrClosed {
 const MAX_REPLAY_BYTES = 1_000_000;
 /** Grace period for the child to exit cleanly after release before SIGTERM. */
 const RELEASE_GRACE_MS = 1_000;
+/** Grace period after SIGTERM before escalating to SIGKILL, so a child that
+ * ignores SIGTERM cannot hang teardown indefinitely. */
+const SIGKILL_GRACE_MS = 2_000;
+
+/** The slice of `ChildProcess` the kill escalation needs; keeps it testable. */
+export interface Killable {
+  killed: boolean;
+  kill(signal: NodeJS.Signals): boolean;
+}
+
+/**
+ * Send SIGTERM and, if `exited()` still reports false after `graceMs`, follow it
+ * with SIGKILL. Returns the escalation timer (unref'd) or null when the child
+ * has already exited. Bounds teardown so a child ignoring SIGTERM cannot hang.
+ */
+export function killWithFallback(
+  child: Killable,
+  exited: () => boolean,
+  graceMs: number = SIGKILL_GRACE_MS,
+): NodeJS.Timeout | null {
+  if (exited()) return null;
+  if (!child.killed) child.kill("SIGTERM");
+  const timer = setTimeout(() => {
+    if (!exited()) child.kill("SIGKILL");
+  }, graceMs);
+  timer.unref?.();
+  return timer;
+}
 
 /**
  * One `herdr terminal session control --takeover` child per pane. herdr renders
@@ -66,6 +94,9 @@ class PaneStream {
   lastFullSeq = 0;
   private released = false;
   private dead = false;
+  /** True once the child process has actually exited (not merely signalled). */
+  private childExited = false;
+  private killTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly paneId: string,
@@ -107,8 +138,25 @@ class PaneStream {
     // Drain stderr so a chatty child never blocks on a full pipe.
     child.stderr?.resume();
     child.on("error", () => this.markDead("stream error"));
-    child.on("exit", () => this.markDead("stream ended"));
+    child.on("exit", () => {
+      this.childExited = true;
+      if (this.killTimer) {
+        clearTimeout(this.killTimer);
+        this.killTimer = null;
+      }
+      this.markDead("stream ended");
+    });
     return child;
+  }
+
+  /**
+   * Send SIGTERM and, if the child is still alive after a bounded grace, follow
+   * it with SIGKILL. A herdr controller that ignores SIGTERM would otherwise
+   * keep the process — and this stream — from ever tearing down.
+   */
+  private killWithFallback(): void {
+    if (this.childExited || this.killTimer) return;
+    this.killTimer = killWithFallback(this.child, () => this.childExited);
   }
 
   /**
@@ -187,16 +235,14 @@ class PaneStream {
     this.released = true;
     this.write({ type: "terminal.release" });
     this.child.stdin?.end();
-    setTimeout(() => {
-      if (!this.child.killed) this.child.kill("SIGTERM");
-    }, RELEASE_GRACE_MS).unref();
+    setTimeout(() => this.killWithFallback(), RELEASE_GRACE_MS).unref();
   }
 
   /** Kill the child immediately; used on shutdown, not on normal release. */
   destroy(): void {
     this.released = true;
     this.child.stdin?.end();
-    if (!this.child.killed) this.child.kill("SIGTERM");
+    this.killWithFallback();
   }
 
   resize(cols: number, rows: number): void {
