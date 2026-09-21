@@ -22,6 +22,11 @@ describe("rpc allowlist", () => {
     "",
     "pane",
     "pane.",
+    // The graphics channel is denied whole: the bare segment as well as the
+    // dotted subtree beneath it.
+    "pane.graphics",
+    "pane.graphics.blit",
+    "pane.graphics.frame",
   ];
 
   for (const method of allowed) {
