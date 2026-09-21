@@ -1,4 +1,11 @@
-import type { DirEntry, LavishState, ListeningPort, SessionSnapshot } from "@workbench/shared";
+import type {
+  DirEntry,
+  ListeningPort,
+  ReviewComment,
+  ReviewSession,
+  ReviewSessionDetail,
+  SessionSnapshot,
+} from "@workbench/shared";
 import { apiUrl } from "./base.ts";
 
 export class RpcError extends Error {
@@ -12,6 +19,16 @@ export class RpcError extends Error {
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(apiUrl(path), { headers: { accept: "application/json" } });
+  if (!res.ok) throw new RpcError(res.status, `${path} → ${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new RpcError(res.status, `${path} → ${res.status}`);
   return (await res.json()) as T;
 }
@@ -33,7 +50,6 @@ export interface HealthInfo {
   herdr: { connected: boolean; version: string | null; protocol: number | null };
   workspaceRoot: string;
   previewDomain: string | null;
-  lavishConfigured: boolean;
 }
 
 export function getHealth(): Promise<HealthInfo> {
@@ -48,8 +64,30 @@ export function getPorts(): Promise<ListeningPort[]> {
   return getJson<ListeningPort[]>("/api/ports");
 }
 
-export function getLavish(): Promise<LavishState> {
-  return getJson<LavishState>("/api/lavish");
+export function getReviewSessions(): Promise<ReviewSession[]> {
+  return getJson<ReviewSession[]>("/api/review/sessions");
+}
+
+export function getReviewSession(key: string): Promise<ReviewSessionDetail> {
+  return getJson<ReviewSessionDetail>(`/api/review/${key}`);
+}
+
+/** The artifact route, which the panel frames and full screen opens. */
+export function reviewArtifactUrl(key: string): string {
+  return apiUrl(`/api/review/${key}/artifact`);
+}
+
+/** Hand the agent what the human wrote; `end` closes the session with it. */
+export async function postReviewFeedback(
+  key: string,
+  comments: ReviewComment[],
+  end = false,
+): Promise<ReviewSessionDetail> {
+  return postJson<ReviewSessionDetail>(`/api/review/${key}/feedback`, { comments, end });
+}
+
+export function endReviewSession(key: string): Promise<ReviewSession> {
+  return postJson<ReviewSession>(`/api/review/${key}/end`, { by: "human" });
 }
 
 export function listDirs(path: string): Promise<DirEntry[]> {

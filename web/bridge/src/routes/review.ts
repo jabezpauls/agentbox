@@ -18,10 +18,14 @@ function wantedWait(raw: unknown): number {
   return Math.min(n, MAX_WAIT_MS);
 }
 
-/** Where a person should browse to see this session. */
+/**
+ * Where a person should browse to see this session. A query parameter rather
+ * than a path segment: the app's assets resolve relatively, so one extra path
+ * level would send the browser looking for them a directory too deep.
+ */
 function sessionUrl(config: Config, req: FastifyRequest, key: string): string {
   const origin = config.publicUrl ?? `${req.protocol}://${req.headers.host ?? "127.0.0.1"}`;
-  return `${origin}${config.basePath}/review/${key}`;
+  return `${origin}${config.basePath}/?review=${key}`;
 }
 
 /**

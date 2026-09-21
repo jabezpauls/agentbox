@@ -3,16 +3,16 @@ import { X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import type { InspectorTab } from "../store/app.ts";
 import { PreviewPanel } from "./PreviewPanel.tsx";
-import { LavishPanel } from "./LavishPanel.tsx";
+import { ReviewPanel } from "./ReviewPanel.tsx";
 
 const MIN_WIDTH = 320;
 const maxWidth = () => (typeof window === "undefined" ? 900 : window.innerWidth * 0.6);
 
-const TABS: InspectorTab[] = ["preview", "lavish"];
-const TAB_LABEL: Record<InspectorTab, string> = { preview: "Preview", lavish: "Lavish" };
+const TABS: InspectorTab[] = ["preview", "review"];
+const TAB_LABEL: Record<InspectorTab, string> = { preview: "Preview", review: "Review" };
 
 /**
- * The right-hand inspector drawer: a resizable panel with a Preview | Lavish
+ * The right-hand inspector drawer: a resizable panel with a Preview | Review
  * segmented control. Its open state, width and tab persist across reloads (see
  * the store). Dragging the left edge resizes it between a floor and 60 % of the
  * viewport.
@@ -75,7 +75,7 @@ export function Inspector() {
           <X size={16} />
         </button>
       </header>
-      <div className="inspector-body">{tab === "preview" ? <PreviewPanel /> : <LavishPanel />}</div>
+      <div className="inspector-body">{tab === "preview" ? <PreviewPanel /> : <ReviewPanel />}</div>
     </aside>
   );
 }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EventsMessage, HerdrEvent, LavishState, ListeningPort } from "@workbench/shared";
+import type { EventsMessage, HerdrEvent, ListeningPort } from "@workbench/shared";
 import type { ConnStatus } from "../api/events.ts";
 import { getSession, rpc, RpcError, type HealthInfo } from "../api/client.ts";
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
@@ -10,15 +10,15 @@ export interface StoredToast extends Toast {
   id: string;
 }
 
-export type InspectorTab = "preview" | "lavish";
+export type InspectorTab = "preview" | "review";
 export interface PaletteState { mode: string }
 export interface DialogState { kind: string; [k: string]: unknown }
 
 /**
  * The inspector drawer's state, kept as one object so it can be persisted and
  * updated atomically via `setInspector`. `port`/`path` are the preview target a
- * localhost link click writes here (Task 8); Task 10 renders the drawer and
- * adds device-width and lavish selection.
+ * localhost link click writes here; `reviewKey` is the review session the
+ * Review panel is showing, or null for its session list.
  */
 export type PreviewDevice = "auto" | 390 | 768 | 1024;
 
@@ -29,7 +29,7 @@ export interface InspectorState {
   port: number | null;
   path: string;
   device: PreviewDevice;
-  lavishKey: string | null;
+  reviewKey: string | null;
 }
 
 const INSPECTOR_KEY = "workbench.inspector";
@@ -42,7 +42,7 @@ function readInspector(): Partial<InspectorState> {
     const v = JSON.parse(raw) as Partial<InspectorState>;
     const out: Partial<InspectorState> = {};
     if (typeof v.open === "boolean") out.open = v.open;
-    if (v.tab === "preview" || v.tab === "lavish") out.tab = v.tab;
+    if (v.tab === "preview" || v.tab === "review") out.tab = v.tab;
     if (typeof v.width === "number") out.width = v.width;
     return out;
   } catch {
@@ -71,7 +71,6 @@ export interface AppState {
   status: ConnStatus;
   session: Session;
   ports: ListeningPort[];
-  lavish: LavishState | null;
   health: HealthInfo | null;
   ui: UiState;
   seenDone: Record<string, number>;
@@ -142,7 +141,7 @@ let previewAutoOpened = false;
 
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
-  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/", device: "auto", lavishKey: null, ...readInspector() },
+  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/", device: "auto", reviewKey: null, ...readInspector() },
   palette: null,
   dialog: null,
   theme: "system",
@@ -153,7 +152,6 @@ export const useApp = create<AppState>((set, get) => ({
   status: "connecting",
   session: emptySession(),
   ports: [],
-  lavish: null,
   health: null,
   ui: initialUi,
   seenDone: {},

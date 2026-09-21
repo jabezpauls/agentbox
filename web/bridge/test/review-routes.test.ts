@@ -65,7 +65,7 @@ describe("review routes", () => {
   it("opens a session and answers with a browsable URL", async () => {
     const body = await open(artifact("plan.html"), "Rollout plan");
     expect(body.key).toMatch(/^[0-9a-f]{8}$/);
-    expect(body.url).toBe(`https://code.example.com/workbench/review/${body.key}`);
+    expect(body.url).toBe(`https://code.example.com/workbench/?review=${body.key}`);
     expect(body.resumed).toBe(false);
 
     const list = await app.inject({ method: "GET", url: "/workbench/api/review/sessions" });

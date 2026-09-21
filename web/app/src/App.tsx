@@ -26,12 +26,22 @@ export function App() {
     return () => setThemeCycle(null);
   }, [cycle, setThemeCycle]);
 
-  // Learn the preview/lavish configuration and the picker's root once.
+  // Learn the preview configuration and the picker's root once.
   useEffect(() => {
     getHealth()
       .then(setHealth)
       .catch(() => {});
   }, [setHealth]);
+
+  // `agentbox-review open` prints a link of the form <base>/?review=<key>.
+  // Opening the drawer on that session is what turns the link the agent handed
+  // over into the thing it meant to show.
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get("review");
+    if (key && /^[0-9a-f]{8}$/.test(key)) {
+      useApp.getState().setInspector({ open: true, tab: "review", reviewKey: key });
+    }
+  }, []);
 
   useEffect(() => {
     // Seed from the REST snapshot so the UI has content before the socket opens.

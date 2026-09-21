@@ -21,7 +21,6 @@ function setup(previewDomain: string | null): void {
         herdr: { connected: true, version: "0.9.1", protocol: 1 },
         workspaceRoot: "/workspace",
         previewDomain,
-        lavishConfigured: false,
       },
       ui: {
         ...useApp.getState().ui,

@@ -93,7 +93,7 @@ describe("agentbox-review", () => {
     expect(opened.code).toBe(0);
     const key = /key: ([0-9a-f]{8})/.exec(opened.stdout)?.[1];
     expect(key).toBeTruthy();
-    expect(opened.stdout).toContain(`/workbench/review/${key}`);
+    expect(opened.stdout).toContain(`/workbench/?review=${key}`);
 
     const listed = await cli("list");
     expect(listed.stdout).toContain("Rollout plan");
