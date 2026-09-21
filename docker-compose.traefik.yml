@@ -1,0 +1,54 @@
+# Traefik mode: an existing Traefik instance on the same Docker host routes a
+# hostname to this stack over the Docker network, and no port is published at
+# all.
+#
+# Prefer this over behind-proxy mode when your reverse proxy is itself a
+# container. A loopback-published port is not reachable from inside another
+# container, and binding the host's routable address to reach it would put an
+# authenticated shell on the internet by way of the host firewall rather than
+# by way of the proxy.
+#
+# Requires: an external network Traefik already watches (AGENTBOX_EDGE_NETWORK,
+# conventionally `edge-prod`) and a DNS record for AGENTBOX_DOMAIN pointing at
+# the host. Caddy keeps authenticating every request inside the stack, so the
+# sandbox is never reachable unauthenticated even from another container on
+# that network.
+services:
+  proxy:
+    networks:
+      - internal
+      - edge
+    volumes:
+      - ./proxy/Caddyfile.behind-proxy:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${AGENTBOX_EDGE_NETWORK:-edge-prod}
+      - traefik.http.routers.agentbox.rule=Host(`${AGENTBOX_DOMAIN}`)
+      - traefik.http.routers.agentbox.entrypoints=websecure
+      - traefik.http.routers.agentbox.tls=true
+      - traefik.http.routers.agentbox.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.agentbox.loadbalancer.server.port=8080
+      - traefik.http.routers.agentbox.middlewares=agentbox-ratelimit,agentbox-headers
+      # A password with no lockout is a password being guessed at whatever rate
+      # the network allows. Normal use is a handful of requests a second — the
+      # editor's assets, a port poll, a review poll — so a ceiling well above
+      # that is invisible to a person and ruinous to a guesser.
+      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.average=60
+      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.burst=120
+      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.period=1s
+      # Behind Cloudflare every request arrives from a Cloudflare address, so
+      # rate limiting on the peer address would pool every visitor into one
+      # bucket. Count against the original client instead. Set
+      # AGENTBOX_CLIENT_IP_HEADER empty when nothing fronts Traefik.
+      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.sourcecriterion.requestheadername=${AGENTBOX_CLIENT_IP_HEADER:-CF-Connecting-IP}
+      - traefik.http.middlewares.agentbox-headers.headers.stsseconds=31536000
+      - traefik.http.middlewares.agentbox-headers.headers.stsincludesubdomains=false
+      - traefik.http.middlewares.agentbox-headers.headers.referrerpolicy=no-referrer
+      - traefik.http.middlewares.agentbox-headers.headers.contenttypenosniff=true
+
+networks:
+  edge:
+    external: true
+    name: ${AGENTBOX_EDGE_NETWORK:-edge-prod}
