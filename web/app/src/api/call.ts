@@ -12,7 +12,9 @@ import { rpc } from "./client.ts";
  */
 export function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T | undefined> {
   return rpc<T>(method, params).catch((err: unknown) => {
-    useApp.getState().reportRpcError(method, err);
+    // The retry re-runs the same call, so an error toast offers a way out
+    // rather than only a sentence about what went wrong.
+    useApp.getState().reportRpcError(method, err, () => void call(method, params));
     return undefined;
   });
 }

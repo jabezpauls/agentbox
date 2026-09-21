@@ -45,6 +45,50 @@ export function notifyTransitions(
   return toasts;
 }
 
+/**
+ * The human sentence for a failed call. rubl's rule: a person never sees a
+ * method name or an `Error: HTTP nnn`, so every failure reads
+ * `Couldn't <verb> the <noun>.` and the server's own message becomes the
+ * second line.
+ */
+const NOUNS: Record<string, string> = {
+  pane: "pane",
+  tab: "tab",
+  workspace: "workspace",
+  worktree: "worktree",
+  agent: "agent",
+  layout: "layout",
+};
+
+const VERBS: Record<string, string> = {
+  close: "close",
+  create: "create",
+  rename: "rename",
+  focus: "focus",
+  split: "split",
+  zoom: "zoom",
+  prompt: "message",
+  set_split_ratio: "resize",
+};
+
+/** Calls that are not herdr methods and carry their own sentence. */
+const PHRASES: Record<string, string> = {
+  session: "Couldn't refresh the session.",
+  "review feedback": "Couldn't send your feedback.",
+  "review end": "Couldn't end the review session.",
+};
+
+export function rpcErrorTitle(method: string): string {
+  const phrase = PHRASES[method];
+  if (phrase) return phrase;
+  const [head, tail] = method.split(".");
+  const noun = head ? NOUNS[head] : undefined;
+  const verb = tail ? VERBS[tail] : undefined;
+  if (noun && verb) return `Couldn't ${verb} the ${noun}.`;
+  if (noun) return `Couldn't update the ${noun}.`;
+  return "Couldn't complete that.";
+}
+
 /** How many agents are currently blocked — the number shown in the title badge. */
 export function blockedCount(s: Session): number {
   let n = 0;

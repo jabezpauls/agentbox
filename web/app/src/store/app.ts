@@ -3,11 +3,31 @@ import type { EventsMessage, HerdrEvent, ListeningPort } from "@workbench/shared
 import type { ConnStatus } from "../api/events.ts";
 import { getSession, rpc, RpcError, type HealthInfo } from "../api/client.ts";
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
-import { blockedCount, notifyTransitions, type Toast } from "../notify.ts";
+import { blockedCount, notifyTransitions, rpcErrorTitle, type Toast } from "../notify.ts";
 import type { Theme } from "../theme/useTheme.ts";
 
 export interface StoredToast extends Toast {
   id: string;
+  /**
+   * What makes this toast "the same" as another. Two toasts with equal keys
+   * refresh one row rather than stacking a second copy of the same sentence;
+   * two distinct failures keep their own rows even when they share a headline.
+   */
+  dedupe: string;
+  /** Re-run the call that failed. Error toasts offer this as a Retry action. */
+  retry?: () => void;
+}
+
+/** At most this many toasts are kept; the stack shows the newest three. */
+const MAX_TOASTS = 6;
+
+/**
+ * Add a toast, replacing any identical one in place rather than stacking a
+ * second copy of the same sentence. The replacement takes a fresh id so its
+ * dismissal timer restarts.
+ */
+function mergeToast(list: StoredToast[], toast: StoredToast): StoredToast[] {
+  return [...list.filter((t) => t.dedupe !== toast.dedupe), toast].slice(-MAX_TOASTS);
 }
 
 export type InspectorTab = "preview" | "review";
@@ -109,8 +129,8 @@ export interface AppState {
    * hundreds of synchronous writes per gesture.
    */
   setSidebarWidth(width: number, opts?: { persist?: boolean }): void;
-  pushToast(toast: Toast): void;
-  reportRpcError(method: string, err: unknown): void;
+  pushToast(toast: Toast, opts?: { retry?: () => void; dedupe?: string }): void;
+  reportRpcError(method: string, err: unknown, retry?: () => void): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
   focusWorkspace(id: string): void;
@@ -196,8 +216,8 @@ export const useApp = create<AppState>((set, get) => ({
         const fresh = notifyTransitions(prev, next, prev.focusedPaneId);
         set({ session: next });
         if (fresh.length) {
-          const stored = fresh.map((t) => ({ ...t, id: toastId(t) }));
-          set((s) => ({ toasts: [...s.toasts, ...stored] }));
+          const stored = fresh.map((t) => ({ ...t, id: toastId(t), dedupe: `${t.kind}:${t.paneId}` }));
+          set((s) => ({ toasts: stored.reduce(mergeToast, s.toasts) }));
           systemNotify(fresh, (id) => get().focusPane(id));
         }
         syncTitle(next);
@@ -262,13 +282,20 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({ ui: { ...s.ui, sidebarWidth: clamped } }));
   },
 
-  pushToast(toast) {
-    set((s) => ({ toasts: [...s.toasts, { ...toast, id: toastId(toast) }] }));
+  pushToast(toast, opts) {
+    const dedupe = opts?.dedupe ?? `${toast.kind}:${toast.paneId}:${toast.title}:${toast.detail ?? ""}`;
+    const stored: StoredToast = { ...toast, id: toastId(toast), dedupe, ...(opts?.retry ? { retry: opts.retry } : {}) };
+    set((s) => ({ toasts: mergeToast(s.toasts, stored) }));
   },
 
-  reportRpcError(method, err) {
+  reportRpcError(method, err, retry) {
     const detail = err instanceof RpcError ? err.message : err instanceof Error ? err.message : String(err);
-    get().pushToast({ kind: "error", paneId: "", title: `${method} failed`, detail });
+    // Keyed by the method, not by the sentence: two different calls that fail
+    // the same way are two facts, and collapsing them would hide one.
+    get().pushToast(
+      { kind: "error", paneId: "", title: rpcErrorTitle(method), detail },
+      { ...(retry ? { retry } : {}), dedupe: `error:${method}:${detail}` },
+    );
   },
 
   focusWorkspace(id) {
@@ -281,7 +308,11 @@ export const useApp = create<AppState>((set, get) => ({
         focusedTabId: ws?.active_tab_id ?? session.focusedTabId,
       },
     });
-    rpc("workspace.focus", { workspace_id: id }).catch((err) => get().reportRpcError("workspace.focus", err));
+    rpc("workspace.focus", { workspace_id: id }).catch((err) =>
+      get().reportRpcError("workspace.focus", err, () => {
+        void rpc("workspace.focus", { workspace_id: id }).catch(() => {});
+      }),
+    );
   },
 
   focusTab(id) {
@@ -294,7 +325,11 @@ export const useApp = create<AppState>((set, get) => ({
         focusedWorkspaceId: tab?.workspace_id ?? session.focusedWorkspaceId,
       },
     });
-    rpc("tab.focus", { tab_id: id }).catch((err) => get().reportRpcError("tab.focus", err));
+    rpc("tab.focus", { tab_id: id }).catch((err) =>
+      get().reportRpcError("tab.focus", err, () => {
+        void rpc("tab.focus", { tab_id: id }).catch(() => {});
+      }),
+    );
   },
 
   focusPane(id) {
@@ -308,7 +343,11 @@ export const useApp = create<AppState>((set, get) => ({
         focusedWorkspaceId: pane?.workspace_id ?? session.focusedWorkspaceId,
       },
     });
-    rpc("pane.focus", { pane_id: id }).catch((err) => get().reportRpcError("pane.focus", err));
+    rpc("pane.focus", { pane_id: id }).catch((err) =>
+      get().reportRpcError("pane.focus", err, () => {
+        void rpc("pane.focus", { pane_id: id }).catch(() => {});
+      }),
+    );
   },
 
   markSeen(paneId) {

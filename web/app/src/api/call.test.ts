@@ -22,14 +22,14 @@ describe("call", () => {
     expect(useApp.getState().toasts).toHaveLength(0);
   });
 
-  it("turns a rejected call into an error toast naming the method", async () => {
+  it("turns a rejected call into a human error toast carrying the server's message", async () => {
     rpc.mockRejectedValue(new RpcError(403, "method not allowed"));
     await expect(call("worktree.create")).resolves.toBeUndefined();
 
     const toasts = useApp.getState().toasts;
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.kind).toBe("error");
-    expect(toasts[0]!.title).toBe("worktree.create failed");
+    expect(toasts[0]!.title).toBe("Couldn't create the worktree.");
     expect(toasts[0]!.detail).toBe("method not allowed");
   });
 
@@ -41,8 +41,22 @@ describe("call", () => {
 
   it("stacks one toast per failure so a burst is not collapsed into silence", async () => {
     rpc.mockRejectedValue(new Error("boom"));
-    await call("a");
-    await call("b");
-    expect(useApp.getState().toasts.map((t) => t.title)).toEqual(["a failed", "b failed"]);
+    await call("pane.close");
+    await call("tab.close");
+    expect(useApp.getState().toasts.map((t) => t.title)).toEqual([
+      "Couldn't close the pane.",
+      "Couldn't close the tab.",
+    ]);
+  });
+});
+
+describe("toast de-duplication", () => {
+  it("refreshes the same failure in place instead of stacking copies of it", async () => {
+    rpc.mockRejectedValue(new RpcError(500, "herdr said no"));
+    await call("pane.close");
+    await call("pane.close");
+    const toasts = useApp.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.title).toBe("Couldn't close the pane.");
   });
 });
