@@ -14,6 +14,9 @@ x-sandbox: &sandbox
     dockerfile: images/workspace/Dockerfile
     args:
       NODE_MAJOR: "22"
+      # Which coding agents to bake in; the installer's --agents flag writes
+      # this, so a rebuild (install or `agentbox update`) re-applies the choice.
+      AGENTS: ${AGENTBOX_AGENTS:-claude,codex}
   image: agentbox/workspace:latest
   restart: unless-stopped
   # UID/GID 1000 inside the image. Never root.

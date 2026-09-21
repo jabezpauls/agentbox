@@ -11,6 +11,16 @@ DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
 PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
 [ -n "$PREVIEW_DOMAIN" ] && DC+=(-f docker-compose.previews.yml)
 
+# Replace (or add) a single KEY=value line in .env, atomically and 0600.
+set_env() {
+    local key="$1" val="$2" tmp
+    tmp="$(mktemp)"
+    grep -v "^${key}=" .env > "$tmp" || true
+    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+    install -m 600 "$tmp" .env
+    rm -f "$tmp"
+}
+
 case "${1:-help}" in
     start)   shift; "${DC[@]}" up -d "$@" ;;
     stop)    shift; "${DC[@]}" stop "$@" ;;
@@ -20,9 +30,40 @@ case "${1:-help}" in
     shell)     "${DC[@]}" exec code bash -l ;;
     workbench) "${DC[@]}" logs -f --tail=100 workbench ;;
     update)
+        # Adopt any of the install flags on an existing box: update .env, then
+        # rebuild and restart with the resolved overlays. --agents and --preview
+        # take effect on the rebuild; --mode swaps the overlay in place.
+        shift
+        ISOLATE="false"
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --agents)         set_env AGENTBOX_AGENTS "${2:-}"; shift 2 ;;
+                --preview)        set_env AGENTBOX_PREVIEW_MODE "${2:-}"; shift 2 ;;
+                --preview-domain) set_env AGENTBOX_PREVIEW_DOMAIN "${2:-}"; shift 2 ;;
+                --mode)           set_env AGENTBOX_MODE "${2:-}"; shift 2 ;;
+                --edge-network)   set_env AGENTBOX_EDGE_NETWORK "${2:-}"; shift 2 ;;
+                --cert-resolver)  set_env AGENTBOX_CERT_RESOLVER "${2:-}"; shift 2 ;;
+                --cpus)           set_env AGENTBOX_CPUS "${2:-}"; shift 2 ;;
+                --memory)         set_env AGENTBOX_MEMORY "${2:-}"; shift 2 ;;
+                --proxy-cpus)     set_env AGENTBOX_PROXY_CPUS "${2:-}"; shift 2 ;;
+                --proxy-memory)   set_env AGENTBOX_PROXY_MEMORY "${2:-}"; shift 2 ;;
+                --isolate-host)   ISOLATE="true"; shift ;;
+                *) echo "unknown update option: $1" >&2; exit 1 ;;
+            esac
+        done
         git pull --ff-only
-        "${DC[@]}" build --pull
-        "${DC[@]}" up -d
+        # Recompute the overlays in case --mode or --preview-domain just changed.
+        MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
+        OVERLAYS=(-f docker-compose.yml -f "docker-compose.${MODE}.yml")
+        PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
+        [ -n "$PREVIEW_DOMAIN" ] && OVERLAYS+=(-f docker-compose.previews.yml)
+        docker compose "${OVERLAYS[@]}" build --pull
+        docker compose "${OVERLAYS[@]}" up -d
+        if [ "$ISOLATE" = "true" ]; then
+            # shellcheck source=scripts/isolate-host.sh
+            . "$(dirname "$0")/isolate-host.sh"
+            agentbox_isolate_host "${OVERLAYS[@]}"
+        fi
         ;;
     password)
         [ $# -ge 2 ] && NEW="$2" || NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
@@ -64,7 +105,10 @@ agentbox <command>
   start | stop | restart | status | logs [service]
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
-  update                pull, rebuild, restart
+  update [flags]        pull, rebuild, restart; accepts the install flags
+                        (--agents, --preview, --preview-domain, --mode,
+                        --cert-resolver, --edge-network, --cpus, --memory,
+                        --proxy-cpus, --proxy-memory, --isolate-host)
   password [new]        rotate the login password
   backup [file]         archive the workspace and home volumes
   restore <file>        replace volumes from an archive
