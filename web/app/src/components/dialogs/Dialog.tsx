@@ -1,32 +1,58 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { X } from "lucide-react";
 
 interface Props {
   title: string;
   onClose(): void;
   onSubmit?(): void;
   submitLabel?: string;
+  cancelLabel?: string;
   submitDisabled?: boolean;
   danger?: boolean;
-  children: ReactNode;
+  /** 420px instead of 560px — the width a confirm wants. */
+  narrow?: boolean;
+  /** Focus the confirm button on open, so Enter confirms. */
+  autoFocusSubmit?: boolean;
+  children?: ReactNode;
 }
 
 const FOCUSABLE = 'input,textarea,button,[href],select,[tabindex]:not([tabindex="-1"])';
 
 /**
- * A modal sheet following the apple-design language: a dimming scrim, a
- * material surface, an initial focus, a focus trap, Escape to cancel and Enter
- * to confirm (except inside a textarea). Reused by every dialog for consistency.
+ * A modal dialog in three rigid bands — a 56px header with a bottom hairline,
+ * a free body, a 64px footer with right-aligned actions — plus the ever-present
+ * close button at the top right. A dimming scrim, an initial focus, a focus
+ * trap, Escape to cancel and Enter to confirm (except inside a textarea).
+ * Reused by every dialog so they are all dismissed the same way.
  */
-export function Dialog({ title, onClose, onSubmit, submitLabel, submitDisabled, danger, children }: Props) {
+export function Dialog({
+  title,
+  onClose,
+  onSubmit,
+  submitLabel,
+  cancelLabel,
+  submitDisabled,
+  danger,
+  narrow,
+  autoFocusSubmit,
+  children,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     // Remember where focus came from and hand it back on close, so dismissing
     // a dialog returns the keyboard to the control that opened it.
     const invoker = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    // A confirm focuses its verb so Enter confirms; a form focuses its first
+    // field, not the close button that happens to come first in the DOM.
+    const first = bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+    if (autoFocusSubmit && submitRef.current) submitRef.current.focus();
+    else if (first) first.focus();
+    else ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     return () => invoker?.focus?.();
-  }, []);
+  }, [autoFocusSubmit]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -59,9 +85,9 @@ export function Dialog({ title, onClose, onSubmit, submitLabel, submitDisabled, 
   };
 
   return (
-    <div className="sheet-scrim" onMouseDown={onClose}>
+    <div className="scrim" onMouseDown={onClose}>
       <div
-        className="dialog"
+        className={`dialog pop-in${narrow ? " is-narrow" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -69,14 +95,26 @@ export function Dialog({ title, onClose, onSubmit, submitLabel, submitDisabled, 
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >
-        <h2 className="dialog-title">{title}</h2>
-        <div className="dialog-body">{children}</div>
+        <header className="dialog-head">
+          <h2 className="dialog-title">{title}</h2>
+        </header>
+        <button className="icon-btn is-sm dialog-close" aria-label="Close" title="Close" onClick={onClose}>
+          <X size={14} />
+        </button>
+        <div className="dialog-body" ref={bodyRef}>
+          {children}
+        </div>
         <div className="dialog-actions">
-          <button className="btn" onClick={onClose}>
-            Cancel
+          <button className="btn btn-small" onClick={onClose}>
+            {cancelLabel ?? "Cancel"}
           </button>
           {onSubmit && (
-            <button className={`btn btn-primary${danger ? " btn-danger" : ""}`} onClick={onSubmit} disabled={submitDisabled}>
+            <button
+              ref={submitRef}
+              className={`btn btn-small ${danger ? "btn-danger" : "btn-primary"}`}
+              onClick={onSubmit}
+              disabled={submitDisabled}
+            >
               {submitLabel ?? "Confirm"}
             </button>
           )}

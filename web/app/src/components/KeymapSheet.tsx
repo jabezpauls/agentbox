@@ -6,9 +6,9 @@ import { BINDINGS, type Binding } from "../keys/actions.ts";
 const GROUPS: Binding["group"][] = ["Panes", "Tabs", "Workspaces", "View"];
 
 /**
- * The keymap sheet (prefix+?). A quiet modal listing the default herdr bindings,
- * grouped, each shown as the prefix pill plus its follow-up key. Dismissed by
- * Escape, the backdrop, or the close button.
+ * The keymap sheet (prefix+?). A quiet modal listing the default herdr
+ * bindings, grouped, each shown as the prefix chip plus its follow-up key.
+ * Dismissed by Escape, the backdrop, or the close button.
  */
 export function KeymapSheet() {
   const isOpen = useApp((s) => s.ui.dialog?.kind === "keymap");
@@ -38,9 +38,9 @@ export function KeymapSheet() {
   const close = () => setUi({ dialog: null });
 
   return (
-    <div className="sheet-scrim" onMouseDown={close}>
+    <div className="scrim" onMouseDown={close}>
       <div
-        className="keymap-sheet"
+        className="keymap-sheet pop-in"
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
@@ -53,28 +53,30 @@ export function KeymapSheet() {
               Press <kbd className="kbd">⌃B</kbd> to arm the prefix, then a key. Twice sends a literal ⌃B.
             </p>
           </div>
-          <button ref={closeRef} className="icon-btn" onClick={close} aria-label="Close">
-            <X size={16} />
+          <button ref={closeRef} className="icon-btn" onClick={close} aria-label="Close" title="Close">
+            <X size={15} />
           </button>
         </header>
 
-        <div className="keymap-grid">
-          {GROUPS.map((group) => (
-            <section key={group} className="keymap-group">
-              <h3 className="keymap-group-title">{group}</h3>
-              <ul className="keymap-list">
-                {BINDINGS.filter((b) => b.group === group).map((b) => (
-                  <li key={b.id} className="keymap-row">
-                    <span className="keymap-keys">
-                      <kbd className="kbd">⌃B</kbd>
-                      <kbd className="kbd">{b.keys}</kbd>
-                    </span>
-                    <span className="keymap-label">{b.label}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+        <div className="keymap-body">
+          <div className="keymap-grid">
+            {GROUPS.map((group) => (
+              <section key={group} className="keymap-group">
+                <h3 className="section-label keymap-group-title">{group}</h3>
+                <ul className="keymap-list">
+                  {BINDINGS.filter((b) => b.group === group).map((b) => (
+                    <li key={b.id} className="keymap-row">
+                      <span className="keymap-keys">
+                        <kbd className="kbd">⌃B</kbd>
+                        <kbd className="kbd">{b.keys}</kbd>
+                      </span>
+                      <span className="keymap-label">{b.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
         </div>
       </div>
     </div>

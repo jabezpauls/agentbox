@@ -47,7 +47,7 @@ export function NewWorkspaceDialog() {
     let live = true;
     listDirs(rel)
       .then((e) => live && (setEntries(e), setError(null)))
-      .catch(() => live && (setEntries([]), setError("Cannot read this folder")));
+      .catch(() => live && (setEntries([]), setError("Couldn't read this folder.")));
     return () => {
       live = false;
     };
@@ -92,7 +92,7 @@ export function NewWorkspaceDialog() {
           ))}
         </div>
         <ul className="dir-list" role="listbox" aria-label="Subdirectories">
-          {entries.length === 0 && <li className="dir-empty">{error ?? "No subfolders"}</li>}
+          {entries.length === 0 && <li className="dir-empty">{error ?? "No subfolders here."}</li>}
           {entries.map((e) => (
             <li key={e.path}>
               {/* Double-click descends with the mouse; Enter/Space on the

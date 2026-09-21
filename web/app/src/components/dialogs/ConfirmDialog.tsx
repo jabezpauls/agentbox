@@ -13,28 +13,28 @@ interface Shape {
 
 const SHAPES: Record<string, Shape> = {
   "confirm.close-pane": {
-    heading: "Close pane?",
+    heading: "Close this pane?",
     submit: "Close pane",
     idKey: "paneId",
     method: "pane.close",
     paramKey: "pane_id",
-    body: () => "has a running agent. Closing it will end the agent's session.",
+    body: () => "has an agent running. Closing the pane ends its session.",
   },
   "confirm.close-tab": {
-    heading: "Close tab?",
+    heading: "Close this tab?",
     submit: "Close tab",
     idKey: "tabId",
     method: "tab.close",
     paramKey: "tab_id",
-    body: () => "has a running agent. Closing it will end the agent's session.",
+    body: () => "has an agent running. Closing the tab ends its session.",
   },
   "confirm.close-workspace": {
-    heading: "Close workspace?",
+    heading: "Close this workspace?",
     submit: "Close workspace",
     idKey: "workspaceId",
     method: "workspace.close",
     paramKey: "workspace_id",
-    body: () => "will be closed, ending every tab, pane and agent inside it.",
+    body: () => "closes with every tab, pane and agent inside it.",
   },
 };
 
@@ -58,7 +58,7 @@ export function ConfirmDialog() {
   };
 
   return (
-    <Dialog title={shape.heading} onClose={close} onSubmit={confirm} submitLabel={shape.submit} danger>
+    <Dialog title={shape.heading} onClose={close} onSubmit={confirm} submitLabel={shape.submit} danger narrow autoFocusSubmit>
       <p className="dialog-text">
         <strong>{title}</strong> {shape.body(title)}
       </p>
