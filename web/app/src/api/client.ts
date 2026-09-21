@@ -1,12 +1,13 @@
 import type {
   DirEntry,
   ListeningPort,
+  PreviewShare,
   ReviewComment,
   ReviewSession,
   ReviewSessionDetail,
   SessionSnapshot,
 } from "@workbench/shared";
-import { apiUrl } from "./base.ts";
+import { apiUrl, basePath } from "./base.ts";
 
 export class RpcError extends Error {
   status: number;
@@ -45,11 +46,18 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
   return body.result as T;
 }
 
+async function del(path: string): Promise<void> {
+  const res = await fetch(apiUrl(path), { method: "DELETE", headers: { accept: "application/json" } });
+  if (!res.ok) throw new RpcError(res.status, `${path} → ${res.status}`);
+}
+
 export interface HealthInfo {
   ok: boolean;
   herdr: { connected: boolean; version: string | null; protocol: number | null };
   workspaceRoot: string;
   previewDomain: string | null;
+  /** Whether the operator has enabled public sharing; the panel hides Share if not. */
+  previewSharing: boolean;
 }
 
 export function getHealth(): Promise<HealthInfo> {
@@ -92,4 +100,44 @@ export function endReviewSession(key: string): Promise<ReviewSession> {
 
 export function listDirs(path: string): Promise<DirEntry[]> {
   return getJson<DirEntry[]>(`/api/fs/dirs?path=${encodeURIComponent(path)}`);
+}
+
+/** The live public shares the owner has minted. */
+export function listShares(): Promise<PreviewShare[]> {
+  return getJson<PreviewShare[]>("/api/preview/shares");
+}
+
+/** Mint a public share for a port; the returned `url` is the link to hand out. */
+export function createShare(port: number): Promise<PreviewShare> {
+  return postJson<PreviewShare>("/api/preview/shares", { port });
+}
+
+/** Revoke a share by id; the link 404s immediately afterwards. */
+export function revokeShare(id: string): Promise<void> {
+  return del(`/api/preview/shares/${id}`);
+}
+
+/** Push a share's expiry back out to the default window. */
+export function extendShare(id: string): Promise<PreviewShare> {
+  return postJson<PreviewShare>(`/api/preview/shares/${id}/extend`, {});
+}
+
+/** The state of a preview port, as the panel's probe reads it. */
+export type ProbeState = "ready" | "down" | "error";
+
+/**
+ * Probe a preview port by asking the proxy for it with a HEAD. The bridge marks
+ * its branded fallback with `X-Preview-Upstream: down`, so a live server and a
+ * not-yet-serving one are told apart without loading the iframe onto an error.
+ */
+export async function probePreview(port: number, path: string): Promise<ProbeState> {
+  const url = `${basePath()}/preview/${port}/${path.replace(/^\/+/, "")}`;
+  try {
+    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+    if (res.headers.get("x-preview-upstream") === "down") return "down";
+    if (res.status >= 500) return "error";
+    return "ready";
+  } catch {
+    return "down";
+  }
 }

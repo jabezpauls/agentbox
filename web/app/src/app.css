@@ -2060,6 +2060,118 @@
   width: 100%;
 }
 
+/* The in-app checking / not-responding state, shown in place of the iframe so a
+   port that is not up yet never flashes a browser or edge error page. */
+.prev-status {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  text-align: center;
+  background: var(--surface);
+}
+.prev-status-glyph {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  margin-bottom: var(--sp-1);
+}
+.prev-status-glyph.is-spin {
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .prev-status-glyph.is-spin svg {
+    animation: prev-spin 900ms linear infinite;
+  }
+}
+@keyframes prev-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.prev-status-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.prev-status-sub {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  max-width: 32ch;
+}
+
+/* The public-share affordance: a persistent banner so a live share is never a
+   surprise, the link with a copy button, and the expiry / extend / revoke row. */
+.prev-share {
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.prev-share-banner {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--fs-xs);
+}
+.prev-share-banner svg {
+  flex: none;
+}
+.prev-share-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.prev-share-url {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.prev-share-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.prev-share-expiry {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.port-tag.is-public {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 /* --- review panel ---------------------------------------------------------- */
 
 .review {

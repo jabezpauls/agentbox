@@ -18,7 +18,7 @@ beforeEach(() => {
   );
   act(() => {
     useApp.setState({
-      health: { ok: true, herdr: { connected: true, version: "0.9.1", protocol: 1 }, workspaceRoot: "/workspace", previewDomain: null },
+      health: { ok: true, herdr: { connected: true, version: "0.9.1", protocol: 1 }, workspaceRoot: "/workspace", previewDomain: null, previewSharing: false },
       ui: { ...useApp.getState().ui, dialog: { kind: "workspace.new" } },
     });
   });
