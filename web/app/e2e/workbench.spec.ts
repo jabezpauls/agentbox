@@ -37,8 +37,8 @@ test("the Workbench drives herdr end to end", async ({ page }) => {
   await page.goto("./");
 
   await test.step("it starts empty and connected", async () => {
-    await expect(page.getByText("Select a pane")).toBeVisible();
-    await expect(page.getByText("No workspaces yet.")).toBeVisible();
+    await expect(page.getByText("Nothing open.")).toBeVisible();
+    await expect(page.getByText(/No workspaces yet\./)).toBeVisible();
     // The connection pill reports the live herdr the stack started.
     await expect(page.locator(".conn-pill.is-open")).toBeVisible();
   });
