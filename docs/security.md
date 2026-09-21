@@ -38,13 +38,31 @@ over the host.
   `127.0.0.1:<port>` inside the sandbox, with the port validated as a number in
   range. It cannot be pointed at another host, and it reaches nothing the
   sandbox could not already reach.
-- **A path preview is sandboxed.** Served under the Workbench's own origin, an
-  agent-written page could otherwise script the app, read its storage and call
-  its API as you, so the iframe deliberately omits `allow-same-origin`. A
-  configured preview domain puts the page on its own origin instead, where the
-  browser's origin separation does the same job without the restriction.
-- **The directory picker is confined** to the workspace root; paths that
-  escape it are rejected rather than resolved.
+- **A path preview is sandboxed in the panel.** Served under the Workbench's
+  own origin, an agent-written page could otherwise script the app, read its
+  storage and call its API as you, so the preview *iframe* deliberately omits
+  `allow-same-origin`. That protection is the iframe's: opening the same
+  preview full screen makes it a top-level document, where no sandbox applies
+  and the page really does share the Workbench's origin. The ↗ button therefore
+  warns and asks first in path mode. A configured preview domain puts the page
+  on its own origin, where the browser's origin separation does the job in both
+  places, and full screen opens without a prompt.
+- **Previews are not handed your login.** `Authorization` and `Cookie` are
+  stripped from every request and websocket upgrade the preview proxy forwards,
+  so the password guarding the box never reaches a port an agent opened.
+- **WebSocket upgrades are origin-checked.** The same-origin policy does not
+  cover websocket handshakes, so a page in another tab could otherwise open
+  `/workbench/ws/events` or `/workbench/ws/terminal` on your cached
+  credentials. Every upgrade must carry an `Origin` equal to the request's own
+  scheme and host; a foreign origin, a missing one and the `null` a sandboxed
+  document sends are all refused.
+- **The Workbench cannot be framed** by another site: its pages are served with
+  `frame-ancestors 'self'`, so it cannot be overlaid onto a live terminal.
+- **The directory picker is confined** to the workspace root: `/api/fs/dirs`
+  rejects any path that escapes it rather than resolving it. Creating a
+  workspace or worktree is *not* so confined — those RPCs pass the directory
+  you choose to herdr, which can open a session anywhere in the sandbox the
+  agents can already reach.
 - **lavish binds the internal network.** lavish-axi is unauthenticated and
   serves local files, so it binds one address on `agentbox_internal` — not a
   wildcard. That network carries only agentbox's own containers, and the proxy

@@ -82,3 +82,10 @@ to prefer behind-proxy mode there.
 
 `./scripts/agentbox update` pulls, rebuilds and restarts. Your workspace and
 home volumes are untouched, so files, agent logins and editor settings survive.
+
+It does not rewrite `.env`. When an update adds settings, an existing install
+keeps its old file and the new keys are simply absent — compare it against
+`.env.example` after updating and copy across anything missing. The keys added
+with the Workbench are `AGENTBOX_LAVISH_DOMAIN` and `AGENTBOX_LAVISH_URL`:
+without them lavish has no allowed host and refuses the requests the proxy
+sends it.

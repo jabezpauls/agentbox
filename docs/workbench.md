@@ -17,7 +17,8 @@ are two views of one session rather than two sessions.
 Everything it shows comes from herdr over a local socket. The bridge that
 serves the app holds one connection to herdr and fans its events out to every
 open tab, so two browsers, a phone and the TUI all stay in step. Nothing is
-stored in the browser except your theme and the inspector's width.
+stored in the browser except your theme and the inspector's own shape — whether
+it is open, which tab it shows and how wide it is.
 
 ![The Workbench in dark mode](images/workbench-dark.png)
 
@@ -96,10 +97,13 @@ that is the Workbench's own origin, the iframe is sandboxed *without*
 `allow-same-origin`: an agent-written dev server must not be able to script the
 Workbench, read its storage or call its API as you. The cost is that the
 previewed page has no cookies, no `localStorage` and no same-origin requests of
-its own. For most dev servers that is invisible. Apps that build absolute URLs
-from the origin, or that are mounted at the root, may also need to be told they
-are behind a prefix — Vite's `base`, Next's `basePath`, JupyterLab's
-`--ServerApp.base_url`, and similar.
+its own. Its websockets are refused too: a sandboxed document has no origin of
+its own — it sends `Origin: null` — and the bridge accepts an upgrade only from
+its own origin, so live reload does not connect in this mode. Page loads and
+reloads are unaffected. Apps that build absolute URLs from the origin, or that
+are mounted at the root, may also need to be told they are behind a prefix —
+Vite's `base`, Next's `basePath`, JupyterLab's `--ServerApp.base_url`, and
+similar. Hostname previews have none of these limits.
 
 **Hostname previews** give each port an origin of its own,
 `PORT.<preview-domain>`, and therefore full fidelity with no sandbox. Turn them
@@ -125,7 +129,10 @@ hostnames to the same address as the main one.
 > Path previews need none of this and are the right default for a tunnel.
 
 Full-screen (the ↗ button) opens the preview domain when one is configured and
-the path proxy otherwise.
+the path proxy otherwise. In path mode it asks first: a top-level window has no
+sandbox attribute, so the agent's page would get the Workbench's own origin —
+its storage, its API and its terminals. With a preview domain the page is on a
+separate origin anyway and it opens straight away.
 
 ## Lavish
 
