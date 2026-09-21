@@ -23,8 +23,12 @@ FROM debian:bookworm-slim
 ARG NODE_MAJOR=22
 # ttyd is not packaged by Debian; pin the upstream static build.
 ARG TTYD_VERSION=1.7.7
-# Set to "false" to build without the coding agents (smaller image).
-ARG INSTALL_AGENTS=true
+# Which coding agents to bake in, as a comma-separated list of manifest names
+# (see the install step below). The default is the current pair; pass e.g.
+# `--build-arg AGENTS=claude` to build a smaller image with just one, or
+# `--build-arg AGENTS=` for none. herdr is installed regardless — it is the
+# multiplexer the Workbench and the TUI attach to, not an optional agent.
+ARG AGENTS=claude,codex
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -91,22 +95,35 @@ RUN useradd --uid 1000 --create-home --home-dir /home/coder --shell /bin/bash co
 # code-server installs to /usr/lib and symlinks into /usr/local/bin.
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
-# Coding agents, installed system-wide as root.
+# Coding agents, installed system-wide as root from the AGENTS list.
+#
+# The manifest is the `case` below: one arm per agent, mapping its name to the
+# npm package and the binary to smoke-test. Adding an agent is a one-line entry
+# here (name → package + bin); nothing else in the build changes.
 #
 # They deliberately do NOT go in /home/coder: a named volume is mounted there at
 # runtime, which would shadow them and leave updates stranded on the old volume.
 # /usr/local/bin is also on the default PATH, so a login shell (which resets PATH
 # from /etc/profile) still finds them.
 #
-# No '|| true' here: a failed install must fail the build rather than quietly
-# producing an image whose entire purpose is missing.
-RUN if [ "$INSTALL_AGENTS" = "true" ]; then \
-        npm install -g --prefix /usr/local --no-fund --no-audit \
-            @anthropic-ai/claude-code \
-            @openai/codex \
-        && claude --version \
-        && codex --version ; \
-    fi
+# No '|| true' here: a requested agent that fails to install must fail the build
+# rather than quietly producing an image whose whole purpose is missing.
+ARG AGENTS
+RUN set -eu; \
+    install_agent() { \
+        case "$1" in \
+            claude) pkg="@anthropic-ai/claude-code"; bin="claude" ;; \
+            codex)  pkg="@openai/codex"; bin="codex" ;; \
+            *) echo "unknown agent in AGENTS: '$1'" >&2; exit 1 ;; \
+        esac; \
+        echo "installing agent: $1 ($pkg)"; \
+        npm install -g --prefix /usr/local --no-fund --no-audit "$pkg"; \
+        "$bin" --version; \
+    }; \
+    IFS=','; for a in $AGENTS; do \
+        a="$(printf '%s' "$a" | tr -d '[:space:]')"; \
+        [ -n "$a" ] && install_agent "$a"; \
+    done; true
 
 # Keep user-installed npm binaries on PATH for login shells too.
 RUN printf '%s\n' \
