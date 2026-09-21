@@ -117,6 +117,16 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
     }
   };
 
+  // Tabbing (or otherwise moving focus) out of the menu closes it. Because this
+  // is a deliberate move forward rather than a dismissal, don't yank focus back
+  // to the trigger the way Escape and item activation do.
+  const onMenuBlur = (e: React.FocusEvent) => {
+    if (!menuRef.current?.contains(e.relatedTarget as Node | null)) {
+      menuTrigger.current = null;
+      setMenu(null);
+    }
+  };
+
   const onMenuKeyDown = (e: React.KeyboardEvent) => {
     const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
     const i = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -219,6 +229,7 @@ export function TabBar({ sidebarOpen, onOpenSidebar }: Props) {
           role="menu"
           ref={menuRef}
           onKeyDown={onMenuKeyDown}
+          onBlur={onMenuBlur}
         >
           <button
             className="ctx-item"

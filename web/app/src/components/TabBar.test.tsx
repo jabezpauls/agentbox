@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -86,6 +86,31 @@ describe("TabBar accessibility", () => {
     expect(within(menu).getByRole("menuitem", { name: /close/i })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(rpc).toHaveBeenCalledWith("tab.close", { tab_id: "w1:t1" });
+  });
+
+  it("closes the actions menu when focus leaves it (Tab-out)", async () => {
+    const user = userEvent.setup();
+    renderBar();
+    await user.click(screen.getByRole("button", { name: "Tab actions for one" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeInTheDocument();
+
+    // Focus moves to a control outside the menu, as Tab would take it.
+    const outside = screen.getByRole("button", { name: "Toggle inspector" });
+    fireEvent.blur(menu, { relatedTarget: outside });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("keeps the menu open while focus moves between its own items", async () => {
+    const user = userEvent.setup();
+    renderBar();
+    await user.click(screen.getByRole("button", { name: "Tab actions for one" }));
+    const menu = screen.getByRole("menu");
+    const close = within(menu).getByRole("menuitem", { name: /close/i });
+    // A blur whose next focus is still inside the menu must not dismiss it.
+    fireEvent.blur(menu, { relatedTarget: close });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("closes a focused tab with Delete", async () => {

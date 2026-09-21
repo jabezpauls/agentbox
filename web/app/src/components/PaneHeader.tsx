@@ -29,6 +29,9 @@ export function PaneHeader({ pane }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  // Suppresses the focus-return-to-trigger behaviour for one close, used when
+  // the menu closes because focus deliberately left it (a Tab-out).
+  const skipRefocus = useRef(false);
 
   const title = paneTitle(pane, agent);
   const cwd = pane.foreground_cwd ?? pane.cwd ?? "";
@@ -51,9 +54,23 @@ export function PaneHeader({ pane }: Props) {
   // Same menu model as the tab bar's: focus moves into the menu on open and
   // back to its trigger on close, with arrows to walk it and Escape to leave.
   useEffect(() => {
-    if (menuOpen) menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    else menuBtnRef.current?.focus();
+    if (menuOpen) {
+      menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    } else if (skipRefocus.current) {
+      skipRefocus.current = false;
+    } else {
+      menuBtnRef.current?.focus();
+    }
   }, [menuOpen]);
+
+  // Close on a deliberate focus move out of the menu (e.g. Tab), without
+  // pulling focus back to the trigger the way Escape and activation do.
+  const onMenuBlur = (e: React.FocusEvent) => {
+    if (!menuRef.current?.contains(e.relatedTarget as Node | null)) {
+      skipRefocus.current = true;
+      setMenuOpen(false);
+    }
+  };
 
   const onMenuKeyDown = (e: React.KeyboardEvent) => {
     const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
@@ -134,7 +151,7 @@ export function PaneHeader({ pane }: Props) {
       </button>
 
       {menuOpen && (
-        <div className="ctx-menu pane-ctx" role="menu" id={menuId} ref={menuRef} onKeyDown={onMenuKeyDown}>
+        <div className="ctx-menu pane-ctx" role="menu" id={menuId} ref={menuRef} onKeyDown={onMenuKeyDown} onBlur={onMenuBlur}>
           <button className="ctx-item" role="menuitem" onClick={() => split("right")}>
             <Columns2 size={14} /> Split right
           </button>
