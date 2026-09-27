@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isRoutablePath, splitTarget } from "../src/path-guard.js";
+import { canonicalPath, isRoutablePath, isStrictPath, splitTarget } from "../src/path-guard.js";
 import { route } from "../src/routes.js";
 
 function at(url: string) {
   const { path, query } = splitTarget(url);
-  return route(path, query);
+  return route(canonicalPath(path), query);
 }
 
 describe("the path guard", () => {
@@ -48,6 +48,29 @@ describe("the path guard", () => {
     // Only that exact prefix: anything resembling it is still judged whole.
     for (const p of ["/api/davx;y", "/api/dav;x/", "/api%2fdav/a;b", "//api/dav/a;b", "/./api/dav/a;b", "/API/DAV/a;b", "/api/../api/dav/a;b"]) {
       expect(isRoutablePath(p), p).toBe(false);
+    }
+  });
+
+  it("reads an escaped ordinary character as the character, so an upstream's router cannot read it differently", () => {
+    // The bridge's router decodes %65 to e; routed raw, /ws/%65ditor would be
+    // a path the gate had never judged.
+    expect(canonicalPath("/ws/%65ditor")).toBe("/ws/editor");
+    expect(canonicalPath("/%77s/editor")).toBe("/ws/editor");
+    expect(canonicalPath("/%76%73code/")).toBe("/vscode/");
+    expect(canonicalPath("/a%2Db%5F%7Ec%30")).toBe("/a-b_~c0");
+    // Reserved and other characters keep their escape: they mean something else decoded.
+    expect(canonicalPath("/x%20y%25z%3F%23%40")).toBe("/x%20y%25z%3F%23%40");
+    // A dot is never decoded (the guard refuses %2e anyway): it could make a dot-segment.
+    expect(canonicalPath("/x%2ey")).toBe("/x%2ey");
+    // The WebDAV mount's names go as sent.
+    expect(canonicalPath("/api/dav/%41%3B")).toBe("/api/dav/%41%3B");
+    expect(canonicalPath("/api/%64av/x")).toBe("/api/dav/x");
+  });
+
+  it("holds a path to the strict form, with no exemption, where one is asked for", () => {
+    expect(isStrictPath("/workbench/")).toBe(true);
+    for (const p of ["/api/dav/a;b", "/api/dav/..%2fvscode/", "/api/dav/../x", "//x", "x"]) {
+      expect(isStrictPath(p), p).toBe(false);
     }
   });
 
@@ -119,6 +142,9 @@ describe("the route table", () => {
 
   it("does not serve the editor channel from outside", () => {
     for (const u of ["/ws/editor", "/ws/editor/", "/ws/editor/x", "/ws/editor?x=1"]) {
+      expect(at(u), u).toEqual({ kind: "notFound" });
+    }
+    for (const u of ["/ws/%65ditor", "/%77s/editor", "/ws/%65%64itor/x", "/%77%73/%65%64%69%74%6f%72"]) {
       expect(at(u), u).toEqual({ kind: "notFound" });
     }
     expect(at("/ws/events")).toEqual({ kind: "upstream", upstream: "bridge", target: "/ws/events" });

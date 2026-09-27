@@ -61,9 +61,12 @@ proxy.
   any raw path with a dot-segment, `%2e`, `%2f`, `%5c`, a backslash, `;` or
   `//` — forms that one parser normalises and another does not — so no
   difference between Caddy, the gate and an upstream can move a request from
-  one branch to another. Then, on the raw path: `/login` and the gate's own
-  `/_gate/*` API, exactly `/cli/install` and `/cli/agentbox.mjs` (the CLI,
-  below) and the device-approval page stay in the gate; `/vscode/*` goes to code-server with
+  one branch to another. An escaped ordinary character (`%65` for `e`) is then
+  read as the character, as the bridge's router would read it, and that one
+  spelling is both routed and forwarded: `/ws/%65ditor` is `/ws/editor` to
+  every layer. Then, on that path: `/login` and the gate's own `/_gate/*` API,
+  exactly `/cli/install` and `/cli/agentbox.mjs` (the CLI, below) and the
+  device-approval page stay in the gate; `/vscode/*` goes to code-server with
   the prefix stripped; `/terminal`, `/shell` and `/monitor` go to their ttyd
   services unchanged; everything else goes to the bridge unchanged.
 - **One exemption, for filenames.** A WebDAV client names files in the path,
@@ -78,7 +81,8 @@ proxy.
   mount is behind sign-in like everything else.
 - **The editor channel stays inside.** `/ws/editor` is how the editor extension
   in the sandbox hears "Open in editor"; the gate answers `404` for it and for
-  anything under it, signed in or not, so only the sandbox's own loopback
+  anything under it, under any spelling, signed in or not, so only the
+  sandbox's own loopback
   reaches it (and the bridge refuses it too if a request arrives with an
   `Origin` or forwarding headers).
 - **Nothing without a session or a device token.** A page load without one is

@@ -49,5 +49,33 @@ export function isDavPath(path: string): boolean {
  */
 export function isRoutablePath(path: string): boolean {
   if (isDavPath(path)) return true;
+  return isStrictPath(path);
+}
+
+/** The strict form alone, with no exemption: for a path that is somewhere to land rather than a filename. */
+export function isStrictPath(path: string): boolean {
   return path.startsWith("/") && !AMBIGUOUS.test(path);
+}
+
+/** RFC 3986's unreserved characters, but the dot (see canonicalPath). */
+const UNRESERVED = /^[A-Za-z0-9_~-]$/;
+
+/**
+ * The path the gate routes on and forwards: `%65` read as `e`, and every other
+ * escape of an unreserved character likewise. RFC 3986 makes the two spellings
+ * one path, and the bridge's router decodes them — so routed raw,
+ * `/ws/%65ditor` would be the editor channel to the bridge and some other path
+ * to the route table. Decoded before routing, and forwarded decoded, both read
+ * one path. Escapes of anything else stay: a reserved character means
+ * something else unescaped, and the guard has already refused the ones that
+ * could move a request (`%2f`, `%5c`, `%2e`). The dot stays escaped for the
+ * same reason. Under the WebDAV mount only the prefix is read this way; the
+ * names beneath it go as sent.
+ */
+export function canonicalPath(path: string): string {
+  if (isDavPath(path)) return path;
+  return path.replace(/%([0-9A-Fa-f]{2})/g, (escape, hex: string) => {
+    const c = String.fromCharCode(parseInt(hex, 16));
+    return UNRESERVED.test(c) ? c : escape;
+  });
 }

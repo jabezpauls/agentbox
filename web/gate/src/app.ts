@@ -10,7 +10,7 @@ import { peekInfo, setInfo, type GateCore, type RequestInfo } from "./context.js
 import { DeviceFlow } from "./device.js";
 import { isSafeMethod, isSameOriginRequest, originMatchesHost } from "./origin.js";
 import { PasswordChecker } from "./password.js";
-import { isRoutablePath, splitTarget } from "./path-guard.js";
+import { canonicalPath, isRoutablePath, splitTarget } from "./path-guard.js";
 import { proxyHttp, proxyUpgrade, refuseUpgrade, SECURITY_HEADERS, type Forwarded } from "./proxy.js";
 import { LOGIN_LIMITS, LoginLimiter, WindowLimiter, type LoginLimits } from "./ratelimit.js";
 import { EDITOR_PREFIX, route } from "./routes.js";
@@ -192,11 +192,15 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
   }
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const { path, query } = splitTarget(req.url ?? "");
-    if (!isRoutablePath(path)) {
+    const target = splitTarget(req.url ?? "");
+    if (!isRoutablePath(target.path)) {
       plain(res, 400, "bad path");
       return;
     }
+    // Everything from here on — the route, the way back after signing in, the
+    // path forwarded — sees the one canonical spelling.
+    const path = canonicalPath(target.path);
+    const { query } = target;
     if (isRefusedServiceWorker(req, path)) {
       plain(res, 403, "service workers are not allowed here");
       return;
@@ -242,8 +246,10 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
 
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     socket.on("error", () => socket.destroy());
-    const { path, query } = splitTarget(req.url ?? "");
-    if (!isRoutablePath(path)) return refuseUpgrade(socket, 400, "Bad Request");
+    const target = splitTarget(req.url ?? "");
+    if (!isRoutablePath(target.path)) return refuseUpgrade(socket, 400, "Bad Request");
+    const path = canonicalPath(target.path);
+    const { query } = target;
     const info = settle(req);
     const r = route(path, query);
     // The gate's own routes take no upgrades (yet); nor does a redirect, nor

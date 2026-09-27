@@ -72,7 +72,7 @@ describe("the WebDAV mount", () => {
 describe("the editor channel", () => {
   it("is not found from outside, signed in or not, by request or by WebSocket", async () => {
     const before = h.allSeen().length;
-    for (const p of ["/ws/editor", "/ws/editor/", "/ws/editor/x?y=1"]) {
+    for (const p of ["/ws/editor", "/ws/editor/", "/ws/editor/x?y=1", "/ws/%65ditor", "/%77s/editor", "/ws/%65%64itor/x"]) {
       for (const headers of [{}, { cookie }, bearer]) {
         expect((await request(h.base, "GET", p, { headers })).status, p).toBe(404);
       }
@@ -81,6 +81,11 @@ describe("the editor channel", () => {
       }
     }
     expect(h.allSeen().length).toBe(before);
+  });
+
+  it("forwards an escaped ordinary character as the character itself", async () => {
+    const res = await request(h.base, "GET", "/api/%68ealth", { headers: bearer });
+    expect(res.json()).toMatchObject({ echo: "bridge", url: "/api/health" });
   });
 
   it("leaves the app's own sockets alone", async () => {

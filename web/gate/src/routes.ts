@@ -2,10 +2,12 @@
  * The route table: which raw request path goes where. Pure, so the table can be
  * tested exhaustively and read in one place.
  *
- * Every decision is made on the raw path, after the path guard has refused
- * anything two parsers could read differently. Prefixes match whole segments
- * (`/shell` and `/shell/…`, never `/shellfish`), so a route's reach is exactly
- * what its name says.
+ * Every decision is made on the path as the gate received it, after the path
+ * guard has refused anything two parsers could read differently and every
+ * escaped ordinary character has been read as itself (`/ws/%65ditor` is
+ * `/ws/editor`: see canonicalPath) — and that same path is what is forwarded.
+ * Prefixes match whole segments (`/shell` and `/shell/…`, never `/shellfish`),
+ * so a route's reach is exactly what its name says.
  */
 import { isDavPath } from "./path-guard.js";
 
@@ -55,7 +57,8 @@ export const EDITOR_PREFIX = "/vscode";
  * sandbox holds open to receive "Open in editor". It is for that extension
  * alone; a browser, or anything else through the front door, posing as the
  * editor would be sent the files the owner opens. The bridge refuses anything
- * that is not local, and the gate does not forward it at all.
+ * that is not local, and the gate does not forward it at all — under any
+ * spelling, since the route table only ever sees the canonical one.
  */
 export const EDITOR_CHANNEL = "/ws/editor";
 

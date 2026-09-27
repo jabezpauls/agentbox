@@ -291,7 +291,8 @@ for CADDYFILE in $CADDYFILES; do
     # /api/dav/ only its prefix is judged), but it is behind sign-in all the
     # same; the editor channel is not served from outside at all.
     for p in "/api/dav/a;b" "/api/dav/a%5Cb" "/api/dav/..%2f..%2fvscode/" "/api/dav/%2e%2e/%2e%2e/terminal/" \
-        "/api/dav/../../vscode/" "/api/dav/..%5c..%5cshell/" "/api/davx;y" "/ws/editor" "/ws/editor/x"; do
+        "/api/dav/../../vscode/" "/api/dav/..%5c..%5cshell/" "/api/davx;y" "/ws/editor" "/ws/editor/x" \
+        "/ws/%65ditor" "/%77s/editor" "/ws/%65%64itor/x"; do
         req PROPFIND "$p" -H 'Depth: 0'
         case "$STATUS" in 400|401|404) ;; *) fail "unauthenticated PROPFIND $p -> $STATUS $BODY" ;; esac
         req PUT "$p" --data 'x'
@@ -333,6 +334,8 @@ for CADDYFILE in $CADDYFILES; do
         "/terminal/|7681|/terminal/" "/terminal/token|7681|/terminal/token" "/shell/|7683|/shell/"
         "/monitor/|7682|/monitor/" "/api/health|7800|/api/health" "/|7800|/"
         "/api/files/list?path=%2Fworkspace|7800|/api/files/list?path=%2Fworkspace"
+        # An escaped ordinary character is forwarded as the character itself.
+        "/api/%68ealth|7800|/api/health"
     )
     for r in "${routes[@]}"; do
         IFS='|' read -r p port want <<<"$r"
@@ -431,7 +434,9 @@ for CADDYFILE in $CADDYFILES; do
         [ "$ok" = 0 ] || pass "nothing that merely resembles /api/dav/ is let through"
     fi
     before="$(hits)"
-    for p in /ws/editor /ws/editor/x; do
+    # Every spelling of it: an escaped ordinary character is read as itself
+    # before routing, as the bridge's router would read it.
+    for p in /ws/editor /ws/editor/x /ws/%65ditor /%77s/editor /ws/%65%64itor/x /%77%73/%65%64%69%74%6f%72; do
         req GET "$p" -H "Cookie: $SESSION"
         [ "$STATUS" = 404 ] || fail "signed-in GET $p -> $STATUS"
         ws "$p" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
