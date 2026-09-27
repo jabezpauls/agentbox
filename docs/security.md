@@ -66,6 +66,21 @@ proxy.
   device-approval page stay in the gate; `/vscode/*` goes to code-server with
   the prefix stripped; `/terminal`, `/shell` and `/monitor` go to their ttyd
   services unchanged; everything else goes to the bridge unchanged.
+- **One exemption, for filenames.** A WebDAV client names files in the path,
+  and a filename may hold `;`, a backslash or `%5c`. So under `/api/dav/` the
+  gate judges only that exact prefix: the rest of the path is not held to the
+  check above, and the request goes to the bridge, raw and unchanged, and
+  nowhere else. That is decided before any other route, so no spelling under
+  `/api/dav/` — encoded dots and slashes included — can reach code-server or a
+  ttyd service; the bridge's WebDAV handler then judges each segment itself
+  and confines every name to the workspace. Anything that merely resembles the
+  prefix (`/api/davx`, `//api/dav/`, `/api%2fdav/`) is judged whole, and the
+  mount is behind sign-in like everything else.
+- **The editor channel stays inside.** `/ws/editor` is how the editor extension
+  in the sandbox hears "Open in editor"; the gate answers `404` for it and for
+  anything under it, signed in or not, so only the sandbox's own loopback
+  reaches it (and the bridge refuses it too if a request arrives with an
+  `Origin` or forwarding headers).
 - **Nothing without a session or a device token.** A page load without one is
   sent to `/login?next=<where it was going>`; any other request gets `401`. The
   only routes open without one are the sign-in page and its assets, sign-in
@@ -218,7 +233,7 @@ Traefik and a stand-in Cloudflare edge, and proves the first three.
 - **The RPC forwarder is an allowlist, not a passthrough.** The browser can
   call the herdr methods the app needs and nothing else; anything outside the
   list is refused before it reaches herdr.
-- **Previews only reach loopback.** `/workbench/preview/<port>/` proxies to
+- **Previews only reach loopback.** `/preview/<port>/` proxies to
   `127.0.0.1:<port>` inside the sandbox, with the port validated as a number in
   range. It cannot be pointed at another host, and it reaches nothing the
   sandbox could not already reach.
@@ -242,12 +257,13 @@ Traefik and a stand-in Cloudflare edge, and proves the first three.
   decided by the gate.
 - **The bridge still guards its own paths.** It refuses (400) the same
   ambiguous path forms the gate does, in any path it routes (checking only the
-  routing prefix of a preview, so an app's own encoded URLs still reach it), and
+  routing prefix of a preview, so an app's own encoded URLs still reach it, and
+  of the WebDAV mount, whose handler judges each name itself), and
   `Service-Worker-Allowed` is stripped from every proxied response, so a
   previewed page cannot register a worker over the Workbench.
 - **WebSocket upgrades are origin-checked, twice.** The same-origin policy does
   not cover websocket handshakes, so a page in another tab could otherwise open
-  `/workbench/ws/events` or `/workbench/ws/terminal` on your session cookie.
+  `/ws/events` or `/ws/terminal` on your session cookie.
   The gate refuses a session's upgrade whose `Origin` is not the box's host,
   and the bridge checks again: a foreign origin, a missing one and the `null` a
   sandboxed document sends are all refused.
