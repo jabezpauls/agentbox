@@ -66,6 +66,30 @@ test.afterAll(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("the sign-in page clears workers left from before, and keeps the editor's", async ({ page, context }) => {
+  // Stand in for the old layout: before the gate, code-server was served at /
+  // and its worker was registered at the root scope. The gate now refuses such
+  // a script, so the browser is handed it by the test's own router instead.
+  const worker = `self.addEventListener("fetch", () => {});`;
+  for (const p of ["/old-root-sw.js", "/workbench/old-sw.js", "/vscode/sw.js"]) {
+    await context.route(`${GATE}${p}`, (route) => route.fulfill({ contentType: "text/javascript", body: worker }));
+  }
+  await page.goto(`${GATE}/login`);
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register("/old-root-sw.js", { scope: "/" });
+    await navigator.serviceWorker.register("/workbench/old-sw.js", { scope: "/workbench/" });
+    await navigator.serviceWorker.register("/vscode/sw.js", { scope: "/vscode/" });
+  });
+  const scopes = () =>
+    page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).map((r) => new URL(r.scope).pathname).sort());
+  expect(await scopes()).toEqual(["/", "/vscode/", "/workbench/"]);
+
+  // The next visit to the sign-in page clears all but the editor's.
+  await page.goto(`${GATE}/login`);
+  await expect.poll(scopes).toEqual(["/vscode/"]);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+});
+
 test("a page from the sandbox cannot register a service worker", async ({ page }) => {
   await signIn(page);
   const scriptStatus: number[] = [];

@@ -14,6 +14,27 @@
     // Storage blocked: follow the system.
   }
 
+  // Service workers this origin should not have: the gate now refuses every
+  // worker's script outside /vscode/, but a browser keeps one registered before
+  // that — code-server's own, from when it was served at /, or one a page from
+  // the sandbox registered — and such a worker could answer for this very page.
+  // Every gate page drops them. code-server's current workers, under /vscode/,
+  // stay.
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then(function (registrations) {
+          registrations.forEach(function (registration) {
+            if (new URL(registration.scope).pathname.indexOf("/vscode/") !== 0) registration.unregister();
+          });
+        })
+        .catch(function () {});
+    }
+  } catch {
+    // No service workers here (an insecure context, say): nothing to clear.
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var form = document.getElementById("login-form");
     if (!form) return;
