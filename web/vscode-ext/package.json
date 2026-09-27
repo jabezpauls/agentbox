@@ -24,6 +24,7 @@
       "properties": {
         "agentbox.bridgeUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "ws://127.0.0.1:7800/ws/editor",
           "description": "The agentbox bridge's editor channel, as seen from inside the sandbox."
         }
