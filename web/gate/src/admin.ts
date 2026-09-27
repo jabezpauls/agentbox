@@ -39,13 +39,18 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: { 
       const password = input.password ?? "";
       const problem = passwordProblem(password);
       if (problem) throw new AdminError(`password not accepted: ${problem}`);
-      store.data.password = { hash: await hashPassword(password, deps.config.bcryptCost), updatedAt: deps.now() };
+      const hash = await hashPassword(password, deps.config.bcryptCost);
+      store.data.password = { hash, updatedAt: deps.now() };
+      store.data.generation += 1;
       const endedSessions = await auth.endSessions();
       deps.limiter?.reset();
-      return { ok: true, endedSessions };
+      // The hash goes back to the host, which keeps .env's seed in step, so
+      // restoring the stack's files cannot bring an old password back.
+      return { ok: true, endedSessions, hash };
     }
     case "totp-reset": {
       store.data.totp = emptyTotp();
+      store.data.generation += 1;
       const endedSessions = await auth.endSessions();
       deps.limiter?.reset();
       return { ok: true, endedSessions };

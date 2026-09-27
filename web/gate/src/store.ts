@@ -58,6 +58,8 @@ export interface DeviceCodeRecord {
   createdAt: number;
   expiresAt: number;
   ip: string;
+  /** What the per-client cap counts against (the address, or its /64). */
+  key?: string;
   status: "pending" | "approved" | "denied";
   /** The token minted on approval, until the CLI collects it. */
   tokenId: string | null;
@@ -80,6 +82,12 @@ export type AppRecord = Record<string, unknown>;
 
 export interface StoreData {
   version: number;
+  /**
+   * Bumped whenever the credentials change (the password, two-factor). A
+   * sign-in that checked the old ones while they changed sees a different
+   * number when it finishes, and is refused rather than surviving the change.
+   */
+  generation: number;
   password: PasswordRecord | null;
   sessions: SessionRecord[];
   totp: TotpRecord;
@@ -95,6 +103,7 @@ export function emptyTotp(): TotpRecord {
 function emptyData(): StoreData {
   return {
     version: STORE_VERSION,
+    generation: 0,
     password: null,
     sessions: [],
     totp: emptyTotp(),
@@ -129,6 +138,7 @@ function parse(text: string, file: string): StoreData {
   const base = emptyData();
   return {
     version: STORE_VERSION,
+    generation: typeof data.generation === "number" ? data.generation : 0,
     password: data.password ?? null,
     sessions: Array.isArray(data.sessions) ? data.sessions : base.sessions,
     totp: { ...base.totp, ...(data.totp ?? {}) },

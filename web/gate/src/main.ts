@@ -1,6 +1,7 @@
 import { startAdminServer } from "./admin.js";
 import { buildGate } from "./app.js";
 import { loadConfig } from "./config.js";
+import { holdLease } from "./lease.js";
 
 const USAGE = "Usage: agentbox-gate-server [--help]\n\nRuns agentbox's front door: sign-in, sessions and all request routing.";
 
@@ -14,6 +15,9 @@ async function main(argv: string[]): Promise<void> {
   // moment between listen() and chmod().
   process.umask(0o077);
   const config = loadConfig();
+  // Taken before the store is opened: from here on, `--offline` in any other
+  // container sees that this gate owns it.
+  const releaseLease = holdLease(config.dataDir);
   const gate = await buildGate(config);
   await gate.app.listen({ host: config.host, port: config.port });
   const admin = await startAdminServer(config.adminSocket, {
@@ -37,7 +41,10 @@ async function main(argv: string[]): Promise<void> {
     gate
       .close()
       .catch(() => {})
-      .finally(() => process.exit(0));
+      .finally(() => {
+        releaseLease();
+        process.exit(0);
+      });
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
