@@ -3,11 +3,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerApi } from "./api.js";
+import { AppGateway } from "./app-access.js";
+import { AppRegistry } from "./apps.js";
 import { Auth, type Ended, type Subject } from "./auth.js";
 import { ClientIpResolver, limitKey, normalizeIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { peekInfo, setInfo, type GateCore, type RequestInfo } from "./context.js";
 import { DeviceFlow } from "./device.js";
+import { Grants } from "./grants.js";
+import { createSandboxApi } from "./sandbox-api.js";
 import { isSafeMethod, isSameOriginRequest, originMatchesHost } from "./origin.js";
 import { PasswordChecker } from "./password.js";
 import { canonicalPath, isRoutablePath, splitTarget } from "./path-guard.js";
@@ -27,10 +31,16 @@ import { Store } from "./store.js";
  * 2. a service worker's script is refused (403) outside the editor;
  * 3. the client's address is settled (forwarding headers count only from the
  *    proxy);
- * 4. the route table picks the destination from the raw path;
- * 5. the gate's own paths go to Fastify, under a deadline; everything else
- *    needs a session or a device token, passes the same-origin checks, and is
- *    forwarded with every front-door credential stripped.
+ * 4. the route table picks the destination from the path;
+ * 5. the gate's own paths go to Fastify, under a deadline; an app's path
+ *    (`/a/<id>/…`) goes to the app gateway, which applies the app policy
+ *    (app-access.ts); the CLI's tunnels take a device token and nothing else;
+ *    everything else needs a session or a device token, passes the
+ *    same-origin checks, and is forwarded with every front-door credential
+ *    stripped.
+ *
+ * Beside the public listener, the sandbox-side app API (sandbox-api.ts) has a
+ * listener of its own, which the proxy never forwards to.
  *
  * Proxied traffic never touches Fastify, so no body parser, router quirk or
  * length limit of Fastify's stands between a request and its upstream.
@@ -61,7 +71,10 @@ export interface GateDeps {
 export interface Gate {
   app: FastifyInstance;
   server: http.Server;
+  /** The sandbox-side app API, listened on separately (main.ts: :7901). */
+  sandboxServer: http.Server;
   core: GateCore;
+  apps: AppGateway;
   /** The session or device token a request carries, if any. */
   authenticate(req: IncomingMessage): Subject | null;
   close(): Promise<void>;
@@ -130,7 +143,20 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     passwords: new PasswordChecker(config.bcryptCost),
     now,
     authenticate: (req) => auth.authenticate(req, peekInfo(req)?.ip ?? normalizeIp(req.socket.remoteAddress ?? "")),
+    apps: new AppRegistry(store, { infraPorts: config.infraPorts, sharing: config.sharing, now }),
   };
+  const grants = new Grants(store);
+  const appGateway = new AppGateway({
+    core,
+    registry: core.apps,
+    grants,
+    dataPlane: config.dataPlane,
+    // Refused lookups of apps, per address: 60 a minute, so no one can
+    // enumerate ids (they are 128 random bits besides).
+    probes: new WindowLimiter(60, 60_000, now),
+    forwarded: (info) => forwarded(info),
+  });
+  const sandboxServer = createSandboxApi(core.apps, clientIps);
 
   function settle(req: IncomingMessage): RequestInfo {
     const who = clientIps.resolve(req);
@@ -220,6 +246,14 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, 404, "not found");
       return;
     }
+    if (r.kind === "app") {
+      await appGateway.handle(req, res, r, info);
+      return;
+    }
+    if (r.kind === "tunnel") {
+      plain(res, 426, "a tunnel is a WebSocket", { upgrade: "websocket" });
+      return;
+    }
 
     const subject = core.authenticate(req);
     if (!subject) {
@@ -244,6 +278,28 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     });
   }
 
+  /**
+   * A tunnel for the CLI: a TCP port on the sandbox's loopback, or herdr's
+   * socket, as a WebSocket of raw bytes (binary frames both ways; a text frame
+   * `{"type":"error","message"}` before a close says why). A device token
+   * only: a tunnel is how `agentbox forward` reaches a port, and a page on
+   * another site must never be able to open one on a browser's cookie.
+   * Infrastructure ports are allowed here — the token holder is the owner.
+   */
+  function tunnel(req: IncomingMessage, socket: Duplex, head: Buffer, query: string | null, info: RequestInfo): void {
+    const subject = core.authenticate(req);
+    if (!subject || subject.kind !== "token") return refuseUpgrade(socket, 401, "Unauthorized");
+    const target = new URLSearchParams(query ?? "").get("target") ?? "";
+    let path: string;
+    const tcp = /^tcp:(\d{1,5})$/.exec(target);
+    if (tcp && Number(tcp[1]) >= 1 && Number(tcp[1]) <= 65535) path = `/tunnel/tcp/${Number(tcp[1])}`;
+    else if (target === "herdr") path = "/tunnel/herdr";
+    else return refuseUpgrade(socket, 400, "Bad Request");
+    trackSocket(subject, socket);
+    console.log(`[gate] tunnel to ${target} for "${subject.token.name}" from ${info.ip}`);
+    proxyUpgrade(config.dataPlane, req, socket, head, { target: path, forwarded: forwarded(info) });
+  }
+
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     socket.on("error", () => socket.destroy());
     const target = splitTarget(req.url ?? "");
@@ -252,7 +308,9 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     const { query } = target;
     const info = settle(req);
     const r = route(path, query);
-    // The gate's own routes take no upgrades (yet); nor does a redirect, nor
+    if (r.kind === "app") return appGateway.upgrade(req, socket, head, r, info);
+    if (r.kind === "tunnel") return tunnel(req, socket, head, query, info);
+    // The gate's own routes take no other upgrades; nor does a redirect, nor
     // the editor channel, which is for the extension inside the sandbox alone.
     if (r.kind !== "upstream") return refuseUpgrade(socket, 404, "Not Found");
     const subject = core.authenticate(req);
@@ -325,11 +383,16 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
   return {
     app,
     server: app.server,
+    sandboxServer,
     core,
+    apps: appGateway,
     authenticate: core.authenticate,
     close: async () => {
       clearInterval(pruner);
+      appGateway.close();
       clientIps.stop();
+      sandboxServer.closeAllConnections();
+      if (sandboxServer.listening) await new Promise<void>((r) => sandboxServer.close(() => r()));
       await app.close();
       await store.flush();
     },

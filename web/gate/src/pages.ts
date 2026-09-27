@@ -145,6 +145,64 @@ export interface DeviceView {
   error: string | null;
 }
 
+/**
+ * The passcode page is served under an app's path, and so under the app
+ * policy's sandbox: an opaque origin, where the box's own files are
+ * cross-origin. So it carries its styles inline (the same tokens and rules as
+ * the sign-in page, without the web font) and runs no script at all.
+ */
+export const PASSCODE_CSP = ["default-src 'none'", "style-src 'unsafe-inline'", "img-src data:", "base-uri 'none'", "frame-ancestors 'self'"].join("; ");
+
+export interface PasscodeView {
+  name: string;
+  /** Where the form posts: the app's own unlock path. */
+  action: string;
+  /** Where to go once unlocked. */
+  next: string;
+  error: "invalid" | "rate" | "locked" | "busy" | null;
+  retryAfterMs: number;
+  /** The tokens and the sign-in stylesheet, to inline. */
+  styles: string;
+}
+
+export function renderPasscode(v: PasscodeView): string {
+  const message =
+    v.error === "invalid"
+      ? "That passcode isn’t right. Check it with whoever shared this link."
+      : v.error
+        ? loginMessage(v.error, v.retryAfterMs)
+        : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>${escapeHtml(v.name)} · passcode</title>
+<style>${v.styles}</style>
+</head>
+<body>
+<main class="gate">
+<div class="gate-brand" aria-hidden="true"><span class="gate-mark"></span>agentbox</div>
+<section class="gate-card" aria-labelledby="gate-title">
+<h1 id="gate-title" class="gate-title">${escapeHtml(v.name)}</h1>
+<p class="gate-sub">This app is shared with a passcode.</p>
+<form class="gate-form" method="post" action="${escapeHtml(v.action)}">
+<input type="hidden" name="next" value="${escapeHtml(v.next)}">
+<div class="field">
+<label class="field-label" for="passcode">Passcode</label>
+<input class="input" id="passcode" name="passcode" type="password" autocomplete="off" required autofocus>
+</div>
+<p class="gate-msg is-error" role="alert"${message ? "" : " hidden"}>${escapeHtml(message)}</p>
+<button class="btn btn-primary gate-submit" type="submit">Open</button>
+</form>
+</section>
+</main>
+</body>
+</html>
+`;
+}
+
 export function renderDevices(v: DeviceView): string {
   if (v.result) {
     const [title, text] =

@@ -21,8 +21,11 @@ export async function seed(): Promise<string> {
   return seedHash;
 }
 
+/** Every stand-in: the sandbox services the route table names, and the bridge's data plane. */
+export type EchoName = UpstreamName | "data";
+
 export interface Seen {
-  upstream: UpstreamName;
+  upstream: EchoName;
   method: string;
   url: string;
   headers: http.IncomingHttpHeaders;
@@ -34,7 +37,7 @@ export interface Seen {
  * what crossed the gate.
  */
 export interface Echo {
-  name: UpstreamName;
+  name: EchoName;
   port: number;
   seen: Seen[];
   /** Extra response headers to send on the next plain responses. */
@@ -42,7 +45,7 @@ export interface Echo {
   close(): Promise<void>;
 }
 
-export async function startEcho(name: UpstreamName): Promise<Echo> {
+export async function startEcho(name: EchoName): Promise<Echo> {
   const seen: Seen[] = [];
   const echo: Echo = { name, port: 0, seen, respondWith: [], close: async () => {} };
   const wss = new WebSocketServer({ noServer: true });
@@ -88,7 +91,9 @@ export interface Harness {
   gate: Gate;
   port: number;
   base: string;
-  echoes: Record<UpstreamName, Echo>;
+  /** The sandbox-side app API. */
+  apps: string;
+  echoes: Record<EchoName, Echo>;
   dataDir: string;
   /** Everything the upstreams saw, across all of them. */
   allSeen(): Seen[];
@@ -98,8 +103,8 @@ export interface Harness {
 const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src/static");
 
 export async function startHarness(overrides: Partial<Config> = {}, deps: GateDeps = {}): Promise<Harness> {
-  const names: UpstreamName[] = ["code", "terminal", "shell", "monitor", "bridge"];
-  const echoes = {} as Record<UpstreamName, Echo>;
+  const names: EchoName[] = ["code", "terminal", "shell", "monitor", "bridge", "data"];
+  const echoes = {} as Record<EchoName, Echo>;
   for (const n of names) echoes[n] = await startEcho(n);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-test-"));
   const config: Config = {
@@ -112,7 +117,14 @@ export async function startHarness(overrides: Partial<Config> = {}, deps: GateDe
     bcryptCost: COST,
     trustedProxies: [],
     publicUrl: null,
-    upstreams: Object.fromEntries(names.map((n) => [n, { host: "127.0.0.1", port: echoes[n].port }])) as Config["upstreams"],
+    upstreams: Object.fromEntries(
+      names.filter((n) => n !== "data").map((n) => [n, { host: "127.0.0.1", port: echoes[n].port }]),
+    ) as Config["upstreams"],
+    dataPlane: { host: "127.0.0.1", port: echoes.data.port },
+    appsHost: "127.0.0.1",
+    appsPort: 0,
+    infraPorts: [8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901, ...names.map((n) => echoes[n].port)],
+    sharing: true,
     staticDir,
     cliDir: path.join(dataDir, "cli"),
     version: "9.9.9-test",
@@ -120,11 +132,13 @@ export async function startHarness(overrides: Partial<Config> = {}, deps: GateDe
   };
   const gate = await buildGate(config, deps);
   await gate.app.listen({ host: "127.0.0.1", port: 0 });
+  await new Promise<void>((r) => gate.sandboxServer.listen(0, "127.0.0.1", r));
   const port = (gate.server.address() as AddressInfo).port;
   return {
     gate,
     port,
     base: `http://127.0.0.1:${port}`,
+    apps: `http://127.0.0.1:${(gate.sandboxServer.address() as AddressInfo).port}`,
     echoes,
     dataDir,
     allSeen: () => names.flatMap((n) => echoes[n].seen),

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { AppError, MAX_EXPIRY_MS, toView } from "./apps.js";
 import { IDLE_MS, bearerToken, type Subject } from "./auth.js";
 import { BUNDLE_NAME, INSTALL_NAME, renderInstallScript } from "./cli-files.js";
 import { clearedSessionCookie, sessionCookie } from "./cookies.js";
@@ -562,6 +563,89 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   );
 
   app.get("/_gate/version", { config: { auth: "any" } }, async () => ({ version: config.version }));
+
+  // --- apps: the owner's side -------------------------------------------------
+  //
+  // Who may open an app is the owner's decision alone, so it is made here, on
+  // the public side, with a session or a device token — never on the sandbox
+  // side (:7901), whatever the sandbox asks. It needs no password in the
+  // request: a sandbox with internet access can publish itself through a
+  // tunnel of its own anyway, so a password here would guard nothing that is
+  // not already open, and sharing is an everyday action. What the gate does
+  // guarantee is that nothing is public unless the owner said so, and that
+  // agentbox's own services never are.
+
+  const apps = core.apps;
+  const appView = (a: Parameters<typeof toView>[0]) => ({ ...toView(a), url: `/a/${a.id}/` });
+  const appFailed = (reply: FastifyReply, err: unknown): FastifyReply => {
+    if (err instanceof AppError) return reply.code(err.status).send({ error: err.code, message: err.message });
+    throw err;
+  };
+
+  app.get("/_gate/apps", { config: { auth: "any" } }, async () => ({
+    sharing: apps.sharing,
+    apps: apps.list().map(appView),
+  }));
+
+  // The owner making an app of a port ("Make an app" beside a listening port).
+  app.post("/_gate/apps", { config: { auth: "any" } }, async (req, reply) => {
+    const b = body(req);
+    try {
+      const created = await apps.create(
+        { port: b.port, name: b.name, cwd: b.cwd, command: b.command, pinned: b.pinned, keepPrefix: b.keepPrefix, compat: b.compat },
+        "owner",
+      );
+      return reply.code(201).send(appView(created));
+    } catch (err) {
+      return appFailed(reply, err);
+    }
+  });
+
+  app.put<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any" } }, async (req, reply) => {
+    const b = body(req);
+    const mode = b.mode;
+    if (mode !== "private" && mode !== "link" && mode !== "passcode") {
+      return reply.code(400).send({ error: "invalid_mode", message: "mode must be private, link or passcode" });
+    }
+    // Seconds from now, or null for "until stopped"; a week when not said.
+    let expiresAt: number | null = null;
+    if (mode !== "private") {
+      const raw = "expiresIn" in b ? b.expiresIn : 7 * 24 * 60 * 60;
+      if (raw !== null) {
+        const secs = Number(raw);
+        if (!Number.isFinite(secs) || secs <= 0 || secs * 1000 > MAX_EXPIRY_MS) {
+          return reply.code(400).send({ error: "invalid_expiry", message: "expiresIn is seconds from now (at most a year), or null for until stopped" });
+        }
+        expiresAt = core.now() + Math.round(secs * 1000);
+      }
+    }
+    let passcodeHash: string | undefined;
+    if (mode === "passcode" && b.passcode !== undefined && b.passcode !== null && b.passcode !== "") {
+      const passcode = str(b.passcode);
+      if (passcode.length < 4 || Buffer.byteLength(passcode) > 72) {
+        return reply.code(400).send({ error: "invalid_passcode", message: "a passcode is 4 to 72 characters" });
+      }
+      passcodeHash = await hashPassword(passcode, config.bcryptCost);
+    }
+    try {
+      const changed = await apps.setVisibility(req.params.id, { mode, expiresAt, ...(passcodeHash ? { passcodeHash } : {}) });
+      const s = req.subject as Subject;
+      console.log(`[gate] app ${changed.id} made ${mode} by a ${s.kind} from ${infoOf(req.raw).ip}`);
+      return appView(changed);
+    } catch (err) {
+      return appFailed(reply, err);
+    }
+  });
+
+  // Stop sharing: private again, and everyone let in as the public — or by a
+  // passcode — is cut off at once.
+  app.delete<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any" } }, async (req, reply) => {
+    try {
+      return appView(await apps.setVisibility(req.params.id, { mode: "private", expiresAt: null }));
+    } catch (err) {
+      return appFailed(reply, err);
+    }
+  });
 
   // --- the device-approval page -----------------------------------------------
 

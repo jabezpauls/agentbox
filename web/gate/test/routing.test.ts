@@ -28,10 +28,11 @@ describe("without a session", () => {
 
   it("reaches no upstream by any route", async () => {
     const before = h.allSeen().length;
-    for (const p of ["/", "/vscode/", "/terminal/", "/terminal/ws", "/shell/", "/monitor/", "/api/health", "/s/0123456789abcdef0123456789abcdef/", "/a/abc/"]) {
+    for (const p of ["/", "/vscode/", "/terminal/", "/terminal/ws", "/shell/", "/monitor/", "/api/health", "/s/0123456789abcdef0123456789abcdef/", "/a/abcdefghijklmnopqrstuvwxyz/"]) {
       for (const method of ["GET", "POST", "PUT", "DELETE", "OPTIONS"]) {
         const res = await request(h.base, method, p, { headers: { origin: h.base } });
-        expect([302, 401], `${method} ${p}`).toContain(res.status);
+        // An app that does not exist answers as a private one would: 404 to a script.
+        expect(p.startsWith("/a/") ? [302, 404] : [302, 401], `${method} ${p}`).toContain(res.status);
       }
     }
     expect(h.allSeen().length).toBe(before);

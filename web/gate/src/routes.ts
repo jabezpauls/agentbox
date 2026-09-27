@@ -22,7 +22,11 @@ export type Route =
   /** Not served from outside at all, signed in or not. */
   | { kind: "notFound" }
   /** Forwarded to a sandbox service; `target` is the raw path and query to request there. */
-  | { kind: "upstream"; upstream: UpstreamName; target: string };
+  | { kind: "upstream"; upstream: UpstreamName; target: string }
+  /** An app, `/a/<id>/…`: the app policy decides (app-access.ts). `rest` starts with `/`. */
+  | { kind: "app"; id: string; rest: string; query: string | null }
+  /** The CLI's tunnels, WebSocket only, device token only. */
+  | { kind: "tunnel" };
 
 /** True when `path` is `prefix` itself or lies beneath it. */
 export function underSegment(path: string, prefix: string): boolean {
@@ -62,6 +66,12 @@ export const EDITOR_PREFIX = "/vscode";
  */
 export const EDITOR_CHANNEL = "/ws/editor";
 
+/** Apps: `/a/<id>/…`. */
+export const APP_PREFIX = "/a";
+
+/** `GET /_gate/tunnel?target=tcp:<port>|herdr`: a WebSocket the CLI forwards a port or herdr over. */
+export const TUNNEL_PATH = "/_gate/tunnel";
+
 export function route(path: string, query: string | null): Route {
   const qs = query === null ? "" : `?${query}`;
 
@@ -70,6 +80,19 @@ export function route(path: string, query: string | null): Route {
   if (isDavPath(path)) return { kind: "upstream", upstream: "bridge", target: `${path}${qs}` };
 
   if (underSegment(path, EDITOR_CHANNEL)) return { kind: "notFound" };
+
+  // An app, and nothing but the app: the data plane, under the app policy.
+  // The bare `/a/<id>` gets its trailing slash, so the app's relative URLs
+  // resolve inside it; that answer is the same for every id, known or not.
+  if (underSegment(path, APP_PREFIX)) {
+    const m = /^\/a\/([^/]+)(\/.*)?$/.exec(path);
+    if (!m) return { kind: "notFound" };
+    const [, id, rest] = m as unknown as [string, string, string | undefined];
+    if (rest === undefined) return { kind: "redirect", location: `${APP_PREFIX}/${id}/${qs}` };
+    return { kind: "app", id, rest, query };
+  }
+
+  if (path === TUNNEL_PATH) return { kind: "tunnel" };
 
   if (GATE_EXACT.has(path) || GATE_PREFIXES.some((p) => underSegment(path, p))) {
     return { kind: "gate" };

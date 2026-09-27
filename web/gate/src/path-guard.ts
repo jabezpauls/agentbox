@@ -48,8 +48,22 @@ export function isDavPath(path: string): boolean {
  * sends, so it is refused rather than interpreted.
  */
 export function isRoutablePath(path: string): boolean {
-  if (isDavPath(path)) return true;
+  if (isDavPath(path) || isAppPath(path)) return true;
   return isStrictPath(path);
+}
+
+/**
+ * An app's path, `/a/<id>/…`. Below its prefix, a path is the app's own — an
+ * app may well use `%2F` or `;` in its URLs — and it goes to the bridge's data
+ * plane, raw, and nowhere else: the data plane reads only its own prefix
+ * (`/app/<port>/`) and hands the rest to the app on that port. So, as under
+ * the WebDAV mount, only the prefix is held to the strict form, and only when
+ * the id is well formed; anything else is judged whole.
+ */
+const APP_PATH = /^\/a\/[a-z2-7]{26}(\/|$)/;
+
+export function isAppPath(path: string): boolean {
+  return APP_PATH.test(path);
 }
 
 /** The strict form alone, with no exemption: for a path that is somewhere to land rather than a filename. */
@@ -69,11 +83,11 @@ const UNRESERVED = /^[A-Za-z0-9_~-]$/;
  * one path. Escapes of anything else stay: a reserved character means
  * something else unescaped, and the guard has already refused the ones that
  * could move a request (`%2f`, `%5c`, `%2e`). The dot stays escaped for the
- * same reason. Under the WebDAV mount only the prefix is read this way; the
- * names beneath it go as sent.
+ * same reason. Under the WebDAV mount and an app's prefix, the path is taken
+ * as it came: the names beneath the mount, and an app's own URLs, go as sent.
  */
 export function canonicalPath(path: string): string {
-  if (isDavPath(path)) return path;
+  if (isDavPath(path) || isAppPath(path)) return path;
   return path.replace(/%([0-9A-Fa-f]{2})/g, (escape, hex: string) => {
     const c = String.fromCharCode(parseInt(hex, 16));
     return UNRESERVED.test(c) ? c : escape;

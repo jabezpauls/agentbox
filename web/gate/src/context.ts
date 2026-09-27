@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import type { AppRegistry } from "./apps.js";
 import type { Auth, Subject } from "./auth.js";
 import type { Config } from "./config.js";
 import type { DeviceFlow } from "./device.js";
@@ -53,6 +54,8 @@ export interface GateCore {
   passwords: PasswordChecker;
   now: () => number;
   authenticate(req: IncomingMessage): Subject | null;
+  /** The app registry. */
+  apps: AppRegistry;
 }
 
 /** Compare two strings in time that does not depend on where they differ. */

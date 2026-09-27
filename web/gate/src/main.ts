@@ -27,6 +27,14 @@ async function main(argv: string[]): Promise<void> {
   });
   const gate = await buildGate(config);
   await gate.app.listen({ host: config.host, port: config.port });
+  // The sandbox-side app API: its own listener, never forwarded by the proxy.
+  await new Promise<void>((resolve, reject) => {
+    gate.sandboxServer.once("error", reject);
+    gate.sandboxServer.listen(config.appsPort, config.appsHost, () => {
+      gate.sandboxServer.off("error", reject);
+      resolve();
+    });
+  });
   const admin = await startAdminServer(config.adminSocket, {
     config,
     store: gate.core.store,
@@ -35,7 +43,8 @@ async function main(argv: string[]): Promise<void> {
     limiter: gate.core.limiter,
     now: gate.core.now,
   });
-  console.log(`[gate] listening on ${config.host}:${config.port}`);
+  console.log(`[gate] listening on ${config.host}:${config.port}; the sandbox's app API on ${config.appsHost}:${config.appsPort}`);
+  if (!config.sharing) console.log("[gate] sharing is off: every app stays private");
   if (!gate.core.store.data.password) {
     console.warn("[gate] no password is set: nobody can sign in. On the host, run ./scripts/agentbox passwd");
   }

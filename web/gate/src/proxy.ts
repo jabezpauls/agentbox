@@ -45,6 +45,9 @@ const IDENTITY = new Set([
   "x-forwarded-host",
   "x-agentbox-public",
   "x-agentbox-client-ip",
+  // What the gate tells the bridge's data plane about an app it forwards.
+  "x-agentbox-prefix",
+  "x-agentbox-keep-prefix",
 ]);
 
 /** Response headers the gate sets itself on everything it serves. */
@@ -97,6 +100,8 @@ export interface ProxyOptions {
    * scope themselves to it (the editor's); see serviceWorkerAllowed.
    */
   serviceWorkerPrefix?: string;
+  /** Headers the gate adds to the forwarded request, after its own filtering. */
+  extraHeaders?: Record<string, string>;
 }
 
 function connectionTokens(req: IncomingMessage): Set<string> {
@@ -191,7 +196,7 @@ function flatten(pairs: ReadonlyArray<readonly [string, string]>): string[] {
   return out;
 }
 
-function badGateway(res: ServerResponse): void {
+export function badGateway(res: ServerResponse): void {
   if (res.headersSent) {
     res.destroy();
     return;
@@ -207,7 +212,7 @@ export function proxyHttp(upstream: Upstream, req: IncomingMessage, res: ServerR
     port: upstream.port,
     method: req.method,
     path: opts.target,
-    headers: forwardRequestHeaders(req, opts.forwarded),
+    headers: { ...forwardRequestHeaders(req, opts.forwarded), ...(opts.extraHeaders ?? {}) },
     agent,
   });
 
@@ -270,7 +275,7 @@ export function proxyUpgrade(upstream: Upstream, req: IncomingMessage, socket: D
     port: upstream.port,
     method: req.method,
     path: opts.target,
-    headers: forwardRequestHeaders(req, opts.forwarded, true),
+    headers: { ...forwardRequestHeaders(req, opts.forwarded, true), ...(opts.extraHeaders ?? {}) },
     // A dedicated connection: once upgraded it belongs to this socket alone.
     agent: false,
   });

@@ -77,8 +77,37 @@ export interface TotpRecord {
   recoveryCodes: string[];
 }
 
-/** Phase C defines the app record; the collection exists from the start. */
-export type AppRecord = Record<string, unknown>;
+/**
+ * An app: a server in the sandbox, reached at `/a/<id>/`. The same shape as
+ * `App` in `web/shared` (which the gate does not import: its image builds
+ * nothing else), plus what stays in the gate — the passcode's hash and the
+ * sharing epoch.
+ */
+export interface AppRecord {
+  id: string;
+  name: string;
+  port: number;
+  keepPrefix: boolean;
+  cwd?: string;
+  command?: string;
+  pinned: boolean;
+  createdBy: "owner" | "agent";
+  createdAt: number;
+  visibility: {
+    mode: "private" | "link" | "passcode";
+    expiresAt: number | null;
+    /** bcrypt, for `passcode`. */
+    passcodeHash?: string;
+    sharedAt?: number;
+    /**
+     * Bumped whenever what a passcode unlocked stops being true (a new
+     * passcode, stopping sharing, expiry): every grant minted by a passcode
+     * names the epoch it was minted in, and one from an older epoch is void.
+     */
+    epoch: number;
+  };
+  compat: "auto" | "off";
+}
 
 export interface StoreData {
   version: number;
@@ -94,6 +123,11 @@ export interface StoreData {
   deviceCodes: DeviceCodeRecord[];
   tokens: TokenRecord[];
   apps: AppRecord[];
+  /**
+   * The key app grants are signed with (base64url, 256 bits), made on first
+   * use. Kept in the store so a restart does not void every grant.
+   */
+  appKey: string | null;
 }
 
 export function emptyTotp(): TotpRecord {
@@ -110,6 +144,7 @@ function emptyData(): StoreData {
     deviceCodes: [],
     tokens: [],
     apps: [],
+    appKey: null,
   };
 }
 
@@ -145,6 +180,7 @@ function parse(text: string, file: string): StoreData {
     deviceCodes: Array.isArray(data.deviceCodes) ? data.deviceCodes : base.deviceCodes,
     tokens: Array.isArray(data.tokens) ? data.tokens : base.tokens,
     apps: Array.isArray(data.apps) ? data.apps : base.apps,
+    appKey: typeof data.appKey === "string" ? data.appKey : null,
   };
 }
 
@@ -213,7 +249,7 @@ export class Store {
     return store;
   }
 
-  /** The app registry, for Phase C. */
+  /** The app registry. */
   get apps(): AppRecord[] {
     return this.data.apps;
   }

@@ -94,6 +94,17 @@ export class Auth {
     return session ? { kind: "session", id: session.id, session } : null;
   }
 
+  /** Whether the session with this handle is still live (an app grant minted from it is good only while it is). */
+  sessionIsLive(id: string): boolean {
+    const s = this.store.data.sessions.find((x) => x.id === id);
+    return s !== undefined && this.isLive(s);
+  }
+
+  /** Whether the device token with this handle still exists. */
+  tokenExists(id: string): boolean {
+    return this.store.data.tokens.some((t) => t.id === id);
+  }
+
   isLive(s: SessionRecord): boolean {
     const t = this.now();
     if (t >= s.expiresAt) return false;

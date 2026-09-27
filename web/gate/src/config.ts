@@ -32,6 +32,23 @@ export interface Config {
   /** The origin people browse to, for links the gate hands out; `null` derives it per request. */
   publicUrl: string | null;
   upstreams: Record<UpstreamName, Upstream>;
+  /**
+   * The bridge's data plane: apps and tunnels, and nothing else. A listener of
+   * its own, which only the gate talks to, so app content reaches the browser
+   * only through the gate's app policy.
+   */
+  dataPlane: Upstream;
+  /** The sandbox-side app API's listener (register, list, change, remove private apps). */
+  appsHost: string;
+  appsPort: number;
+  /**
+   * agentbox's own listeners and any the operator adds
+   * (`AGENTBOX_INFRA_PORTS`): never an app, whoever asks. Tunnels may reach
+   * them — the token holder is the owner.
+   */
+  infraPorts: number[];
+  /** The owner may make apps public (`AGENTBOX_SHARING`, on by default). */
+  sharing: boolean;
   /** The login page's stylesheet, script, tokens and font. */
   staticDir: string;
   /** The CLI bundle served under `/cli/`, when there is one. */
@@ -57,15 +74,47 @@ function port(raw: string | undefined, fallback: number): number {
   return n;
 }
 
+/** agentbox's own listeners: the editor, the three ttyd services, the bridge's two planes, the gate's two sides. */
+export const INFRA_PORTS = [8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901];
+
+/** A comma-separated list of ports, as the operator writes it. */
+function portList(raw: string | undefined): number[] {
+  return (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => port(s, 0));
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const upstreamHost = env.GATE_UPSTREAM_HOST || "code";
   const upstream = (name: string, fallback: number): Upstream => ({
     host: upstreamHost,
     port: port(env[`GATE_${name}_PORT`], fallback),
   });
+  const upstreams = {
+    code: upstream("CODE", 8080),
+    terminal: upstream("TERMINAL", 7681),
+    monitor: upstream("MONITOR", 7682),
+    shell: upstream("SHELL", 7683),
+    bridge: upstream("BRIDGE", 7800),
+  };
+  const dataPlane = upstream("DATA", 7801);
+  const gatePort = port(env.GATE_PORT, 7900);
+  const appsPort = port(env.GATE_APPS_PORT, 7901);
+  // Whatever ports this gate and its upstreams really use count, as well as
+  // the defaults: a test or an unusual install moves them.
+  const infra = new Set([
+    ...INFRA_PORTS,
+    ...Object.values(upstreams).map((u) => u.port),
+    dataPlane.port,
+    gatePort,
+    appsPort,
+    ...portList(env.AGENTBOX_INFRA_PORTS),
+  ]);
   return {
     host: env.GATE_HOST || "0.0.0.0",
-    port: port(env.GATE_PORT, 7900),
+    port: gatePort,
     dataDir: env.GATE_DATA_DIR || "/data",
     adminSocket: env.GATE_ADMIN_SOCKET || "/tmp/agentbox-gate.sock",
     user: env.AGENTBOX_USER || "admin",
@@ -78,13 +127,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .map((s) => s.trim())
       .filter(Boolean),
     publicUrl: (env.AGENTBOX_PUBLIC_URL || null)?.replace(/\/+$/, "") ?? null,
-    upstreams: {
-      code: upstream("CODE", 8080),
-      terminal: upstream("TERMINAL", 7681),
-      monitor: upstream("MONITOR", 7682),
-      shell: upstream("SHELL", 7683),
-      bridge: upstream("BRIDGE", 7800),
-    },
+    upstreams,
+    dataPlane,
+    appsHost: env.GATE_APPS_HOST || "0.0.0.0",
+    appsPort,
+    infraPorts: [...infra].sort((a, b) => a - b),
+    // Anything but an explicit "off" leaves sharing on; the installer's
+    // --sharing writes it.
+    sharing: (env.AGENTBOX_SHARING ?? "on").trim().toLowerCase() !== "off",
     staticDir: env.GATE_STATIC_DIR || path.join(here, "static"),
     cliDir: env.GATE_CLI_DIR || path.join(here, "..", "cli"),
     // Which agentbox this is: the image is built with the checkout's
