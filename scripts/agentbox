@@ -237,10 +237,18 @@ case "${1:-help}" in
         # sign-in, not whatever .env's seed happens to say. Keep the archive as
         # private as .env.
         out="${2:-agentbox-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
+        # Written by root in the container, then handed to whoever ran this, so
+        # the archive can be copied off without sudo; still 0600. Under
+        # rootless Docker the container's root already is that user, and a
+        # chown to its uid would hand the file to a subordinate one instead.
+        owner="$(id -u):$(id -g)"
+        if docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then owner=""; fi
         docker run --rm -v agentbox_workspace:/w:ro -v agentbox_home:/h:ro -v agentbox_gate:/g:ro \
             -v "$PWD:/out" alpine \
-            sh -c "umask 077 && tar czf '/out/$(basename "$out")' --numeric-owner -C / w h g"
-        echo "wrote $out"
+            sh -ec 'umask 077; tar czf "/out/$1" --numeric-owner -C / w h g
+                    [ -z "$2" ] || chown "$2" "/out/$1"; chmod 600 "/out/$1"' \
+            sh "$(basename "$out")" "$owner"
+        echo "wrote $PWD/$(basename "$out")"
         ;;
     restore)
         [ $# -ge 2 ] || { echo "usage: agentbox restore <file.tar.gz>" >&2; exit 1; }
@@ -249,9 +257,10 @@ case "${1:-help}" in
         # then left alone rather than emptied.
         docker run --rm -v agentbox_workspace:/w -v agentbox_home:/h -v agentbox_gate:/g \
             -v "$PWD:/in" alpine \
-            sh -ec "a='/in/$(basename "$2")'; tar tzf \"\$a\" >/dev/null; rm -rf /w/* /h/*; \
-                    if tar tzf \"\$a\" | grep -q '^g/'; then rm -rf /g/* /g/.[!.]*; fi; \
-                    tar xzf \"\$a\" --numeric-owner -C /"
+            sh -ec 'a="/in/$1"; tar tzf "$a" >/dev/null; rm -rf /w/* /h/*
+                    if tar tzf "$a" | grep -q "^g/"; then rm -rf /g/* /g/.[!.]*; fi
+                    tar xzf "$a" --numeric-owner -C /' \
+            sh "$(basename "$2")"
         "${DC[@]}" up -d
         echo "restored from $2"
         ;;
