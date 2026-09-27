@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../src/errors.js";
-import { driveFromNetUse, findOnPath, gvfsPath, mountPlan } from "../src/mount.js";
+import { driveFromNetUse, findOnPath, gvfsMountName, mountPlan } from "../src/mount.js";
 import { capture, json, runCli, signedIn, stubServer, tmpDir, type Stub } from "./helpers.js";
 
-const base = { url: "http://127.0.0.1:4100/SECRET/", port: 4100, secret: "SECRET", boxName: "work", home: "/Users/me" };
+const base = { url: "http://127.0.0.1:4100/SECRET/", boxName: "work", home: "/Users/me" };
 
 describe("mount plans", () => {
   it("macOS: mount_webdav at the folder (default ~/agentbox/<box>), umount after", () => {
@@ -20,10 +20,23 @@ describe("mount plans", () => {
     const plan = mountPlan({ ...base, platform: "linux", dir: "/home/me/box", env: { XDG_RUNTIME_DIR: "/run/user/1000" } });
     expect(plan.mount).toEqual({ command: "gio", args: ["mount", "dav://127.0.0.1:4100/SECRET/"] });
     expect(plan.unmount).toEqual({ command: "gio", args: ["mount", "-u", "dav://127.0.0.1:4100/SECRET/"] });
-    expect(plan.where).toBe(gvfsPath("/run/user/1000", 4100, "SECRET"));
-    expect(plan.where).toBe("/run/user/1000/gvfs/dav:host=127.0.0.1,port=4100,prefix=%2FSECRET");
+    expect(plan.gvfsRoot).toBe("/run/user/1000/gvfs");
+    expect(plan.where).toBeNull();
     expect(plan.link).toBe("/home/me/box");
     expect(plan.install).toMatch(/gvfs-backends/);
+  });
+
+  it("finds the mount's folder among gvfs's, whatever parameters the release adds", () => {
+    const names = [
+      "sftp:host=example.com",
+      "dav:host=127.0.0.1,port=4101,ssl=false,prefix=%2FSECRET",
+      "dav:host=127.0.0.1,port=4100,ssl=false,prefix=%2FOTHER",
+      // As Debian 12's gvfs names it.
+      "dav:host=127.0.0.1,port=4100,ssl=false,prefix=%2FSECRET",
+    ];
+    expect(gvfsMountName(names, 4100, "SECRET")).toBe("dav:host=127.0.0.1,port=4100,ssl=false,prefix=%2FSECRET");
+    expect(gvfsMountName(["dav:host=127.0.0.1,port=4100,prefix=%2FSECRET"], 4100, "SECRET")).toBe("dav:host=127.0.0.1,port=4100,prefix=%2FSECRET");
+    expect(gvfsMountName(names, 4102, "SECRET")).toBeNull();
   });
 
   it("Windows: net use to a drive letter, or the next free one", () => {

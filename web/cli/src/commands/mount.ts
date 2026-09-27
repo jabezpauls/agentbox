@@ -1,12 +1,30 @@
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { bool, int } from "../args.js";
 import type { Context } from "../context.js";
 import { DavFront, REMOTE_PREFIX } from "../dav.js";
 import { CliError, EXIT } from "../errors.js";
 import { apiErrorFrom } from "../http.js";
-import { driveFromNetUse, findOnPath, mountPlan, runStep } from "../mount.js";
+import { driveFromNetUse, findOnPath, gvfsMountName, mountPlan, runStep } from "../mount.js";
 import { command, type Command } from "./types.js";
+
+/** This mount's folder under gvfs's, once it appears; `null` after `ms` without it. */
+async function gvfsFolder(root: string, port: number, secret: string, ms: number): Promise<string | null> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(root);
+    } catch {
+      // Not there (yet).
+    }
+    const name = gvfsMountName(names, port, secret);
+    if (name) return path.join(root, name);
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
 
 /** Resolves when the command is asked to stop (Ctrl-C, SIGTERM, SIGHUP). */
 function stopped(ctx: Context): Promise<void> {
@@ -67,7 +85,7 @@ export const mount = command({
       const dir = p.operands[0] ?? null;
       let plan;
       try {
-        plan = mountPlan({ platform: ctx.platform, url, port: front.listenPort, secret: front.secret, dir, boxName: name, home: os.homedir(), env: ctx.env });
+        plan = mountPlan({ platform: ctx.platform, url, dir, boxName: name, home: os.homedir(), env: ctx.env });
       } catch (err) {
         throw new CliError((err as Error).message, EXIT.USAGE);
       }
@@ -94,14 +112,28 @@ export const mount = command({
         where = driveFromNetUse(mounted.output);
         if (where) unmount = { command: "net", args: ["use", where, "/delete", "/y"] };
       }
+      // gvfs shows a mount as a folder only through its FUSE helper, which
+      // takes a moment and may not be running at all (a server, a container).
+      let gioOnly = false;
+      if (plan.gvfsRoot) {
+        where = await gvfsFolder(plan.gvfsRoot, front.listenPort, front.secret, 5000);
+        if (!where) {
+          gioOnly = true;
+          const dav = url.replace(/^http:/, "dav:");
+          if (ctx.json) ctx.printJson({ box: name, url, mountedAt: null, gio: dav });
+          else ctx.out(`Mounted ${name} in gvfs as ${dav}: open that in your file manager (gvfs's folder view, gvfsd-fuse, is not running here)\n`);
+        }
+      }
       let linked = false;
       if (plan.link && where) {
         fs.symlinkSync(where, plan.link, "dir");
         linked = true;
       }
 
-      if (ctx.json) ctx.printJson({ box: name, url, mountedAt: linked ? plan.link : where });
-      else ctx.out(`Mounted ${name} at ${linked ? `${plan.link} (→ ${where})` : (where ?? "a new drive")}\n`);
+      if (!gioOnly) {
+        if (ctx.json) ctx.printJson({ box: name, url, mountedAt: linked ? plan.link : where });
+        else ctx.out(`Mounted ${name} at ${linked ? `${plan.link} (→ ${where})` : (where ?? "a new drive")}\n`);
+      }
       ctx.err("Keep this running while you use it; Ctrl-C unmounts.\n");
 
       await stopped(ctx);

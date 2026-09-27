@@ -22,28 +22,32 @@ export interface MountPlan {
   unmount: Step | null;
   /** Where the files appear, when that is known before mounting. */
   where: string | null;
+  /** gvfs's folder of mounts, where this one's folder is looked for once mounted. */
+  gvfsRoot: string | null;
   /** A folder to create first (and remove afterwards if it was created). */
   mountpoint: string | null;
   /** A link to create at the requested folder, pointing at `where` (gvfs chooses its own place). */
   link: string | null;
 }
 
-/** gvfs's own folder for a dav mount: `…/gvfs/dav:host=127.0.0.1,port=N,prefix=%2F<secret>`. */
-export function gvfsPath(runtimeDir: string, port: number, secret: string): string {
-  return path.join(runtimeDir, "gvfs", `dav:host=127.0.0.1,port=${port},prefix=%2F${secret}`);
+/**
+ * This mount's folder among gvfs's: `dav:host=127.0.0.1,port=N,prefix=%2F<secret>`,
+ * give or take parameters that vary by gvfs release (Debian 12's adds
+ * `ssl=false`), so it is looked for rather than built.
+ */
+export function gvfsMountName(names: string[], port: number, secret: string): string | null {
+  return names.find((n) => n.startsWith("dav:") && n.split(",").includes(`port=${port}`) && n.includes(`prefix=%2F${secret}`)) ?? null;
 }
 
 export function mountPlan(opts: {
   platform: NodeJS.Platform;
   url: string;
-  port: number;
-  secret: string;
   dir: string | null;
   boxName: string;
   home: string;
   env: NodeJS.ProcessEnv;
 }): MountPlan {
-  const { platform, url, port, secret, dir } = opts;
+  const { platform, url, dir } = opts;
   if (platform === "darwin") {
     const mountpoint = path.resolve(dir ?? path.join(opts.home, "agentbox", opts.boxName));
     return {
@@ -53,6 +57,7 @@ export function mountPlan(opts: {
       mount: { command: "mount_webdav", args: ["-S", "-v", opts.boxName, url, mountpoint] },
       unmount: { command: "umount", args: [mountpoint] },
       where: mountpoint,
+      gvfsRoot: null,
       mountpoint,
       link: null,
     };
@@ -67,19 +72,20 @@ export function mountPlan(opts: {
       // The drive letter is only known once `net use` says it.
       unmount: drive === "*" ? null : { command: "net", args: ["use", drive, "/delete", "/y"] },
       where: drive === "*" ? null : drive.toUpperCase(),
+      gvfsRoot: null,
       mountpoint: null,
       link: null,
     };
   }
   const runtime = opts.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`;
   const davUrl = url.replace(/^http:/, "dav:");
-  const where = gvfsPath(runtime, port, secret);
   return {
     helper: "gio",
     install: "install gvfs with its WebDAV backend (Debian/Ubuntu: `sudo apt install gvfs-backends libglib2.0-bin`; Fedora: `sudo dnf install gvfs`), or use `agentbox mount --no-mount` with any WebDAV client",
     mount: { command: "gio", args: ["mount", davUrl] },
     unmount: { command: "gio", args: ["mount", "-u", davUrl] },
-    where,
+    where: null,
+    gvfsRoot: path.join(runtime, "gvfs"),
     mountpoint: null,
     link: dir ? path.resolve(dir) : null,
   };
