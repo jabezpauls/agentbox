@@ -2,9 +2,9 @@
 
 The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
 the agent multiplexer that runs inside the sandbox. It is served at
-`/workbench`, behind the same login as everything else.
+`/workbench`, behind the same sign-in as everything else.
 
-The editor at `/` is where you read and write code. The TUI at `/terminal` is
+The editor at `/vscode/` is where you read and write code. The TUI at `/terminal` is
 where you drive agents from a keyboard on a small screen. The Workbench is the
 surface in between: several agents across several workspaces, all visible at
 once, each in a live terminal, with the web apps they build previewable beside
@@ -105,19 +105,22 @@ through untouched, so a framework's error overlay or a deliberate `503` still
 shows. Once a response has started there is no timeout, so server-sent events
 and long downloads are left alone.
 
-There are two ways to reach it, and the difference matters.
-
-**Path previews** are always available. The bridge proxies
-`/workbench/preview/<port>/…` to `127.0.0.1:<port>` inside the sandbox. Because
-that is the Workbench's own origin, the iframe is sandboxed *without*
-`allow-same-origin`: an agent-written dev server must not be able to script the
-Workbench, read its storage or call its API as you. Three things follow.
+The bridge proxies `/workbench/preview/<port>/…` to `127.0.0.1:<port>` inside
+the sandbox. Because that is the Workbench's own origin, the iframe is
+sandboxed *without* `allow-same-origin`: an agent-written dev server must not
+be able to script the Workbench, read its storage or call its API as you.
+Four things follow.
 
 The previewed page has no `localStorage` and no same-origin requests of its
 own — that much is the sandbox, and it applies inside the panel only.
 
-It has no cookies either, and that is not the sandbox: the proxy strips
-`Cookie` (and `Authorization`) from everything it forwards, so your login for
+Inside the panel it loads its page but not its stylesheets, scripts or images.
+A sandboxed frame's requests count as cross-site, and the sign-in cookie is
+deliberately not sent on cross-site requests, so the gate refuses them. Open the
+preview full screen (below) to see the whole app.
+
+It has no cookies either, and that is not the sandbox: the bridge strips
+`Cookie` (and `Authorization`) from everything it forwards, so your sign-in for
 the box is never handed to a port an agent opened. That holds in the
 full-screen window too, so a previewed app with its own cookie login will not
 work through a path preview at all.
@@ -129,80 +132,22 @@ reloads are unaffected.
 
 Apps that build absolute URLs from the origin, or that are mounted at the root,
 may also need to be told they are behind a prefix — Vite's `base`, Next's
-`basePath`, JupyterLab's `--ServerApp.base_url`, and similar. Hostname previews
-have none of these limits.
+`basePath`, JupyterLab's `--ServerApp.base_url`, and similar.
 
-**Hostname previews** give each port an origin of its own,
-`PORT.<preview-domain>`, and therefore full fidelity with no sandbox. Turn them
-on by setting a preview domain:
+Full-screen (the ↗ button) opens the preview as a page of its own. It asks
+first: a top-level window has no sandbox attribute, so the agent's page would
+get the Workbench's own origin — its storage, its API and its terminals.
 
-```bash
-./install.sh --domain code.example.com --preview-domain preview.example.com
-```
-
-That needs a wildcard DNS record, `*.preview.example.com`, pointing at the same
-host. In standalone mode Caddy issues each certificate on demand the first time
-a hostname is requested, gated so it only ever answers for numeric subdomains
-of your preview domain; no DNS-provider plugin is needed. Behind an existing
-proxy, that proxy needs the wildcard certificate and should forward those
-hostnames to the same address as the main one.
-
-> **Cloudflare Tunnel:** Universal SSL covers a single wildcard level: only
-> `*.example.com` is certified. A preview domain one label down needs
-> `*.preview.example.com`, which is two levels and is not, so there are two
-> options — buy Advanced Certificate Manager, or use the apex wildcard itself
-> by setting the preview domain to `example.com`, which serves ports as
-> `3000.example.com`. Path previews need neither and are the right default for
-> a tunnel.
-
-Full-screen (the ↗ button) opens the preview domain when one is configured and
-the path proxy otherwise. In path mode it asks first: a top-level window has no
-sandbox attribute, so the agent's page would get the Workbench's own origin —
-its storage, its API and its terminals. With a preview domain the page is on a
-separate origin anyway and it opens straight away.
+Per-port preview hostnames (`PORT.<preview-domain>`) were removed: the sign-in
+cookie is host-only, so it never reaches another hostname.
 
 ### Sharing a preview
 
-Everything above is for your own viewing, behind the login. To hand a preview
-to someone without an account, **share** the port. The **Share** action on a
-port mints a public link on the same hostname:
-
-```
-https://code.example.com/s/<token>/
-```
-
-The token is 128 bits from a cryptographic RNG, so the link is unguessable, and
-it is served by the proxy *without* the login — anyone you send it to can open
-it. A share is never created for you: a port is private until you press Share,
-and sharing it again returns the same link. agentbox's own services — the
-editor, the terminals, the Workbench itself — cannot be shared at all. While a
-share is live the panel keeps a "Public — anyone with this link can view this"
-banner in view and marks the port in the list, so a public preview is never a
-surprise. The link **expires after 24 hours** by default; **Extend** pushes that
-back out and **Revoke** kills it immediately — the next request to a revoked,
-expired or unknown token is a plain 404 that reveals nothing, and anyone
-already connected (a live-reload socket, a stream) is cut off too.
-
-What you are exposing is your own app, by your choice, to anyone holding the
-link. The shared page reaches only that one loopback port, with your login
-stripped from every request. Because it is served on the box's own hostname,
-every shared response also carries a `sandbox` Content-Security-Policy: the
-page gets an opaque origin, so it cannot read the Workbench's cookies or
-storage or call its API, even opened in a tab of its own. The same sandbox has
-a cost for the shared app: like a path preview it runs without cookies,
-storage, same-origin requests or live reload, so share something that renders
-from plain page loads. In traefik mode the `/s/` path is rate-limited the way
-the login is; standalone and behind-proxy modes have no rate limiter of their
-own, and rely on the token being unguessable.
-
-Full-screen of a shared preview opens its `/s/` link, so what you see and what
-a viewer sees are the same page, and it asks first even when a preview domain
-is set, because that link is on the box's own address.
-
-Sharing is on by default (`--preview path`), still opt-in per port. An operator
-can turn it off entirely with `--preview off`, which hides the Share action and
-404s every share link. Minted shares live under `~/.agentbox/shares/` on the
-home volume, so a link survives a restart.
+Public sharing is off. The old `/s/<token>/` links opened without a sign-in on
+the strength of a record the bridge kept inside the sandbox, where an agent
+could have written one; the gate, which decides who gets in, admits no one
+without a session. The Share action is hidden, and sharing returns as app
+sharing decided by the gate. See [the security model](security.md#the-front-door).
 
 ## Review
 
@@ -289,11 +234,12 @@ sandbox. A server bound to `127.0.0.1` is fine — that is the common case — b
 one started on the host is invisible, by design. Ports belonging to agentbox's
 own services are hidden behind *Show system*.
 
-**The browser asks for the password again.** Basic authentication is per
-origin, so each `PORT.<preview-domain>` prompts separately. The credentials are
-the same.
+**The page went back to sign in.** The session ended: 12 hours unused (unless
+"Remember this device" was ticked), a password or two-factor change, or a
+sign-out elsewhere. The Workbench notices on its next request, or when the tab
+comes back into view, and returns you where you were after signing in.
 
 **Cloudflare Access in front of the tunnel.** Access intercepts the websocket
 upgrade for anything without a session, so the Workbench's event stream and its
 terminals will not connect from an unauthenticated context. Add a service-token
-or bypass policy for the hostname, or use agentbox's own login alone.
+or bypass policy for the hostname, or use agentbox's own sign-in alone.

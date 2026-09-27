@@ -3,7 +3,8 @@
 A sandboxed coding environment for a VPS, reachable from any browser.
 
 Editor, terminal, process monitor, a control room for your coding agents —
-behind a login, in containers that cannot reach the host.
+behind a real sign-in with optional two-factor, in containers that cannot reach
+the host.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
@@ -17,13 +18,18 @@ certificate and starts the stack. It prints the password once.
 
 | Path | What it is |
 | --- | --- |
-| `/` | VS Code in the browser — files, editor, integrated terminal, extensions |
+| `/login` | The sign-in page; every other path sends you here first |
+| `/vscode/` | VS Code in the browser — files, editor, integrated terminal, extensions |
 | `/workbench` | The Workbench: many agents, live terminals, previews, review |
 | `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
 | `/shell` | A plain bash shell, pleasant on a phone |
 | `/monitor` | Live CPU, memory and process usage for the sandbox |
-| `/s/<token>` | An opt-in public preview you shared — no login, expiring, revocable |
-| `PORT.<preview-domain>` | Optional: each listening port on its own hostname |
+
+Sign-in is served by the **gate**, a small container outside the sandbox that
+holds the password, sessions, optional two-factor (TOTP with recovery codes)
+and device tokens, rate-limits and locks out guessing, and strips your
+credentials from everything it passes on. See
+[docs/install.md](docs/install.md#signing-in).
 
 ## The Workbench
 
@@ -80,7 +86,10 @@ This is the point of the project, so it is enforced rather than asserted:
   dropped and `no-new-privileges` set.
 - **Bounded.** CPU, memory and PID ceilings stop a runaway agent from taking
   the host down with it.
-- **One door.** Only the proxy publishes a port, and it authenticates first.
+- **One door, outside.** Only the proxy publishes a port, and everything it
+  receives goes through the gate — its own container, user and volume, which
+  the sandbox cannot touch — before anything reaches the sandbox. No password,
+  session cookie or token is ever passed on to it.
 
 It protects the host from the sandbox. It does not make the code inside safe:
 an agent with your keys can still push commits and spend tokens. See
@@ -96,12 +105,8 @@ address — no ports are opened and Cloudflare terminates TLS:
 code.example.com  →  http://127.0.0.1:8443
 ```
 
-**Wildcards and certificates.** Cloudflare's Universal SSL covers one wildcard
-level, so `*.example.com` is certified and `*.preview.code.example.com` is not.
-If you want per-port preview hostnames through a tunnel, the preview domain has
-to sit where a covered wildcard reaches it — the zone apex — or you need
-Advanced Certificate Manager. The Workbench's path previews need none of this,
-which is why they are the default.
+Set `AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env` so sign-in limits
+count each visitor rather than the tunnel as one.
 
 **Order matters.** `cloudflared` matches ingress rules top to bottom, so a
 route placed below a wildcard such as `*.example.com` never runs. The symptom
@@ -130,7 +135,8 @@ root.
 ./scripts/agentbox logs code
 ./scripts/agentbox shell            # a shell inside the sandbox
 ./scripts/agentbox workbench        # follow the Workbench bridge's log
-./scripts/agentbox password         # rotate the login
+./scripts/agentbox passwd           # change the password
+./scripts/agentbox totp reset       # turn two-factor off (lost phone)
 ./scripts/agentbox backup           # archive workspace and home
 ./scripts/agentbox update           # pull, rebuild, restart
 ```

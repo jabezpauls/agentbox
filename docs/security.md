@@ -27,11 +27,121 @@ over the host.
   deliberate: a dev server an agent starts in one pane is previewable from the
   others. The shared namespaces belong to sandbox containers only; nothing
   about the host boundary changes.
+- The gate's listener, on the internal network, exactly as an anonymous visitor
+  would: the sign-in page, rate-limited sign-in, and nothing else. It cannot
+  claim another visitor's address there, and it cannot read or write the
+  gate's store.
+
+## The front door
+
+Two rules decide the shape of everything that follows:
+
+1. **Whatever decides who gets in lives outside the sandbox.** The sandbox runs
+   agents, and anything it holds an agent can change. So the password, the
+   sessions, two-factor and device tokens live in the **gate** — a container of
+   its own, from its own image, running as its own user (uid 10001, not the
+   sandbox's 1000), with a read-only root filesystem, no capabilities, and a
+   volume (`agentbox_gate`) that no sandbox container mounts.
+2. **No front-door credential ever enters the sandbox.** Before Caddy's basic
+   authentication was replaced, the password itself travelled to the editor and
+   the bridge on every request, where a process in the sandbox could have read
+   it. Now the gate strips `Authorization`, `Proxy-Authorization`, its session
+   cookie and its app-grant cookie from every request and WebSocket upgrade it
+   forwards, whatever the route; and it drops any `Set-Cookie` from the sandbox
+   that would set or clear one of its own cookies.
+
+Every request goes proxy → gate → sandbox. The proxy (Caddy) terminates TLS in
+standalone mode, compresses, and forwards everything to the gate; it
+authenticates nothing and routes nothing.
+
+- **Routing on the raw path.** Before anything else, the gate refuses (`400`)
+  any raw path with a dot-segment, `%2e`, `%2f`, `%5c`, a backslash, `;` or
+  `//` — forms that one parser normalises and another does not — so no
+  difference between Caddy, the gate and an upstream can move a request from
+  one branch to another. Then, on the raw path: `/login` and the gate's own
+  `/_gate/*` API, `/cli/*` (the CLI download, empty until it ships) and the
+  device-approval page stay in the gate; `/vscode/*` goes to code-server with
+  the prefix stripped; `/terminal`, `/shell` and `/monitor` go to their ttyd
+  services unchanged; everything else goes to the bridge unchanged.
+- **Nothing without a session or a device token.** A page load without one is
+  sent to `/login?next=<where it was going>`; any other request gets `401`. The
+  only routes open without one are the sign-in page and its assets, sign-in
+  itself, the two calls a device login makes (below) and the CLI download. A
+  request from the sandbox to the gate is treated as any anonymous client.
+- **Sessions.** Cookie `__Host-agentbox`: `HttpOnly; Secure; SameSite=Lax;
+  Path=/`, 256 random bits, stored only as a SHA-256 digest. A session ends
+  after 12 hours without use; "Remember this device" instead keeps it for 30
+  days, and no session outlives 30 days. Changing the password or two-factor
+  ends every other session. Because the cookie is `Secure`, the box must be
+  reached over HTTPS (or on `localhost`).
+- **Same-origin checks.** A state-changing request (anything but GET or HEAD)
+  riding the session cookie must carry an `Origin` naming the box's own host,
+  or `Sec-Fetch-Site: same-origin`, or it is refused `403` before it reaches
+  the sandbox; that is cross-site request forgery closed off at the door, for
+  sign-in and sign-out as well. A WebSocket upgrade on a session must carry an
+  `Origin` naming the box's host too, so a page in another tab cannot open a
+  terminal on your cookie. (ttyd's `--check-origin` and the bridge's own
+  upgrade check still apply behind it.) Device tokens are exempt: a page on
+  another site cannot attach an `Authorization` header.
+- **Passwords.** bcrypt with cost 14, in the gate's store. `AGENTBOX_PASSWORD_HASH`
+  in `.env` only seeds a store that does not exist yet; every way of setting the
+  password — the installer's `--password`, `./scripts/agentbox passwd`, the
+  account API — writes the store and ends sessions. Passwords longer than
+  bcrypt's 72 bytes are refused rather than silently truncated.
+- **Rate limits and lockout, in every mode, before bcrypt.** Per client
+  address: five password checks in any minute; from the fifth consecutive
+  failure on, each further try waits 1 s, 2 s, 4 s, … after the last; ten
+  consecutive failures lock the address out for 15 minutes, right password or
+  not. Across all addresses, at most 30 checks a minute — a flood from many
+  addresses can pause sign-in for everyone for that minute, but sessions
+  already open are unaffected. A refused attempt costs a map lookup, not a
+  bcrypt comparison, and the gate's CPU is capped besides. `./scripts/agentbox
+  gate unlock` clears every lock.
+- **Whose address.** The gate believes a forwarding header only on a connection
+  from the proxy (the compose service `proxy`, resolved through Docker's DNS;
+  a sandbox container cannot forge the proxy's source address, having no
+  `NET_RAW`). From the proxy it reads `AGENTBOX_CLIENT_IP_HEADER` when set, and
+  otherwise the last entry of `X-Forwarded-For`, which Caddy writes itself.
+  Standalone mode needs nothing more. The traefik overlay reads
+  `CF-Connecting-IP`, which is right behind Cloudflare and spoofable without
+  it — set `AGENTBOX_CLIENT_IP_HEADER` empty when nothing fronts Traefik. Behind
+  another reverse proxy, name the header it sets (e.g. `X-Real-IP`), or every
+  visitor shares one budget and one visitor's failures can lock everyone out.
+- **Two-factor (optional).** TOTP (RFC 6238: SHA-1, six digits, 30-second
+  steps, one step of clock drift either way), each code usable once. Enrolling
+  gives ten single-use recovery codes of 80 bits each, stored as SHA-256
+  digests. A lost phone is fixed on the host with `./scripts/agentbox totp
+  reset`.
+- **Device tokens.** The CLI signs in with a device flow: it asks the gate for a
+  code, the owner — signed in, in a browser — approves it on
+  `/settings/devices?code=XXXX-XXXX`, and the CLI collects a token once. Tokens
+  are `abx_` plus 256 random bits, stored as SHA-256 digests with a name, when
+  they were made and last used, and from where; they work as `Authorization:
+  Bearer` on every authenticated route, ttyd included. They cannot manage the
+  account — sessions, the password, two-factor, approving another device —
+  which takes a signed-in browser. Revoke one from the API, or all of them
+  with `./scripts/agentbox gate revoke-all`.
+- **Headers.** Everything the gate serves carries `Referrer-Policy:
+  no-referrer` and `X-Content-Type-Options: nosniff`, and HTML carries
+  `frame-ancestors 'self'`. The sign-in pages allow nothing but their own
+  files (`default-src 'none'`). HSTS stays with whatever terminates TLS.
+- **The host's escape hatches** (`passwd`, `totp reset`, `gate unlock`,
+  `gate revoke-all`) reach the running gate through a Unix socket in the gate
+  container's private `/tmp`, so only a process already inside that container
+  — `docker compose exec` from the host — can use them.
+
+What this does *not* do: a compromised sandbox with internet egress can still
+publish itself through a tunnel of its own; that was always true (see
+"Egress filtering"). The gate guarantees that its own front door never lets
+anyone in without the owner, and never hands the sandbox the owner's
+credentials. `tests/proxy/gate-bypass.sh` runs the real Caddyfiles and the real
+gate image against stand-ins for every sandbox port and proves both.
 
 ## The Workbench's own surface
 
 - **The bridge is not published.** `workbench` listens on :7800 inside the
-  shared namespace. Only the proxy can reach it, and only after authenticating.
+  shared namespace. Only the gate forwards to it, and only once a request is
+  authenticated.
 - **The RPC forwarder is an allowlist, not a passthrough.** The browser can
   call the herdr methods the app needs and nothing else; anything outside the
   list is refused before it reaches herdr.
@@ -45,61 +155,29 @@ over the host.
   `allow-same-origin`. That protection is the iframe's: opening the same
   preview full screen makes it a top-level document, where no sandbox applies
   and the page really does share the Workbench's origin. The ↗ button therefore
-  warns and asks first in path mode. A configured preview domain puts the page
-  on its own origin, where the browser's origin separation does the job in both
-  places, and full screen opens without a prompt.
-- **Previews are not handed your login.** `Authorization` and `Cookie` are
-  stripped from every request and websocket upgrade the preview proxy forwards,
-  so the password guarding the box never reaches a port an agent opened.
-- **Public shares are opt-in, unguessable and revocable.** A preview is private
-  until you mint a share for it. A share is a 128-bit CSPRNG token that the
-  proxy serves under `/s/<token>/` **without** the login, so anyone you hand the
-  link to can open it. It maps to exactly one loopback port and is not a general
-  proxy: agentbox's own services (the editor, the ttyd shells, the bridge) can
-  never be shared, at mint or at serve. An unknown, expired (24h default) or
-  revoked token is a plain `404` that reveals nothing else exists; revoking —
-  or expiry — also cuts any connection a viewer already has open. Turn the
-  whole feature off with `--preview off`. Records live under
-  `~/.agentbox/shares/` on the home volume.
-- **The unauthenticated path is decided twice, on the raw URL.** The proxy
-  treats a request as public only when its raw request URI is `/s/` followed
-  by a 32-hex token and contains none of the forms two parsers read
-  differently — dot-segments, `%2e`, `%2f`, `%5c`, a backslash, `;`, `//`.
-  Anything else takes the login. The proxy deletes any client-sent
-  `X-Agentbox-Public` header on every request and sets it only on that public
-  branch, and the bridge refuses (404) any request carrying it whose raw path
-  is not a share. Because the bridge judges the same raw string it routes on,
-  a normalisation difference between Caddy and the bridge cannot turn a public
-  request into a private route. The bridge also refuses (400) those ambiguous
-  forms in any path it routes, checking only the routing prefix of a preview
-  or share so an app's own encoded URLs still reach it.
-  `tests/proxy/share-bypass.sh` runs the real Caddyfiles against the real
-  bridge with the known bypass shapes.
-- **A shared page does not get the box's origin.** It is served on the box's
-  hostname, so every response under `/s/` carries
-  `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups
-  allow-modals`: the browser gives it an opaque origin — no access to the
-  Workbench's cookies, storage, API or credentials — even when it is opened as
-  a top-level tab. `Service-Worker-Allowed` is stripped from every proxied
-  response, so a previewed page cannot register a worker over the Workbench.
-  What a share *does* expose is your app itself, to anyone with the link: its
-  pages, and any endpoint it serves. Share a dev server you would be content
-  for the recipient to use, and revoke it when you are done. The panel asks
-  before opening a share full screen for the same reason.
-- **Rate limiting of `/s/` is a traefik-mode feature.** The Traefik overlay
-  gives the share path its own limit, like the login's. Caddy has no built-in
-  rate limiter, so in standalone and behind-proxy modes the share path is not
-  rate-limited by agentbox; the token's 128 bits are what stop guessing there,
-  and a fronting proxy can add a limit. Traefik counts requests per
-  `CF-Connecting-IP` by default, which is right behind Cloudflare and
-  spoofable without it — set `AGENTBOX_CLIENT_IP_HEADER` empty when nothing
-  fronts Traefik.
-- **WebSocket upgrades are origin-checked.** The same-origin policy does not
-  cover websocket handshakes, so a page in another tab could otherwise open
-  `/workbench/ws/events` or `/workbench/ws/terminal` on your cached
-  credentials. Every upgrade must carry an `Origin` equal to the request's own
-  scheme and host; a foreign origin, a missing one and the `null` a sandboxed
-  document sends are all refused.
+  warns and asks first.
+- **Previews are not handed your login.** The gate has already removed its own
+  cookies and `Authorization` from every request; the bridge's preview proxy
+  strips `Cookie` and `Authorization` again from everything it forwards to a
+  port an agent opened.
+- **Public shares are off.** The old `/s/<token>/` links were served without a
+  login on the strength of a record the bridge kept — inside the sandbox, where
+  an agent could have minted one for any port. That breaks the first rule, so
+  the gate admits no one without a session, and the bridge runs with sharing
+  off. Per-port preview hostnames are gone as well: the session cookie is
+  host-only and never reaches another hostname. Sharing returns as app sharing
+  decided by the gate.
+- **The bridge still guards its own paths.** It refuses (400) the same
+  ambiguous path forms the gate does, in any path it routes (checking only the
+  routing prefix of a preview, so an app's own encoded URLs still reach it), and
+  `Service-Worker-Allowed` is stripped from every proxied response, so a
+  previewed page cannot register a worker over the Workbench.
+- **WebSocket upgrades are origin-checked, twice.** The same-origin policy does
+  not cover websocket handshakes, so a page in another tab could otherwise open
+  `/workbench/ws/events` or `/workbench/ws/terminal` on your session cookie.
+  The gate refuses a session's upgrade whose `Origin` is not the box's host,
+  and the bridge checks again: a foreign origin, a missing one and the `null` a
+  sandboxed document sends are all refused.
 - **The Workbench cannot be framed** by another site: its pages are served with
   `frame-ancestors 'self'`, so it cannot be overlaid onto a live terminal.
 - **The directory picker is confined** to the workspace root: `/api/fs/dirs`
@@ -116,11 +194,6 @@ over the host.
   across the boundary is `postMessage`, and the panel accepts messages from its
   own frame alone. Session keys are short hashes matched against that shape, so
   a `..` in a key is refused rather than resolved.
-- **On-demand certificates are gated.** In standalone mode the preview
-  wildcard's certificates are issued on demand; the permission endpoint answers
-  only for numeric subdomains of the configured preview domain, comparing that
-  suffix literally, so the box cannot be made to mint certificates for names it
-  does not serve.
 
 ## Verifying the boundary yourself
 
@@ -141,21 +214,21 @@ done
 Expect `User=1000:1000`, `CapDrop=[ALL]`, `Privileged=false`, and only
 `/var/lib/docker/volumes/...` paths for the sandbox services.
 
+```bash
+# The gate is outside the sandbox: its own user, read-only, no capabilities,
+# and the only container that mounts agentbox_gate.
+docker inspect agentbox-gate-1 \
+  --format 'user={{.Config.User}} ro={{.HostConfig.ReadonlyRootfs}} caps={{.HostConfig.CapDrop}}'
+docker ps -a --filter volume=agentbox_gate --format '{{.Names}}'
+```
+
+Expect `user=10001:10001 ro=true caps=[ALL]`, and only the gate listed.
+
 ## Rootless mode (recommended)
 
 In `rootless` mode the Docker daemon itself runs as an unprivileged user, so a
 container breakout lands in a user account rather than root. This is the
 strongest configuration and is what the project recommends for shared hosts.
-
-## Authentication
-
-The proxy demands credentials before any request reaches the editor, the
-Workbench, the terminal, the metrics or a preview. Basic authentication is
-scoped per origin, so each preview hostname prompts separately with the same
-credentials.
-
-Passwords are stored only as bcrypt hashes. In `standalone` mode the proxy also
-obtains and renews TLS certificates automatically.
 
 ## Threat model, honestly stated
 

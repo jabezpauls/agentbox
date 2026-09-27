@@ -25,7 +25,7 @@ one; the credentials persist in the `agentbox_home` volume.
 
 ## Other entry points
 
-- `/` — this editor
+- `/vscode/` — this editor
 - `/workbench` — the Workbench: every agent at once, with live terminals and
   previews of the servers they start
 - `/terminal` — the same herdr session as a full-screen TUI
