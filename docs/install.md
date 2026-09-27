@@ -126,9 +126,10 @@ is what counts: `AGENTBOX_PASSWORD_HASH` in `.env` only seeds a store that does
 not exist yet, so editing it by hand changes nothing — `passwd` updates it too,
 so the two never disagree.
 
-**Sudo mode.** Approving a device, two-factor changes, the password and
-revoking device tokens ask for your password again (and a code, with
-two-factor on), then need nothing more for ten minutes. Everything else never
+**Asked again, every time.** Approving a device, two-factor changes, the
+password and revoking a device token ask for your password (and a code, with
+two-factor on) each time, in the same request — a signed-in session alone is
+never enough for them, however recently you signed in. Everything else never
 asks.
 
 **Two-factor.** Optional, and recommended on a box reachable from the internet.
@@ -140,7 +141,7 @@ any page of the box:
 const post = (p, b) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
 const { secret, otpauthUrl } = await post("/_gate/totp/setup", { password: "your password" });
 // Add `secret` (or `otpauthUrl`) to your authenticator app, then confirm with the code it shows:
-await post("/_gate/totp/confirm", { code: "123456" });   // returns your ten recovery codes
+await post("/_gate/totp/confirm", { password: "your password", code: "123456" });   // returns your ten recovery codes
 ```
 
 Keep the ten recovery codes it returns — each signs you in once in place of a

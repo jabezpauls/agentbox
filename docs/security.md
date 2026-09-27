@@ -103,13 +103,16 @@ proxy.
   another tab cannot open a terminal on your cookie. (ttyd's `--check-origin`
   and the bridge's own upgrade check still apply behind it.) Device tokens are
   exempt: a page on another site cannot attach an `Authorization` header.
-- **Sudo mode.** What would let someone keep the box or lock you out needs
-  fresh credentials, not just the session: approving a device, setting up,
-  confirming or turning off two-factor, changing the password, and revoking
-  device tokens. Re-entering the password — and a code, with two-factor on —
-  puts the session in sudo mode for ten minutes (`POST /_gate/sudo`, or the
-  credentials sent with the request itself, which are always checked). The
-  approval page asks for them in the same form. Ordinary use never asks.
+- **Fresh credentials in the request.** What would let someone keep the box
+  or lock you out needs the password — and a code, with two-factor on — sent
+  with the request that does it, every time: approving a device, setting up,
+  confirming or turning off two-factor, changing the password (the current one
+  is mandatory), and revoking a device token other than the caller's own. The
+  session alone is never enough, and nothing is remembered in between: there
+  is no window after one confirmation in which a page running on the session
+  (a sandbox page the owner opened, say) could do any of these without the
+  password. Each check counts against the sign-in limits below. The approval
+  page asks for the password in the same form. Ordinary use never asks.
 - **Passwords.** bcrypt with cost 14, in the gate's store. `AGENTBOX_PASSWORD_HASH`
   in `.env` only seeds a store that does not exist yet (`./scripts/agentbox
   passwd` keeps it in step anyway, so restoring the stack's files cannot bring
@@ -120,7 +123,7 @@ proxy.
   silently truncated.
 - **Rate limits and lockout, in every mode, before bcrypt.** Per client
   address (an IPv6 client: per /64): five password checks in any minute —
-  sign-in, sudo mode and the password change all count; from the fifth
+  sign-in and every sensitive action's own check count; from the fifth
   consecutive failure on, each further try waits 1 s, 2 s, 4 s, … after the
   last; ten consecutive failures lock the address out for 15 minutes, right
   password or not. Across all addresses, at most 30 checks a minute — a flood
@@ -152,16 +155,16 @@ proxy.
   digests. A lost phone is fixed on the host with `./scripts/agentbox totp
   reset`.
 - **Device tokens.** The CLI signs in with a device flow: it asks the gate for a
-  code, the owner — signed in, in a browser, in sudo mode — approves it on
-  `/settings/devices?code=XXXX-XXXX`, and the CLI collects a token once. One
-  client address may have three logins waiting, and a hundred may wait in
-  all. Tokens are `abx_` plus 256 random bits, stored as SHA-256 digests with a
+  code, the owner — signed in, in a browser, entering the password again —
+  approves it on `/settings/devices?code=XXXX-XXXX`, and the CLI collects a
+  token once. One client address may have three logins waiting, and a hundred
+  may wait in all. Tokens are `abx_` plus 256 random bits, stored as SHA-256 digests with a
   name, when they were made and last used, and from where; they work as
   `Authorization: Bearer` on every authenticated route, ttyd included. They
   cannot manage the account — sessions, the password, two-factor, approving
   another device — which takes a signed-in browser, and a token may revoke
-  only itself. Revoke others from a browser in sudo mode, or all of them with
-  `./scripts/agentbox gate revoke-all`.
+  only itself. Revoke others from a signed-in browser with the password, or
+  all of them with `./scripts/agentbox gate revoke-all`.
 - **Headers.** Everything the gate serves carries `X-Content-Type-Options:
   nosniff` and — except its own pages, above — `Referrer-Policy: no-referrer`,
   and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing
