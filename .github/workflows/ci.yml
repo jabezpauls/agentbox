@@ -18,7 +18,8 @@ jobs:
             scripts/isolate-host.sh \
             images/workspace/entrypoint.sh \
             images/workspace/agentbox-workbench \
-            tests/proxy/share-bypass.sh tests/install/*.sh
+            images/gate/agentbox-gate \
+            tests/proxy/gate-bypass.sh tests/install/*.sh
 
       - name: Validate Compose files
         run: |
@@ -26,12 +27,15 @@ jobs:
           # is written by install.sh.
           cp .env.example .env
           sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholderplaceholderplaceholderplaceholder|' .env
-          for mode in standalone behind-proxy; do
+          for mode in standalone behind-proxy traefik; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
-            docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" \
-              -f docker-compose.previews.yml config -q
           done
-          docker compose -f docker-compose.yml -f docker-compose.traefik.yml config -q
+          # The traefik overlay must never publish a port: Traefik reaches the
+          # proxy over the Docker network, and nothing else should reach it.
+          if docker compose -f docker-compose.yml -f docker-compose.traefik.yml config | grep -q '^ *ports:'; then
+            echo "the traefik overlay publishes a port" >&2
+            exit 1
+          fi
 
       - name: What a re-run of the installer keeps
         run: tests/install/env-preserve.sh
@@ -48,41 +52,21 @@ jobs:
         # Compose validation cannot catch a malformed Caddyfile; an undefined
         # snippet or a renamed directive only fails when the proxy starts.
         run: |
-          # A real bcrypt-shaped hash: basic_auth rejects anything else, so a
-          # literal "placeholder" fails validation rather than standing in.
-          hash='$2a$14$abcdefghijklmnopqrstuuKO0DUaDUZ9L.Qq0OZ9nZ5tQmZ6q1pO'
-          validate() {
-            docker run --rm -v "$PWD/proxy:/p:ro" "$@" \
-              -e AGENTBOX_DOMAIN=example.com \
-              -e AGENTBOX_USER=ci \
-              -e AGENTBOX_PASSWORD_HASH="$hash" \
-              caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
-          }
-          # Without a preview domain, and with one plus the previews file
-          # mounted the way docker-compose.previews.yml mounts it.
           for file in Caddyfile.standalone Caddyfile.behind-proxy; do
-            validate -e AGENTBOX_PREVIEW_DOMAIN=
-            validate -e AGENTBOX_PREVIEW_DOMAIN=preview.example.com \
-              -v "$PWD/proxy/Caddyfile.previews:/etc/caddy/previews/previews.caddyfile:ro"
+            docker run --rm -v "$PWD/proxy:/p:ro" -e AGENTBOX_DOMAIN=example.com \
+              caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
           done
 
-  share-bypass:
+  gate-bypass:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-        working-directory: web
-      - run: npm run build -w bridge
-        working-directory: web
-      - name: The public /s/ path cannot reach a private route
-        # The real Caddyfiles in the real Caddy image, in front of the real
-        # bridge, fed the encoded and dot-segment variants of /s/<token>/.
-        run: tests/proxy/share-bypass.sh
+      - name: Nothing gets past the gate
+        # Builds the gate image, then runs the real Caddyfiles in the real Caddy
+        # image in front of it, with echo servers for every sandbox port: no
+        # unauthenticated path, header or WebSocket trick reaches the sandbox,
+        # no front-door credential arrives there, and sign-in locks out.
+        run: tests/proxy/gate-bypass.sh
 
   web:
     runs-on: ubuntu-latest
@@ -141,3 +125,11 @@ jobs:
         run: |
           docker run --rm agentbox/workspace:ci \
             node /usr/local/lib/agentbox-workbench/bridge/bridge/src/main.js --help
+      - name: Build the gate image
+        run: docker build -t agentbox/gate:ci -f images/gate/Dockerfile .
+      - name: The gate must run unprivileged, and its admin command work
+        run: |
+          test "$(docker run --rm --entrypoint id agentbox/gate:ci -u)" = 10001
+          docker run --rm agentbox/gate:ci node /app/dist/main.js --help
+          printf 'a-ci-password\n' | docker run --rm -i --entrypoint agentbox-gate agentbox/gate:ci hash-password \
+            | grep -q '^\$2[aby]\$14\$'
