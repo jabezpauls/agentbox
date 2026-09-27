@@ -179,4 +179,20 @@ describe("the raw-path guard", () => {
     const res = await raw("/api/fs/dirs?path=a%2F..%2Fb");
     expect(res.status).not.toBe(400);
   });
+
+  it("leaves a WebDAV path's filename characters to the DAV handler", async () => {
+    // `;` and an encoded backslash are characters a filename may hold; the
+    // handler reads each segment itself and 404s these missing files.
+    for (const p of ["/api/dav/a;b", "/api/dav/a%5Cb", "/api/dav/a%5cb%3B"]) {
+      expect((await raw(p)).status, p).toBe(404);
+    }
+    // What would climb out is refused there instead.
+    for (const p of ["/api/dav/..%2f..%2fapi/health", "/api/dav/%2e%2e/api/health", "/api/dav/../api/health"]) {
+      expect((await raw(p)).status, p).toBe(400);
+    }
+  });
+
+  it("still guards a path that only resembles the DAV prefix", async () => {
+    expect((await raw("/api/davx;y")).status).toBe(400);
+  });
 });

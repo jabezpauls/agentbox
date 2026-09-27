@@ -6,5 +6,5 @@
     "test": "vitest run", "typecheck": "tsc -p tsconfig.json --noEmit", "lint": "eslint src test"
   },
   "dependencies": { "fastify": "^5", "@fastify/websocket": "^11", "@fastify/static": "^8", "@fastify/http-proxy": "^11", "ws": "^8", "yazl": "^3.3.1" },
-  "devDependencies": { "typescript": "^5.6", "tsx": "^4", "vitest": "^2", "@types/node": "^22", "@types/ws": "^8", "@types/yazl": "^3", "eslint": "^9", "typescript-eslint": "^8" }
+  "devDependencies": { "typescript": "^5.6", "tsx": "^4", "vitest": "^2", "@types/node": "^22", "@types/ws": "^8", "@types/yazl": "^3", "webdav": "^5", "eslint": "^9", "typescript-eslint": "^8" }
 }

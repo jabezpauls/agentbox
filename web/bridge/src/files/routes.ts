@@ -10,6 +10,20 @@ import { searchNames } from "./search.js";
 import type { FilesService } from "./service.js";
 import { zipStream } from "./zip.js";
 
+/**
+ * `onSend` hook for routes that stream their request body: when the answer
+ * goes out before the body was read — a refused chunk, a locked file — the
+ * connection is closed rather than kept alive. The unread bytes would
+ * otherwise sit in front of the client's next request on that socket, and a
+ * client that retries idempotent requests on a confused connection (PUT is
+ * idempotent) sends the next one twice.
+ */
+export async function closeIfBodyUnread(req: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> {
+  const body = req.body as { readableEnded?: boolean } | undefined;
+  if (body && body.readableEnded === false) reply.header("connection", "close");
+  return payload;
+}
+
 /** Report a failure the way every files route does: `{error, code?}` and a status. */
 export function sendError(reply: FastifyReply, err: unknown): FastifyReply {
   const e = fsError(err, "path");
@@ -203,6 +217,7 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
   void app.register(async (scope) => {
     scope.removeAllContentTypeParsers();
     scope.addContentTypeParser("*", (_req, payload, done) => done(null, payload));
+    scope.addHook("onSend", closeIfBodyUnread);
     scope.put<{ Params: { id: string } }>(
       "/api/files/uploads/:id",
       wrap(async (req) => {

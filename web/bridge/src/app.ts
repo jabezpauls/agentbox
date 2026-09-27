@@ -19,6 +19,7 @@ import { LiveShares } from "./share/live.js";
 import { pathGuard } from "./path-guard.js";
 import { FilesService } from "./files/service.js";
 import { registerFilesRoutes } from "./files/routes.js";
+import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -60,7 +61,10 @@ const FRAME_GUARD: Record<string, string> = {
 };
 
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, rewriteUrl: routableUrl });
+  // WebDAV's verbs, for `/api/dav`. Declared on the root instance, before any
+  // route, because the router's method table is shared.
+  for (const m of DAV_METHODS) app.addHttpMethod(m, { hasBody: true });
   await app.register(websocket);
   // Before any route, so it covers every route and every websocket upgrade:
   // the decisive half of the public `/s/` boundary, and a refusal of ambiguous
@@ -103,6 +107,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
   registerFilesRoutes(app, files);
+  registerDavRoutes(app, files);
   registerReviewRoutes(app, config, review);
   registerShareApiRoutes(app, config, shareDeps);
   registerEventsWs(app, deps.hub, deps.ports);

@@ -53,6 +53,20 @@ const DOWNLOAD_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+/** The type a download of `name` is labelled with. */
+export function contentTypeFor(name: string): string {
+  return DOWNLOAD_TYPES[path.extname(name).toLowerCase()] ?? "application/octet-stream";
+}
+
+/**
+ * A file's entity tag, from its size and modification time. WebDAV clients
+ * compare the one `PROPFIND` reports with the one `GET` sends, so both come
+ * from here.
+ */
+export function etagOf(st: Stats): string {
+  return `"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`;
+}
+
 /** True when the first bytes of a file look like text: valid UTF-8, no NULs. */
 export function looksLikeText(head: Buffer): boolean {
   if (head.includes(0)) return false;
@@ -120,7 +134,7 @@ export async function sendFile(
   inline: boolean,
 ): Promise<FastifyReply> {
   const ext = path.extname(name).toLowerCase();
-  let type = DOWNLOAD_TYPES[ext] ?? "application/octet-stream";
+  let type = contentTypeFor(name);
   let kind: "inline" | "attachment" = "attachment";
   if (inline) {
     if (INLINE_TYPES[ext]) {
@@ -137,7 +151,7 @@ export async function sendFile(
   reply.header("content-type", type);
   reply.header("content-disposition", disposition(kind, name));
   reply.header("last-modified", st.mtime.toUTCString());
-  reply.header("etag", `W/"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`);
+  reply.header("etag", etagOf(st));
   reply.header("accept-ranges", "bytes");
 
   const range = parseRange(req.headers.range, st.size);

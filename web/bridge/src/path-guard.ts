@@ -31,6 +31,11 @@ function rawPath(req: FastifyRequest): string {
  * strict form. Every other path the bridge serves is checked whole.
  */
 function routingPart(path: string): string {
+  // WebDAV names files in its path, and a filename may hold `;`, a backslash
+  // or anything else. The DAV handler decodes each segment itself and refuses
+  // `.`, `..`, empty names and encoded slashes before a path reaches the
+  // filesystem, so here only its prefix is held to the strict form.
+  if (path === "/api/dav" || path.startsWith("/api/dav/")) return "/api/dav/";
   for (const prefix of ["/preview/", "/s/"]) {
     if (path.startsWith(prefix)) {
       const end = path.indexOf("/", prefix.length);
