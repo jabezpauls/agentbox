@@ -52,12 +52,61 @@ export type HerdrEvent =
 export type HerdrEventName = HerdrEvent["event"];
 
 /** Messages on /ws/events, bridge → browser. */
-export interface ListeningPort { port: number; pid: number | null; process: string | null; system: boolean; address: string }
+export interface ListeningPort {
+  port: number; pid: number | null; process: string | null; system: boolean; address: string;
+  /** The owning process's working directory, when /proc tells. */
+  cwd?: string | null;
+}
 export type EventsMessage =
   | { kind: "snapshot"; snapshot: SessionSnapshot }
   | { kind: "event"; event: HerdrEventName; data: unknown }
   | { kind: "ports"; ports: ListeningPort[]; readable?: boolean }
-  | { kind: "reset"; reason: string };
+  | { kind: "reset"; reason: string }
+  | ProjectCloneEvent;
+
+/**
+ * A project: a top-level directory of the workspace, with what is going on in
+ * it — its git state, the agents (panes) whose cwd is inside it, and the
+ * listening servers started from inside it.
+ */
+export interface Project {
+  name: string;
+  /** Absolute. */
+  path: string;
+  git: ProjectGit | null;
+  /** Milliseconds: the last commit, or the directory's own mtime if later or not a repository. */
+  lastChange: number;
+  agents: ProjectAgent[];
+  listeners: ProjectListener[];
+}
+export interface ProjectGit {
+  /** null when detached. */
+  branch: string | null;
+  detached: boolean;
+  upstream: string | null;
+  ahead: number; behind: number;
+  /** Changed, added, deleted and untracked entries (ignored ones not counted). */
+  uncommitted: number;
+  lastCommit: number | null;
+}
+export interface ProjectAgent {
+  paneId: string; workspaceId: string;
+  agent: string | null; status: AgentStatus;
+  cwd: string;
+}
+export interface ProjectListener { port: number; pid: number | null; process: string | null; cwd: string }
+/** `POST /api/projects/clone` answers with this; progress follows as events. */
+export interface ProjectCloneStart { id: string; name: string; path: string; url: string }
+/** Progress of a clone, on /ws/events. */
+export interface ProjectCloneEvent extends ProjectCloneStart {
+  kind: "project.clone";
+  phase: "started" | "progress" | "done" | "error";
+  /** git's current stage, e.g. "Receiving objects". */
+  stage?: string;
+  percent?: number;
+  /** What went wrong, for `error`. */
+  message?: string;
+}
 
 /** Browser → bridge control messages on /ws/terminal (JSON text frames). Output arrives as binary frames of raw ANSI bytes. */
 export type TerminalClientMessage =

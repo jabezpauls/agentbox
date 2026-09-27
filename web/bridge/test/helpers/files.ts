@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../../src/app.js";
+import { buildApp, type AppDeps } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import type { SessionHub } from "../../src/herdr/session.js";
 import { FilesService, type FilesOptions } from "../../src/files/service.js";
@@ -35,7 +35,10 @@ export interface FilesFixture {
  * A bridge serving the files API over two throwaway roots. Nothing here ever
  * points at the developer's own home or at /workspace.
  */
-export async function filesFixture(opts: Partial<FilesOptions> = {}): Promise<FilesFixture> {
+export async function filesFixture(
+  opts: Partial<FilesOptions> = {},
+  more: (files: FilesService, roots: { workspace: string; home: string }) => Partial<AppDeps> = () => ({}),
+): Promise<FilesFixture> {
   const base = fs.mkdtempSync(path.join(tmpBase(), "wb-files-"));
   const workspace = path.join(base, "workspace");
   const home = path.join(base, "home");
@@ -63,7 +66,7 @@ export async function filesFixture(opts: Partial<FilesOptions> = {}): Promise<Fi
     version: null,
     env: { PATH: "" },
   });
-  const app = await buildApp(config, { hub: stubHub, files, system });
+  const app = await buildApp(config, { hub: stubHub, files, system, ...more(files, { workspace, home }) });
   await app.ready();
   return {
     base,

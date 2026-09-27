@@ -237,6 +237,9 @@ export async function listListeningPorts(opts: {
       process,
       system: isSystemPort({ port: row.port, systemPorts: system, cwd, workspaceRoot }),
       address: row.address,
+      // Which project started it: the project cards and the apps list both
+      // attribute a server by where its process runs.
+      cwd,
     };
     const existing = byPort.get(row.port);
     // Prefer an entry we could attribute to a process over an anonymous one.

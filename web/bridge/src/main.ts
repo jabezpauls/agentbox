@@ -6,6 +6,7 @@ import { PortsWatcher } from "./ports.js";
 import { ensureReviewRoot } from "./review/store.js";
 import { ensureSharesRoot } from "./share/store.js";
 import { FilesService } from "./files/service.js";
+import { sweepClones } from "./projects.js";
 
 const USAGE = "Usage: workbench-bridge [--help]\n\nRuns the Workbench bridge server that proxies browser clients to herdr.";
 
@@ -41,6 +42,8 @@ async function main(argv: string[]): Promise<void> {
   // rather than in buildApp, so a test server never touches a real volume.
   const files = new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
   const stopFiles = files.startMaintenance();
+  // A clone cut off by a restart is left in scratch space; clear old ones.
+  void sweepClones(config.workspaceRoot).catch(() => {});
 
   const app = await buildApp(config, { hub, ports, files });
   await app.listen({ host: "0.0.0.0", port: config.port });

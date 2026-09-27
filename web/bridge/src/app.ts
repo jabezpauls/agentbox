@@ -21,6 +21,10 @@ import { FilesService } from "./files/service.js";
 import { registerFilesRoutes } from "./files/routes.js";
 import { SystemMonitor } from "./system.js";
 import { registerSystemRoutes } from "./routes/system.js";
+import { BridgeEvents } from "./events.js";
+import { Projects } from "./projects.js";
+import { registerProjectRoutes } from "./routes/projects.js";
+import { listListeningPorts } from "./ports.js";
 import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 
 /**
@@ -51,6 +55,10 @@ export interface AppDeps {
   files?: FilesService;
   /** The system view's sampler; defaults to one over the configured cgroup and roots. */
   system?: SystemMonitor;
+  /** The bridge's own events, fanned out on /ws/events next to herdr's. */
+  events?: BridgeEvents;
+  /** The project cards; defaults to one over the workspace root and the live ports. */
+  projects?: Projects;
 }
 
 /**
@@ -108,8 +116,22 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const files =
     deps.files ?? new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+  const events = deps.events ?? new BridgeEvents();
+  const projects =
+    deps.projects ??
+    new Projects({
+      files,
+      snapshot: () => deps.hub.snapshot(),
+      // A fresh scan rather than the watcher's list, which is only kept
+      // current while an events client is connected.
+      scanPorts: async () =>
+        (await listListeningPorts({ systemPorts: config.infraPorts, workspaceRoot: config.workspaceRoot })).ports,
+      events,
+    });
+  app.addHook("onClose", async () => projects.stop());
 
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
+  registerProjectRoutes(app, projects);
   registerFilesRoutes(app, files);
   registerDavRoutes(app, files);
   registerSystemRoutes(
@@ -127,7 +149,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   );
   registerReviewRoutes(app, config, review);
   registerShareApiRoutes(app, config, shareDeps);
-  registerEventsWs(app, deps.hub, deps.ports);
+  registerEventsWs(app, deps.hub, deps.ports, events);
   registerTerminalWs(app, streams);
   await registerPreviewRoutes(app, config);
 
