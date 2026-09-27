@@ -123,20 +123,19 @@ export function extendShare(id: string): Promise<PreviewShare> {
 }
 
 /** The state of a preview port, as the panel's probe reads it. */
-export type ProbeState = "ready" | "down" | "error";
+export type ProbeState = "ready" | "down";
 
 /**
  * Probe a preview port by asking the proxy for it with a HEAD. The bridge marks
- * its branded fallback with `X-Preview-Upstream: down`, so a live server and a
- * not-yet-serving one are told apart without loading the iframe onto an error.
+ * every answer it gives on the upstream's behalf — nothing listening, nothing
+ * answering — with `X-Preview-Upstream: down`. Anything else came from the app
+ * itself, error statuses included, and is the app's to show, so it is "ready".
  */
 export async function probePreview(port: number, path: string): Promise<ProbeState> {
   const url = `${basePath()}/preview/${port}/${path.replace(/^\/+/, "")}`;
   try {
     const res = await fetch(url, { method: "HEAD", cache: "no-store" });
-    if (res.headers.get("x-preview-upstream") === "down") return "down";
-    if (res.status >= 500) return "error";
-    return "ready";
+    return res.headers.get("x-preview-upstream") === "down" ? "down" : "ready";
   } catch {
     return "down";
   }

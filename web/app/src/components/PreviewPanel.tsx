@@ -156,6 +156,8 @@ export function PreviewPanel() {
   }
 
   const activeShare = shares.find((s) => s.port === port) ?? null;
+  // agentbox's own services are never shareable; the bridge refuses them too.
+  const selectedIsSystem = ports.some((p) => p.port === port && p.system);
   const src = previewTarget(port, path, previewDomain, base);
   // A shared preview opens full screen at its public `/s/` link, so what the
   // owner opens and what a viewer opens are the same page.
@@ -215,7 +217,7 @@ export function PreviewPanel() {
           onKeyDown={(e) => e.key === "Enter" && commitPath()}
           onBlur={commitPath}
         />
-        {sharingEnabled && !activeShare && (
+        {sharingEnabled && !activeShare && !selectedIsSystem && (
           <button
             className="icon-btn"
             aria-label="Share this port"
@@ -233,7 +235,7 @@ export function PreviewPanel() {
           className="icon-btn"
           aria-label="Open full screen"
           title="Open full screen"
-          onClick={() => (previewDomain ? openFullScreen() : setConfirmFullScreen(true))}
+          onClick={() => (previewDomain && !activeShare ? openFullScreen() : setConfirmFullScreen(true))}
         >
           <ExternalLink size={14} />
         </button>
@@ -285,7 +287,7 @@ export function PreviewPanel() {
 
       {confirmFullScreen && (
         <Dialog
-          title="Open outside the sandbox?"
+          title={activeShare ? "Open the public link?" : "Open outside the sandbox?"}
           onClose={() => setConfirmFullScreen(false)}
           onSubmit={openFullScreen}
           submitLabel="Open anyway"
@@ -293,8 +295,9 @@ export function PreviewPanel() {
           narrow
         >
           <p className="dialog-text">
-            This page was written by an agent. Full screen gives it the same access to Workbench that you have —
-            its storage, its API and its terminals. Setting a preview domain avoids that.
+            {activeShare
+              ? "This opens the shared page on this box's own address. It is served sandboxed, so it cannot reach Workbench's storage, API or terminals — but it is still a page an agent wrote, and anyone with the link sees the same thing."
+              : "This page was written by an agent. Full screen gives it the same access to Workbench that you have — its storage, its API and its terminals. Setting a preview domain avoids that."}
           </p>
         </Dialog>
       )}
@@ -319,7 +322,7 @@ export function PreviewPanel() {
 
 interface PreviewStatusProps {
   port: number;
-  state: "checking" | "down" | "error";
+  state: "checking" | "down";
   onRetry(): void;
 }
 
@@ -340,14 +343,8 @@ function PreviewStatus({ port, state, onRetry }: PreviewStatusProps) {
       <span className="prev-status-glyph" aria-hidden="true">
         <Radio size={22} />
       </span>
-      <p className="prev-status-title">
-        {state === "error" ? `Port ${port} returned an error` : `Nothing is serving on port ${port} yet`}
-      </p>
-      <p className="prev-status-sub">
-        {state === "error"
-          ? "The server answered with an error. Check the pane that started it."
-          : "If you just started a server, give it a moment."}
-      </p>
+      <p className="prev-status-title">Nothing is serving on port {port} yet</p>
+      <p className="prev-status-sub">If you just started a server, give it a moment.</p>
       <button className="btn btn-primary btn-small" onClick={onRetry}>
         <RotateCw size={13} aria-hidden="true" /> Retry
       </button>

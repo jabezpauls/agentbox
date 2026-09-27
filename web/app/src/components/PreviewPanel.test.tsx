@@ -141,9 +141,12 @@ function shareFetch(shares: typeof SHARE[]): ReturnType<typeof vi.fn> {
 
 describe("sharing a preview", () => {
 
-  it("hides the Share action when sharing is disabled", () => {
+  it("hides the Share action when sharing is disabled", async () => {
     setup(null, false);
+    vi.stubGlobal("fetch", shareFetch([]));
     render(<PreviewPanel />);
+    // Let the probe settle so nothing updates after the test ends.
+    await screen.findByTitle("Preview on port 3000");
     expect(screen.queryByRole("button", { name: "Share this port" })).not.toBeInTheDocument();
   });
 
@@ -187,5 +190,66 @@ describe("sharing a preview", () => {
     await user.click(screen.getByRole("button", { name: "Open anyway" }));
 
     expect(open).toHaveBeenCalledWith(SHARE.url, "_blank", "noopener,noreferrer");
+  });
+});
+
+describe("guarding a shared preview", () => {
+  it("still asks before opening a share full screen when a preview domain is set", async () => {
+    setup("previews.example.com", true);
+    vi.stubGlobal("fetch", shareFetch([SHARE]));
+    const user = userEvent.setup();
+    render(<PreviewPanel />);
+
+    await screen.findByText(/anyone with this link can view/i);
+    await user.click(screen.getByRole("button", { name: "Open full screen" }));
+
+    // The /s/ link is on the box's own address whatever the preview domain.
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: /open the public link/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open anyway" }));
+    expect(open).toHaveBeenCalledWith(SHARE.url, "_blank", "noopener,noreferrer");
+  });
+
+  it("offers no Share action on one of agentbox's own ports", async () => {
+    setup(null, true);
+    vi.stubGlobal("fetch", shareFetch([]));
+    act(() => {
+      useApp.setState({
+        ports: [{ port: 3000, pid: 1, process: "code-server", system: true, address: "0.0.0.0" }],
+      });
+    });
+    render(<PreviewPanel />);
+    await screen.findByTitle("Preview on port 3000");
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringMatching(/api\/preview\/shares$/), expect.anything()));
+    expect(screen.queryByRole("button", { name: "Share this port" })).not.toBeInTheDocument();
+  });
+});
+
+describe("probing the port", () => {
+  function probeWith(headers: Record<string, string>, status = 200): ReturnType<typeof vi.fn> {
+    return vi.fn(async () => ({ status, ok: status < 400, headers: new Headers(headers) }) as Response);
+  }
+
+  it("shows the not-serving state, not a frame, when the bridge marks the port down", async () => {
+    setup(null);
+    vi.stubGlobal("fetch", probeWith({ "x-preview-upstream": "down" }, 502));
+    render(<PreviewPanel />);
+    expect(await screen.findByText(/Nothing is serving on port 3000 yet/)).toBeInTheDocument();
+    expect(screen.queryByTitle("Preview on port 3000")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+  });
+
+  it("mounts the frame for an app's own error status, so its error page shows", async () => {
+    setup(null);
+    vi.stubGlobal("fetch", probeWith({}, 503));
+    render(<PreviewPanel />);
+    expect(await screen.findByTitle("Preview on port 3000")).toBeInTheDocument();
+  });
+
+  it("mounts the frame for a live port", async () => {
+    setup(null);
+    vi.stubGlobal("fetch", probeWith({}));
+    render(<PreviewPanel />);
+    expect(await screen.findByTitle("Preview on port 3000")).toBeInTheDocument();
   });
 });
