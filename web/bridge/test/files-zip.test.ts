@@ -6,7 +6,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { encodePathParam } from "@workbench/shared";
-import { entryComponent } from "../src/files/zip.js";
+import { entryComponent, zipStream } from "../src/files/zip.js";
 import { filesFixture, rawPath, type FilesFixture } from "./helpers/files.js";
 
 let f: FilesFixture;
@@ -62,6 +62,25 @@ describe("an abandoned zip", () => {
     // The tree has 3660 entries; the walk stopped well short and stays stopped.
     expect(settled - before).toBeLessThan(3660);
     expect(later).toBe(settled);
+  });
+
+  it("keeps pace with the download through a tree of nothing but folders", async () => {
+    // A folder's entry is written at once, read or not: nothing but the
+    // bytes waiting in the output can hold the walk back.
+    const dirs = path.join(f.base, "only-dirs");
+    for (let i = 0; i < 2000; i++) fs.mkdirSync(path.join(dirs, `d${i}`), { recursive: true });
+    const lstat = vi.spyOn(fsp, "lstat");
+    const before = lstat.mock.calls.length;
+    const out = zipStream([{ fs: dirs, name: "only-dirs" }], (err) => { throw err; }, { maxBuffered: 16 * 1024 });
+    await new Promise((r) => setTimeout(r, 300));
+    const paused = lstat.mock.calls.length - before;
+    lstat.mockRestore();
+    expect(paused).toBeGreaterThan(0);
+    expect(paused).toBeLessThan(2000);
+    // Read, and it goes on to the end.
+    const chunks: Buffer[] = [];
+    for await (const c of out as AsyncIterable<Buffer>) chunks.push(c);
+    expect(entriesOf(Buffer.concat(chunks))).toHaveLength(1 + 2000);
   });
 
   it("builds nothing for a HEAD", async () => {

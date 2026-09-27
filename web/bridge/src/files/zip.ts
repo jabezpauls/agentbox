@@ -1,7 +1,7 @@
 import { createReadStream, type Stats } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import type { Readable } from "node:stream";
+import type { PassThrough } from "node:stream";
 import yazl from "yazl";
 import { decodeName, displayName, fsPath } from "./names.js";
 
@@ -13,8 +13,10 @@ const STORED = new Set([
   ".woff", ".woff2", ".pdf", ".jar", ".whl", ".docx", ".xlsx", ".pptx",
 ]);
 
-/** How far the walk may run ahead of what has been written, in entries. */
+/** How far the walk may run ahead of what has been written, in entries… */
 const MAX_BACKLOG = 256;
+/** …and in bytes written but not yet taken by the download. */
+const MAX_BUFFERED = 1024 * 1024;
 
 export interface ZipSource {
   /** The real path to read. */
@@ -28,6 +30,8 @@ export interface ZipOptions {
   exclude?: ReadonlySet<string>;
   /** Stops the walk: the download was abandoned. */
   signal?: AbortSignal;
+  /** How many bytes may wait for the download before the walk does (tests). */
+  maxBuffered?: number;
 }
 
 /**
@@ -54,7 +58,8 @@ export function entryComponent(name: string): string {
  */
 export function zipStream(sources: ZipSource[], onError: (err: unknown) => void, opts: ZipOptions = {}): NodeJS.ReadableStream {
   const zip = new yazl.ZipFile();
-  const out = zip.outputStream as Readable;
+  // A PassThrough in fact: what yazl has written, until the download reads it.
+  const out = zip.outputStream as PassThrough;
   const exclude = opts.exclude ?? new Set<string>();
   const used = new Set<string>();
   let stopped = false;
@@ -91,7 +96,9 @@ export function zipStream(sources: ZipSource[], onError: (err: unknown) => void,
   };
 
   // yazl keeps every entry it has been given; the walk waits while too many
-  // are still unwritten, which is what a slow download looks like.
+  // are still unwritten, which is what a slow download looks like. A
+  // directory's entry is written at once, whether or not anyone is reading, so
+  // for those it is the bytes piling up in the output that tell.
   let written = 0;
   const backlog = (): number => {
     const entries = (zip as unknown as { entries?: { state?: number }[] }).entries;
@@ -99,8 +106,10 @@ export function zipStream(sources: ZipSource[], onError: (err: unknown) => void,
     while (written < entries.length && entries[written]!.state === 3 /* FILE_DATA_DONE */) written++;
     return entries.length - written;
   };
+  const maxBuffered = opts.maxBuffered ?? MAX_BUFFERED;
+  const buffered = (): number => out.readableLength + out.writableLength;
   const keepPace = async (): Promise<void> => {
-    while (!stopped && backlog() > MAX_BACKLOG) await new Promise((r) => setTimeout(r, 10));
+    while (!stopped && (backlog() > MAX_BACKLOG || buffered() > maxBuffered)) await new Promise((r) => setTimeout(r, 10));
   };
 
   const walk = async (fs: string, name: string, st: Stats): Promise<void> => {
@@ -108,6 +117,8 @@ export function zipStream(sources: ZipSource[], onError: (err: unknown) => void,
     const meta = { mtime: st.mtime, mode: st.mode };
     if (st.isDirectory()) {
       zip.addEmptyDirectory(name, meta);
+      await keepPace();
+      if (stopped) return;
       const names = await fsp.readdir(fsPath(fs), { encoding: "buffer" });
       for (const raw of names) {
         if (stopped) return;
