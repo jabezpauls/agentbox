@@ -56,8 +56,11 @@ export function checkUrl(raw: unknown): string {
   const url = raw.trim();
   if (url.length === 0 || url.length > 2048) throw new FilesError(400, "url required");
   if (/[\s\0]/.test(url) || url.startsWith("-")) throw new FilesError(400, "not a repository URL");
-  const scheme = /^(https?|ssh|git):\/\/[^/]+/i.test(url);
-  const scp = /^[\w.-]+@[\w.-]+:(?!\/\/)[^:]+$/.test(url);
+  // A user or host that starts with a dash is how ssh options were once
+  // smuggled through git (CVE-2017-1000117); git refuses them today, and so
+  // does this, before git is involved.
+  const scheme = /^(https?|ssh|git):\/\/(?:[^/@]*@)?[A-Za-z0-9[][^/]*/i.test(url) && !/:\/\/[^/]*@-/.test(url);
+  const scp = /^[A-Za-z0-9_][\w.-]*@[A-Za-z0-9][\w.-]*:(?!\/\/)[^:]+$/.test(url);
   if (!scheme && !scp) throw new FilesError(400, "use an https, ssh or git URL, or user@host:path");
   return url;
 }

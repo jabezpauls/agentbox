@@ -41,6 +41,10 @@ describe("what a project may be called and cloned from", () => {
       "--upload-pack=touch /tmp/x",
       "https://h/r x",
       "fd::/x",
+      "ssh://-oProxyCommand=id/r",
+      "ssh://git@-oProxyCommand=id/r",
+      "-oProxyCommand@host:r",
+      "git@-oProxyCommand:r",
       "",
     ]) {
       expect(() => checkUrl(bad), bad).toThrow();
