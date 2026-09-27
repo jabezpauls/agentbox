@@ -13,6 +13,10 @@
 		on_demand
 	}
 
+	# Never public: strip any client-supplied share marker before it can
+	# reach the bridge.
+	request_header -X-Agentbox-Public
+
 	basic_auth {
 		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
 	}

@@ -14,6 +14,7 @@ import { registerReviewRoutes } from "./routes/review.js";
 import { registerPublicShareRoutes, registerShareApiRoutes } from "./routes/share.js";
 import { ReviewStore } from "./review/store.js";
 import { ShareStore } from "./share/store.js";
+import { pathGuard } from "./path-guard.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -42,6 +43,11 @@ export interface AppDeps {
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(websocket);
+  // Before any route, so it covers every route and every websocket upgrade:
+  // the decisive half of the public `/s/` boundary, and a refusal of ambiguous
+  // paths. After the websocket plugin, whose own hook wires an upgrade's socket
+  // to its reply — a refusal sent before that leaves the socket dangling.
+  app.addHook("onRequest", pathGuard(config.basePath));
 
   const streams =
     deps.streams ??
@@ -54,8 +60,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
   // The public share route lives at the server root, outside the base-path
-  // scope: Caddy's `handle /s/*` block carries no basic auth and reaches the
-  // bridge at `/s/…` directly, so it must not sit under `/workbench`.
+  // scope: Caddy's unauthenticated public branch forwards `/s/…` to the bridge
+  // unchanged, so it must not sit under `/workbench`.
   registerPublicShareRoutes(app, config, shares);
 
   await app.register(
