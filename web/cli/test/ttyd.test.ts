@@ -193,6 +193,18 @@ describe("restoring the terminal", () => {
     expect(m.restoreSequence()).toBe("\x1b[0m");
   });
 
+  it("undoes what herdr's TUI switches on, as recorded through ttyd", () => {
+    const m = new ModeTracker();
+    m.observe(
+      Buffer.from(
+        "\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?2031h\x1b[?7l\x1b[?2026h\x1b[?25l\x1b[?2026l",
+      ),
+    );
+    expect(m.restoreSequence()).toBe(
+      "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[?2031l\x1b[?25h\x1b[?7h\x1b[0m",
+    );
+  });
+
   it("sees a sequence cut in two by the chunk boundary", () => {
     const m = new ModeTracker();
     m.observe(Buffer.from("text\x1b[?10"));

@@ -38,7 +38,15 @@ export class DetachFilter {
 }
 
 const ALT_SCREENS = [1049, 1047, 47];
-const MOUSE_MODES = [1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016];
+/**
+ * Modes a program switches on and a shell expects off: mouse reporting (X10
+ * and every extension), application cursor keys, focus events, bracketed
+ * paste, colour-palette notifications, synchronized output (left on, the
+ * terminal stops drawing).
+ */
+const ON_MODES = [9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016, 1, 1004, 2004, 2031, 2026];
+/** Modes a program switches off and a shell expects on: the cursor, line wrap. */
+const OFF_MODES = [25, 7];
 const ESC = "\x1b";
 
 /**
@@ -46,9 +54,10 @@ const ESC = "\x1b";
  * output, so that leaving — detaching mid-draw, a dropped connection — can
  * switch back exactly those: the alternate screen, mouse reporting,
  * bracketed paste, focus events, application cursor keys, a hidden cursor,
- * the keypad, and kitty's keyboard protocol. A mode the program never touched
- * is left alone (resetting the alternate screen when it is not active would
- * move the cursor, for one).
+ * line wrap, synchronized output, the keypad, and kitty's keyboard protocol
+ * (herdr uses most of them). A mode the program never touched is left alone
+ * (resetting the alternate screen when it is not active would move the
+ * cursor, for one).
  */
 export class ModeTracker {
   private readonly modes = new Map<number, boolean>();
@@ -86,11 +95,8 @@ export class ModeTracker {
   restoreSequence(): string {
     let out = "";
     for (const n of ALT_SCREENS) if (this.modes.get(n)) out += `${ESC}[?${n}l`;
-    for (const n of MOUSE_MODES) if (this.modes.get(n)) out += `${ESC}[?${n}l`;
-    if (this.modes.get(2004)) out += `${ESC}[?2004l`;
-    if (this.modes.get(1004)) out += `${ESC}[?1004l`;
-    if (this.modes.get(1)) out += `${ESC}[?1l`;
-    if (this.modes.get(25) === false) out += `${ESC}[?25h`;
+    for (const n of ON_MODES) if (this.modes.get(n)) out += `${ESC}[?${n}l`;
+    for (const n of OFF_MODES) if (this.modes.get(n) === false) out += `${ESC}[?${n}h`;
     if (this.keypad) out += `${ESC}>`;
     if (this.kittyPushes > 0) out += `${ESC}[<${this.kittyPushes}u`;
     if (this.modifyOtherKeys) out += `${ESC}[>4m`;
