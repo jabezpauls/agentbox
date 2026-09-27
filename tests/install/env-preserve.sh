@@ -205,5 +205,18 @@ else
 fi
 if [ "$(cat "$DIR/.env")" = "$before" ]; then pass ".env untouched by refused updates"; else fail ".env changed by a refused update"; fi
 
+echo "agentbox update carries an older .env's Cloudflare choice over"
+# It fails at `git pull` (not a checkout), after the settings are written.
+for header in "CF-Connecting-IP:on" "X-Real-IP:off" ":off"; do
+    seed
+    sed -i "s/^AGENTBOX_CLIENT_IP_HEADER=.*/AGENTBOX_CLIENT_IP_HEADER=${header%%:*}/" "$DIR/.env"
+    (cd / && "$DIR/scripts/agentbox" update) >/dev/null 2>&1 || true
+    expect AGENTBOX_CLOUDFLARE "${header#*:}" "AGENTBOX_CLIENT_IP_HEADER=${header%%:*} becomes AGENTBOX_CLOUDFLARE=${header#*:}"
+done
+seed
+sed -i '/^AGENTBOX_CLIENT_IP_HEADER=/d' "$DIR/.env"
+(cd / && "$DIR/scripts/agentbox" update) >/dev/null 2>&1 || true
+expect AGENTBOX_CLOUDFLARE on "a traefik .env that never said becomes on"
+
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

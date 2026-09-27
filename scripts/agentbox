@@ -103,6 +103,21 @@ case "${1:-help}" in
             esac
         done
         for kv in "${PENDING[@]}"; do set_env "${kv%%=*}" "${kv#*=}"; done
+        # An .env from before AGENTBOX_CLOUDFLARE said it with
+        # AGENTBOX_CLIENT_IP_HEADER; carry that over, as install.sh does, rather
+        # than let the mode's default decide.
+        if ! grep -q '^AGENTBOX_CLOUDFLARE=' .env; then
+            if grep -q '^AGENTBOX_CLIENT_IP_HEADER=' .env; then
+                case "$(grep -m1 '^AGENTBOX_CLIENT_IP_HEADER=' .env | cut -d= -f2- | tr '[:upper:]' '[:lower:]')" in
+                    cf-connecting-ip) set_env AGENTBOX_CLOUDFLARE on ;;
+                    *) set_env AGENTBOX_CLOUDFLARE off ;;
+                esac
+            elif [ "$(grep -m1 '^AGENTBOX_MODE=' .env | cut -d= -f2-)" = traefik ]; then
+                set_env AGENTBOX_CLOUDFLARE on
+            else
+                set_env AGENTBOX_CLOUDFLARE off
+            fi
+        fi
         git pull --ff-only
         # Recompute the overlay in case --mode just changed.
         MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
