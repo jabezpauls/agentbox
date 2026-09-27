@@ -96,6 +96,7 @@ export class ClientIpResolver {
   constructor(
     private readonly proxies: string[],
     private readonly lookup: Lookup = defaultLookup,
+    private readonly now: () => number = Date.now,
   ) {
     for (const p of proxies) if (net.isIP(p)) this.trusted.add(normalizeIp(p));
   }
@@ -110,14 +111,42 @@ export class ClientIpResolver {
     if (this.timer) clearTimeout(this.timer);
   }
 
-  /** Synchronous: it only ever reads the last addresses resolved. */
+  /**
+   * Synchronous: it only ever reads the last addresses resolved. A peer it
+   * does not know may be the proxy with a new address (its container was
+   * recreated), so that prompts a refresh in the background — at most every
+   * couple of seconds, and never waited for.
+   */
   resolve(req: IncomingMessage): ClientAddress {
     const peer = normalizeIp(req.socket.remoteAddress ?? "");
-    if (!this.trusted.has(peer)) return { ip: peer, viaProxy: false };
+    if (!this.trusted.has(peer)) {
+      this.refreshSoon();
+      return { ip: peer, viaProxy: false };
+    }
     return { ip: fromProxy(req) ?? peer, viaProxy: true };
   }
 
+  private refreshing = false;
+  private lastRefresh = 0;
+
+  private refreshSoon(): void {
+    if (this.stopped || this.refreshing || this.proxies.every((p) => net.isIP(p))) return;
+    if (this.now() - this.lastRefresh < RETRY_MS) return;
+    if (this.timer) clearTimeout(this.timer);
+    void this.refresh();
+  }
+
   private async refresh(): Promise<void> {
+    this.refreshing = true;
+    this.lastRefresh = this.now();
+    try {
+      await this.resolveAll();
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  private async resolveAll(): Promise<void> {
     const next = new Set<string>();
     let failed = false;
     for (const entry of this.proxies) {

@@ -75,6 +75,34 @@ describe("the client address", () => {
     r.stop();
   });
 
+  it("looks again, in the background, when an unknown peer appears — the proxy may have a new address", async () => {
+    let address = "172.20.0.2";
+    let calls = 0;
+    let t = 1_000_000;
+    const r = new ClientIpResolver(
+      ["proxy"],
+      async () => {
+        calls++;
+        return [address];
+      },
+      () => t,
+    );
+    await r.start();
+    // Some seconds on, the proxy's container is recreated with a new address.
+    t += 5_000;
+    address = "172.20.0.9";
+    const moved = req("172.20.0.9", { "x-agentbox-client-ip": "203.0.113.9" });
+    // This request is not believed — and is not held up by the lookup...
+    expect(r.resolve(moved).viaProxy).toBe(false);
+    await new Promise((res) => setTimeout(res, 10));
+    // ...but the next one is, without waiting out the half-minute refresh.
+    expect(r.resolve(moved)).toEqual({ ip: "203.0.113.9", viaProxy: true });
+    // A stream of strangers does not become a stream of lookups.
+    for (let i = 0; i < 20; i++) r.resolve(req(`10.0.0.${i}`));
+    expect(calls).toBe(2);
+    r.stop();
+  });
+
   it("normalises IPv4-mapped IPv6", () => {
     expect(normalizeIp("::ffff:10.1.2.3")).toBe("10.1.2.3");
     expect(normalizeIp("::1")).toBe("::1");
