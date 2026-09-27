@@ -15,8 +15,10 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
+            scripts/isolate-host.sh \
             images/workspace/entrypoint.sh \
-            images/workspace/agentbox-workbench
+            images/workspace/agentbox-workbench \
+            tests/proxy/share-bypass.sh tests/install/*.sh
 
       - name: Validate Compose files
         run: |
@@ -29,6 +31,14 @@ jobs:
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" \
               -f docker-compose.previews.yml config -q
           done
+          docker compose -f docker-compose.yml -f docker-compose.traefik.yml config -q
+
+      - name: What a re-run of the installer keeps
+        run: tests/install/env-preserve.sh
+
+      - name: The host-isolation rules apply idempotently
+        # Applied inside a throwaway container's own network namespace.
+        run: tests/install/isolate-rules.sh
 
   proxy-config:
     runs-on: ubuntu-latest
@@ -55,6 +65,24 @@ jobs:
             validate -e AGENTBOX_PREVIEW_DOMAIN=preview.example.com \
               -v "$PWD/proxy/Caddyfile.previews:/etc/caddy/previews/previews.caddyfile:ro"
           done
+
+  share-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build -w bridge
+        working-directory: web
+      - name: The public /s/ path cannot reach a private route
+        # The real Caddyfiles in the real Caddy image, in front of the real
+        # bridge, fed the encoded and dot-segment variants of /s/<token>/.
+        run: tests/proxy/share-bypass.sh
 
   web:
     runs-on: ubuntu-latest
