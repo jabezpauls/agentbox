@@ -1,7 +1,7 @@
 import { startAdminServer } from "./admin.js";
 import { buildGate } from "./app.js";
 import { loadConfig } from "./config.js";
-import { holdLease } from "./lease.js";
+import { acquireLease } from "./lease.js";
 
 const USAGE = "Usage: agentbox-gate-server [--help]\n\nRuns agentbox's front door: sign-in, sessions and all request routing.";
 
@@ -16,8 +16,15 @@ async function main(argv: string[]): Promise<void> {
   process.umask(0o077);
   const config = loadConfig();
   // Taken before the store is opened: from here on, `--offline` in any other
-  // container sees that this gate owns it.
-  const releaseLease = holdLease(config.dataDir);
+  // container sees that this gate owns it. An offline edit in progress is
+  // waited for, so its save is not lost under this gate's first one.
+  const releaseLease = await acquireLease(config.dataDir, {
+    holder: "gate",
+    waitMs: 120_000,
+    takeOverOwnHost: true,
+    onWait: (lease) =>
+      console.log(`[gate] waiting for ${lease?.holder === "offline" ? "an offline edit" : "another gate"} to let go of the store`),
+  });
   const gate = await buildGate(config);
   await gate.app.listen({ host: config.host, port: config.port });
   const admin = await startAdminServer(config.adminSocket, {

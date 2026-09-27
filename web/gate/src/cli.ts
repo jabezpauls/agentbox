@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AdminError, callAdmin, runAdmin, type AdminCommand } from "./admin.js";
 import { Auth } from "./auth.js";
 import { loadConfig, type Config } from "./config.js";
-import { liveLease } from "./lease.js";
+import { acquireLease, LeaseHeld } from "./lease.js";
 import { hashPassword, passwordProblem } from "./password.js";
 import { Store } from "./store.js";
 
@@ -50,18 +50,30 @@ export async function runCli(argv: string[], io: CliIo): Promise<string> {
   let out: Record<string, unknown>;
   if (offline) {
     // Only safe when no gate owns the store: its next save would undo ours.
-    // The lease on the volume sees a gate in any container; the socket, one
-    // in this container.
-    const lease = liveLease(config.dataDir);
-    if (lease) {
-      throw new AdminError(`a gate is running on this store (container ${lease.host}); stop it first, or drop --offline and use docker compose exec`);
+    // The lease on the volume sees a gate in any container, and holding it for
+    // the whole edit keeps a gate that starts meanwhile waiting until we are
+    // done. The socket sees a gate in this container.
+    let release: () => void;
+    try {
+      release = await acquireLease(config.dataDir, { holder: "offline", waitMs: 0 });
+    } catch (err) {
+      if (!(err instanceof LeaseHeld)) throw err;
+      throw new AdminError(
+        err.lease.holder === "offline"
+          ? `another offline edit is running on this store (container ${err.lease.host}); try again when it is done`
+          : `a gate is running on this store (container ${err.lease.host}); stop it first, or drop --offline and use docker compose exec`,
+      );
     }
-    if ((await callAdmin(config.adminSocket, "status")) !== null) {
-      throw new AdminError("the gate is running here; drop --offline so it makes the change itself");
+    try {
+      if ((await callAdmin(config.adminSocket, "status")) !== null) {
+        throw new AdminError("the gate is running here; drop --offline so it makes the change itself");
+      }
+      const store = await Store.open(config.dataDir, config.seedPasswordHash);
+      out = await runAdmin({ config, store, auth: new Auth(store), now: Date.now }, command as AdminCommand, input);
+      await store.flush();
+    } finally {
+      release();
     }
-    const store = await Store.open(config.dataDir, config.seedPasswordHash);
-    out = await runAdmin({ config, store, auth: new Auth(store), now: Date.now }, command as AdminCommand, input);
-    await store.flush();
   } else {
     const deadline = Date.now() + (io.waitMs ?? 30_000);
     let answer = await callAdmin(config.adminSocket, command as AdminCommand, input);

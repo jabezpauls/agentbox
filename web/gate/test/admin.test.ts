@@ -1,11 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Server } from "node:http";
 import { callAdmin, runAdmin, startAdminServer } from "../src/admin.js";
 import { Auth } from "../src/auth.js";
 import { runCli } from "../src/cli.js";
-import { holdLease, LEASE_FILE } from "../src/lease.js";
+import { acquireLease, LEASE_FILE, LeaseHeld } from "../src/lease.js";
 import { Store } from "../src/store.js";
 import { COST, PASSWORD, USER, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
 
@@ -145,7 +146,7 @@ describe("the host's admin commands", () => {
     // No lease: a stopped stack, so the store is edited directly.
     expect(JSON.parse(await runCli(["--offline", "status"], io))).toMatchObject({ passwordSet: true });
     // A running gate elsewhere holds the lease on the volume.
-    const release = holdLease(h.dataDir);
+    const release = await acquireLease(h.dataDir, { holder: "gate", waitMs: 0 });
     try {
       await expect(runCli(["--offline", "set-password"], io)).rejects.toThrow(/a gate is running on this store/);
     } finally {
@@ -154,6 +155,91 @@ describe("the host's admin commands", () => {
     // A lease left by a gate that died long ago does not block.
     fs.writeFileSync(path.join(h.dataDir, LEASE_FILE), JSON.stringify({ host: "gone", pid: 1, at: Date.now() - 60_000 }));
     expect(JSON.parse(await runCli(["--offline", "status"], io))).toMatchObject({ passwordSet: true });
+    // And the edit lets go of the store when it is done.
+    expect(fs.existsSync(path.join(h.dataDir, LEASE_FILE))).toBe(false);
+  });
+
+  it("--offline holds the store for its whole edit, so a gate starting meanwhile cannot take it", async () => {
+    h = await startHarness();
+    const dir = h.dataDir;
+    const io = { config: h.gate.core.config, readPassword: async () => "a brand new password" };
+    const holders: Array<string | null> = [];
+    const gateTried: string[] = [];
+    const original = Store.prototype.flush;
+    const flush = vi.spyOn(Store.prototype, "flush").mockImplementation(async function (this: Store) {
+      // The moment the edit saves: the lease is the edit's, and a gate cannot have it.
+      const file = path.join(dir, LEASE_FILE);
+      const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+      holders.push(text && (JSON.parse(text) as { holder: string }).holder);
+      try {
+        (await acquireLease(dir, { holder: "gate", waitMs: 0, takeOverOwnHost: true }))();
+        gateTried.push("took it");
+      } catch (err) {
+        gateTried.push(err instanceof LeaseHeld ? "refused" : String(err));
+      }
+      return original.call(this);
+    });
+    try {
+      expect(JSON.parse(await runCli(["--offline", "set-password"], io))).toMatchObject({ ok: true });
+    } finally {
+      flush.mockRestore();
+    }
+    expect(holders.length).toBeGreaterThan(0);
+    expect(new Set(holders)).toEqual(new Set(["offline"]));
+    expect(new Set(gateTried)).toEqual(new Set(["refused"]));
+    // Done: the store is free again.
+    (await acquireLease(dir, { holder: "gate", waitMs: 0 }))();
+  });
+
+  it("a starting gate waits for an offline edit, and takes the store when it is done", async () => {
+    h = await startHarness();
+    const dir = h.dataDir;
+    const releaseEdit = await acquireLease(dir, { holder: "offline", waitMs: 0 });
+    const told: string[] = [];
+    let got = false;
+    const gate = acquireLease(dir, {
+      holder: "gate",
+      waitMs: 10_000,
+      // Even from the same container: only a gate's own lease is taken over on restart.
+      takeOverOwnHost: true,
+      onWait: (l) => told.push(l?.holder ?? "?"),
+    }).then((release) => {
+      got = true;
+      return release;
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(got).toBe(false);
+    expect(told).toEqual(["offline"]);
+    releaseEdit();
+    const releaseGate = await gate;
+    expect(JSON.parse(fs.readFileSync(path.join(dir, LEASE_FILE), "utf8"))).toMatchObject({ holder: "gate", host: os.hostname() });
+    // While the gate holds it, a second offline edit is refused at once.
+    await expect(acquireLease(dir, { holder: "offline", waitMs: 0 })).rejects.toBeInstanceOf(LeaseHeld);
+    releaseGate();
+  });
+
+  it("a gate restarted in its own container takes over its old lease; a stale or garbled one is taken over too", async () => {
+    h = await startHarness();
+    const file = path.join(h.dataDir, LEASE_FILE);
+    // Left by this container's gate before a restart, still fresh.
+    fs.writeFileSync(file, JSON.stringify({ host: os.hostname(), pid: 1, at: Date.now(), holder: "gate" }));
+    await expect(acquireLease(h.dataDir, { holder: "offline", waitMs: 0 })).rejects.toBeInstanceOf(LeaseHeld);
+    (await acquireLease(h.dataDir, { holder: "gate", waitMs: 0, takeOverOwnHost: true }))();
+    // Another container's, fresh: not taken over.
+    fs.writeFileSync(file, JSON.stringify({ host: "elsewhere", pid: 1, at: Date.now(), holder: "gate" }));
+    await expect(acquireLease(h.dataDir, { holder: "gate", waitMs: 0, takeOverOwnHost: true })).rejects.toBeInstanceOf(LeaseHeld);
+    // Stale, whoever held it.
+    let clock = Date.now();
+    const now = (): number => clock;
+    fs.writeFileSync(file, JSON.stringify({ host: "elsewhere", pid: 1, at: clock - 25_000, holder: "offline" }));
+    (await acquireLease(h.dataDir, { holder: "offline", waitMs: 0, now }))();
+    // Garbled: held until it has been garbled for as long as a lease goes stale.
+    fs.writeFileSync(file, "{");
+    await expect(acquireLease(h.dataDir, { holder: "offline", waitMs: 0, now })).rejects.toBeInstanceOf(LeaseHeld);
+    const waiting = acquireLease(h.dataDir, { holder: "offline", waitMs: 60_000, now });
+    await new Promise((r) => setTimeout(r, 300));
+    clock += 21_000;
+    (await waiting)();
   });
 
   it("reports that no gate is listening, so the command can edit the store itself", async () => {
