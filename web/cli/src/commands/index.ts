@@ -7,6 +7,7 @@ import { MOUNT_COMMANDS } from "./mount.js";
 import { STATUS_COMMANDS } from "./status.js";
 import { TERMINAL_COMMANDS } from "./terminal.js";
 import type { Command } from "./types.js";
+import { UPDATE_COMMANDS } from "./update.js";
 
 /**
  * Every command, in the order `agentbox --help` lists them. Still to come,
@@ -20,6 +21,7 @@ export const COMMANDS: Command[] = [
   ...TERMINAL_COMMANDS,
   ...FILES_COMMANDS,
   ...MOUNT_COMMANDS,
+  ...UPDATE_COMMANDS,
 ];
 
 function optionLine(o: OptionSpec): string {
