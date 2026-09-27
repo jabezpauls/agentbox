@@ -100,7 +100,7 @@ export interface ProjectCloneStart { id: string; name: string; path: string; url
 /** Progress of a clone, on /ws/events. */
 export interface ProjectCloneEvent extends ProjectCloneStart {
   kind: "project.clone";
-  phase: "started" | "progress" | "done" | "error";
+  phase: "started" | "progress" | "done" | "error" | "cancelled";
   /** git's current stage, e.g. "Receiving objects". */
   stage?: string;
   percent?: number;

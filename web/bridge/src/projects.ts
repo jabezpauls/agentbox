@@ -27,6 +27,8 @@ export interface ProjectsDeps {
   scanPorts: () => Promise<ListeningPort[]>;
   /** How long one scan is reused (2 s by default). */
   portsTtlMs?: number;
+  /** How long a clone may run ({@link CLONE_TIMEOUT_MS} by default). */
+  cloneTimeoutMs?: number;
   events: BridgeEvents;
   /** The git binary (tests). */
   git?: string;
@@ -73,6 +75,37 @@ export function nameFromUrl(url: string): string {
   return tail.replace(/\.git$/i, "");
 }
 
+/** How long a clone may run before it is taken to be stuck. */
+export const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
+/** The longest stretch of git's output kept at once. */
+const MAX_LINE = 8192;
+const CANCELLED = "cancelled";
+
+/** A clone in progress. */
+interface Clone {
+  name: string;
+  child: ChildProcess;
+  /** Why it is being stopped, once it is: cancelled, or timed out. */
+  reason: string | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * A URL as it may be shown: whatever sits before the `@` of an http(s) or git
+ * URL is a credential (a token often goes there as the "user"), and so is the
+ * password half of any URL. An scp-style `git@host:path` user is not secret.
+ */
+export function redactUrl(url: string): string {
+  return url
+    .replace(/^((?:https?|git):\/\/)[^/@]+@/i, "$1***@")
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/:@]*):[^/@]*@/i, "$1:***@");
+}
+
+/** The same, for every URL inside a message (git's own errors quote the URL). */
+export function redactText(text: string): string {
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, (u) => redactUrl(u));
+}
+
 /** Parse `Receiving objects:  42% (123/456)` out of git's progress output. */
 export function parseProgress(line: string): { stage: string; percent: number } | null {
   const m = /^(?:remote:\s*)?([A-Za-z][A-Za-z ]+):\s+(\d{1,3})%/.exec(line.trim());
@@ -85,7 +118,7 @@ export function parseProgress(line: string): { stage: string; percent: number } 
  * ones, empty or cloned.
  */
 export class Projects {
-  private readonly clones = new Map<string, { name: string; child: ChildProcess }>();
+  private readonly clones = new Map<string, Clone>();
   private scan: { at: number; value: Promise<ListeningPort[]> } | null = null;
 
   constructor(private readonly deps: ProjectsDeps) {}
@@ -217,9 +250,15 @@ export class Projects {
     const scratchDir = path.join(this.deps.files.roots.stateDir(this.deps.files.roots.workspace), "clones");
     await fsp.mkdir(scratchDir, { recursive: true });
     const scratch = path.join(scratchDir, id);
-    const start: ProjectCloneStart = { id, name, path: dest.abs, url };
+    // What is shown and sent to every tab never carries the URL's secret.
+    const start: ProjectCloneStart = { id, name, path: dest.abs, url: redactUrl(url) };
     const emit = (e: Omit<ProjectCloneEvent, keyof ProjectCloneStart | "kind">): void =>
-      this.deps.events.emit({ kind: "project.clone", ...start, ...e });
+      this.deps.events.emit({
+        kind: "project.clone",
+        ...start,
+        ...e,
+        ...(e.message === undefined ? {} : { message: redactText(e.message) }),
+      });
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -227,21 +266,25 @@ export class Projects {
       // private repository must fail rather than hang forever.
       GIT_TERMINAL_PROMPT: "0",
       GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+      // Only the network transports, whatever the URL (or a submodule) says.
+      GIT_ALLOW_PROTOCOL: "https:http:ssh:git",
     };
-    const child = spawn(
-      this.deps.git ?? "git",
-      [
-        // Only the network transports, whatever the URL said.
-        "-c", "protocol.allow=never",
-        "-c", "protocol.https.allow=always",
-        "-c", "protocol.http.allow=always",
-        "-c", "protocol.ssh.allow=always",
-        "-c", "protocol.git.allow=always",
-        "clone", "--progress", "--", url, scratch,
-      ],
-      { cwd: this.root, env, stdio: ["ignore", "ignore", "pipe"] },
-    );
-    this.clones.set(id, { name, child });
+    const child = spawn(this.deps.git ?? "git", ["clone", "--progress", "--", url, scratch], {
+      cwd: this.root,
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+      // Its own process group: git fetches through helpers (git-remote-http,
+      // ssh) that hold its output open, so stopping a clone means signalling
+      // all of them, not just git.
+      detached: true,
+    });
+    const clone: Clone = { name, child, reason: null, timer: null };
+    this.clones.set(id, clone);
+    // A clone that has not finished in ten minutes is stuck (a stalled
+    // network, a server that never answers) rather than slow.
+    const limit = this.deps.cloneTimeoutMs ?? CLONE_TIMEOUT_MS;
+    clone.timer = setTimeout(() => this.stopClone(clone, `timed out after ${Math.round(limit / 60_000) || 1} minutes`), limit);
+    clone.timer.unref?.();
     emit({ phase: "started" });
 
     let last = "";
@@ -249,11 +292,13 @@ export class Projects {
     let lastSent = 0;
     let buffer = "";
     child.stderr?.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString();
+      // git redraws its progress in place; only a line's end matters, so a
+      // stream that never ends a line is kept to its tail.
+      buffer = (buffer + chunk.toString()).slice(-MAX_LINE);
       const parts = buffer.split(/[\r\n]/);
       buffer = parts.pop() ?? "";
       for (const line of parts) {
-        if (line.trim()) last = line.trim();
+        if (line.trim()) last = line.trim().slice(0, MAX_LINE);
         const p = parseProgress(line);
         if (!p) continue;
         // At most a few updates a second, but every change of stage.
@@ -266,13 +311,21 @@ export class Projects {
       }
     });
     child.on("error", (err) => {
+      if (clone.timer) clearTimeout(clone.timer);
       this.clones.delete(id);
       void removeTree(scratch).catch(() => {});
       emit({ phase: "error", message: err.message });
     });
     child.on("close", (code) => {
+      if (clone.timer) clearTimeout(clone.timer);
       if (!this.clones.delete(id)) return;
       void (async () => {
+        if (clone.reason !== null) {
+          await removeTree(scratch).catch(() => {});
+          if (clone.reason === CANCELLED) emit({ phase: "cancelled" });
+          else emit({ phase: "error", message: clone.reason });
+          return;
+        }
         if (code !== 0) {
           await removeTree(scratch).catch(() => {});
           emit({ phase: "error", message: (buffer.trim() || last || `git exited with ${code}`).replace(/^fatal:\s*/, "") });
@@ -291,10 +344,39 @@ export class Projects {
     return start;
   }
 
+  /** Stop a clone, saying why; its scratch copy is removed as it exits. */
+  private stopClone(clone: Clone, reason: string): void {
+    if (clone.reason !== null) return;
+    clone.reason = reason;
+    signalGroup(clone.child, "SIGTERM");
+    // git exits on TERM; if something under it does not, it is not waited for.
+    setTimeout(() => signalGroup(clone.child, "SIGKILL"), 5000).unref?.();
+  }
+
+  /** Cancel a clone in progress; false when there is none by that id. */
+  cancel(id: string): boolean {
+    const clone = this.clones.get(id);
+    if (!clone) return false;
+    this.stopClone(clone, CANCELLED);
+    return true;
+  }
+
   /** Stop any clone still running (the bridge is shutting down). */
   stop(): void {
-    for (const { child } of this.clones.values()) child.kill("SIGTERM");
+    for (const clone of this.clones.values()) {
+      if (clone.timer) clearTimeout(clone.timer);
+      signalGroup(clone.child, "SIGTERM");
+    }
     this.clones.clear();
+  }
+}
+
+/** Signal a detached child's whole process group (git and its helpers). */
+function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    if (child.pid !== undefined) process.kill(-child.pid, signal);
+  } catch {
+    // already gone
   }
 }
 

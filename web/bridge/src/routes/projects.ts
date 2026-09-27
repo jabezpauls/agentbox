@@ -35,4 +35,10 @@ export function registerProjectRoutes(app: FastifyInstance, projects: Projects):
       return sendError(reply, err);
     }
   });
+
+  // Cancel a clone in progress; it ends with a `cancelled` event.
+  app.delete<{ Params: { id: string } }>("/api/projects/clone/:id", async (req, reply) => {
+    if (!projects.cancel(req.params.id)) return reply.code(404).send({ error: "no clone in progress by that id" });
+    return reply.code(204).send();
+  });
 }

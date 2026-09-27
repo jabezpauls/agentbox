@@ -2,11 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import type { EventsMessage, ListeningPort, PaneInfo, Project, ProjectCloneEvent } from "@workbench/shared";
 import { BridgeEvents } from "../src/events.js";
-import { checkName, checkUrl, nameFromUrl, parseProgress, Projects, sweepClones } from "../src/projects.js";
+import { checkName, checkUrl, nameFromUrl, parseProgress, Projects, redactText, redactUrl, sweepClones } from "../src/projects.js";
 import { filesFixture, tmpBase, type FilesFixture } from "./helpers/files.js";
 
 const GIT_ENV = {
@@ -277,6 +278,25 @@ describe("making projects", () => {
     ws.close();
   });
 
+  it("keeps a URL's credentials out of everything it reports", async () => {
+    const withCreds = remote.url.replace("http://", "http://someone:s3cr3t-token@");
+    const ok = await post("/api/projects/clone", { url: withCreds, name: "creds-ok" });
+    expect(ok.statusCode).toBe(202);
+    const okId = (ok.json() as { id: string; url: string }).id;
+    expect(ok.body).not.toContain("s3cr3t");
+    const bad = await post("/api/projects/clone", { url: withCreds.replace("remote.git", "missing.git"), name: "creds-bad" });
+    const badId = (bad.json() as { id: string }).id;
+    await until(() => [okId, badId].every((id) => seen.some((e) => e.id === id && (e.phase === "done" || e.phase === "error"))));
+    const mine = seen.filter((e) => e.id === okId || e.id === badId);
+    expect(JSON.stringify(mine)).not.toContain("s3cr3t");
+    expect(mine[0]?.url).toMatch(/^http:\/\/\*\*\*@127\.0\.0\.1/);
+    expect(fs.existsSync(path.join(f.workspace, "creds-ok", "hello.txt"))).toBe(true);
+  });
+
+  it("cancels a clone in progress, and refuses an unknown one", async () => {
+    expect((await f.app.inject({ method: "DELETE", url: "/api/projects/clone/nope" })).statusCode).toBe(404);
+  });
+
   it("sweeps clones a restart left behind, once they are a day old", async () => {
     const dir = path.join(f.workspace, ".agentbox", "clones");
     fs.mkdirSync(path.join(dir, "old"), { recursive: true });
@@ -285,5 +305,79 @@ describe("making projects", () => {
     fs.utimesSync(path.join(dir, "old"), old, old);
     expect(await sweepClones(f.workspace)).toBe(1);
     expect(fs.readdirSync(dir)).toEqual(["new"]);
+  });
+});
+
+describe("redacting clone URLs", () => {
+  it("hides tokens and passwords, keeps what is not secret", () => {
+    expect(redactUrl("https://ghp_abc123@github.com/o/r.git")).toBe("https://***@github.com/o/r.git");
+    expect(redactUrl("https://user:pass@host/r")).toBe("https://***@host/r");
+    expect(redactUrl("ssh://git:pw@host/r")).toBe("ssh://git:***@host/r");
+    expect(redactUrl("ssh://git@host/r")).toBe("ssh://git@host/r");
+    expect(redactUrl("git@github.com:o/r.git")).toBe("git@github.com:o/r.git");
+    expect(redactUrl("https://github.com/o/r")).toBe("https://github.com/o/r");
+    expect(redactText("fatal: repository 'https://tok@h/x/' not found")).toBe("fatal: repository 'https://***@h/x/' not found");
+  });
+});
+
+describe("a clone that does not finish", () => {
+  let f: FilesFixture;
+  let stall: net.Server;
+  let stallUrl: string;
+  const seen: ProjectCloneEvent[] = [];
+  const events = new BridgeEvents();
+
+  beforeAll(async () => {
+    f = await filesFixture();
+    events.on((m) => {
+      if (m.kind === "project.clone") seen.push(m);
+    });
+    // Accepts connections and never answers: a stalled server.
+    stall = net.createServer(() => {});
+    await new Promise<void>((r) => stall.listen(0, "127.0.0.1", r));
+    stallUrl = `http://127.0.0.1:${(stall.address() as AddressInfo).port}/slow.git`;
+  });
+  afterAll(async () => {
+    stall.close();
+    await f.close();
+  });
+
+  const projects = (extra: Partial<ConstructorParameters<typeof Projects>[0]> = {}) =>
+    new Projects({ files: f.files, snapshot: async () => ({ panes: [] }), scanPorts: async () => [], events, ...extra });
+
+  async function until(pred: () => boolean, ms = 15_000): Promise<void> {
+    const start = Date.now();
+    while (!pred()) {
+      if (Date.now() - start > ms) throw new Error("timed out");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+  const last = (id: string) => seen.filter((e) => e.id === id).at(-1);
+
+  it("stops when cancelled, and leaves nothing behind", async () => {
+    const p = projects();
+    const { id } = await p.clone({ url: stallUrl, name: "cancel-me" });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(p.cancel(id)).toBe(true);
+    await until(() => last(id)?.phase === "cancelled");
+    expect(p.cancel(id)).toBe(false);
+    expect(fs.existsSync(path.join(f.workspace, "cancel-me"))).toBe(false);
+    await until(() => fs.readdirSync(path.join(f.workspace, ".agentbox", "clones")).length === 0);
+  });
+
+  it("gives up after its time limit", async () => {
+    const { id } = await projects({ cloneTimeoutMs: 400 }).clone({ url: stallUrl, name: "too-slow" });
+    await until(() => last(id)?.phase === "error");
+    expect(last(id)?.message).toMatch(/timed out/);
+    expect(fs.existsSync(path.join(f.workspace, "too-slow"))).toBe(false);
+  });
+
+  it("runs git limited to the network transports, with prompts off", async () => {
+    const bin = path.join(f.base, "fake-git");
+    const dump = path.join(f.base, "git-env.txt");
+    fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n%s\\n' "$GIT_ALLOW_PROTOCOL" "$GIT_TERMINAL_PROMPT" > '${dump}'\nexit 1\n`, { mode: 0o755 });
+    const { id } = await projects({ git: bin }).clone({ url: "https://example.invalid/r.git", name: "env-check" });
+    await until(() => last(id)?.phase === "error");
+    expect(fs.readFileSync(dump, "utf8")).toBe("https:http:ssh:git\n0\n");
   });
 });
