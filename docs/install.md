@@ -33,7 +33,10 @@ prints the resolved command before it runs anything.
 | `--dir <path>` | `~/agentbox` | Where to install. |
 | `--yes` | — | Do not prompt. |
 
-Re-running the installer keeps your existing password unless you pass
+Re-running the installer keeps every setting you already have — mode, domain,
+caps, API keys, anything you added to `.env` by hand — and changes only the
+ones you pass. `install.sh --isolate-host` on an existing traefik box adds the
+firewall and leaves it a traefik box. The password is kept unless you pass
 `--password`.
 
 ### traefik mode
@@ -54,7 +57,8 @@ never reachable unauthenticated even from another container on that network.
 ### Choosing coding agents
 
 The agents baked into the image are a build-time choice. `--agents claude,codex`
-is the default; `--agents claude` builds a smaller image with just one. The
+is the default; `--agents claude` builds a smaller image with just one, and
+`--agents ''` builds none. The
 Workbench multiplexer `herdr` is always installed regardless. Adding a new agent
 is a one-line entry in the manifest — the `case` in `images/workspace/Dockerfile`
 mapping a name to its npm package — after which it becomes a valid `--agents`
@@ -67,8 +71,10 @@ deploy mechanism — pass `--isolate-host`. It reads the stack's Docker subnet,
 renders the nftables egress rules from [the security model](security.md#isolating-the-sandbox-from-the-host)
 against it, installs them to `/etc/nftables/agentbox-egress.nft`, writes and
 enables the `agentbox-egress` systemd unit so they survive a reboot, and then
-proves from inside a container that the host is refused while the public
-internet still answers. It needs root (for `nft` and `systemd`) and declines on
+proves from inside a container that a port actually listening on the host is
+refused while the public internet still answers (if nothing on the host is
+listening it says the isolation is applied but not proven). Re-running it
+replaces the rules rather than stacking them. It needs root (for `nft` and `systemd`) and declines on
 a rootless host, where a breakout lands in a user account and the isolation is
 not needed. A single-purpose host with nothing else on it does not need it
 either.
@@ -143,7 +149,14 @@ writes the matching `.env` key and re-applies it: `agentbox update --agents
 claude` rebuilds with just Claude, `agentbox update --preview off` turns sharing
 off, `agentbox update --mode traefik` swaps the overlay, and `--isolate-host`,
 `--preview-domain`, `--cert-resolver`, `--edge-network`, `--cpus`, `--memory`,
-`--proxy-cpus` and `--proxy-memory` all work the same way.
+`--proxy-cpus` and `--proxy-memory` all work the same way. `update` checks
+every flag before it writes any of them.
+
+Updating an existing box to this version makes public preview sharing
+available: `AGENTBOX_PREVIEW_MODE` is absent from an older `.env`, which means
+the default, `path`. Nothing is shared until someone presses **Share** on a
+port; set `AGENTBOX_PREVIEW_MODE=off` (or `agentbox update --preview off`) if you
+would rather the option not exist.
 
 Review replaced the bundled lavish-axi, so `AGENTBOX_LAVISH_DOMAIN` and
 `AGENTBOX_LAVISH_URL` no longer do anything and can be deleted from an existing

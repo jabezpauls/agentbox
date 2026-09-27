@@ -54,13 +54,46 @@ over the host.
 - **Public shares are opt-in, unguessable and revocable.** A preview is private
   until you mint a share for it. A share is a 128-bit CSPRNG token that the
   proxy serves under `/s/<token>/` **without** the login, so anyone you hand the
-  link to can open it; it maps to exactly one loopback port and is not a general
-  proxy. An unknown, expired (24h default) or revoked token is a plain `404`
-  that reveals nothing else exists, revocation takes effect on the next request,
-  and the `/s/` path is rate-limited the way the login is. The same credential
-  stripping applies, so a share exposes your app's own dev server — your choice
-  to publish — never the box. Turn the whole feature off with `--preview off`.
-  Records live under `~/.agentbox/shares/` on the home volume.
+  link to can open it. It maps to exactly one loopback port and is not a general
+  proxy: agentbox's own services (the editor, the ttyd shells, the bridge) can
+  never be shared, at mint or at serve. An unknown, expired (24h default) or
+  revoked token is a plain `404` that reveals nothing else exists; revoking —
+  or expiry — also cuts any connection a viewer already has open. Turn the
+  whole feature off with `--preview off`. Records live under
+  `~/.agentbox/shares/` on the home volume.
+- **The unauthenticated path is decided twice, on the raw URL.** The proxy
+  treats a request as public only when its raw request URI is `/s/` followed
+  by a 32-hex token and contains none of the forms two parsers read
+  differently — dot-segments, `%2e`, `%2f`, `%5c`, a backslash, `;`, `//`.
+  Anything else takes the login. The proxy deletes any client-sent
+  `X-Agentbox-Public` header on every request and sets it only on that public
+  branch, and the bridge refuses (404) any request carrying it whose raw path
+  is not a share. Because the bridge judges the same raw string it routes on,
+  a normalisation difference between Caddy and the bridge cannot turn a public
+  request into a private route. The bridge also refuses (400) those ambiguous
+  forms in any path it routes, checking only the routing prefix of a preview
+  or share so an app's own encoded URLs still reach it.
+  `tests/proxy/share-bypass.sh` runs the real Caddyfiles against the real
+  bridge with the known bypass shapes.
+- **A shared page does not get the box's origin.** It is served on the box's
+  hostname, so every response under `/s/` carries
+  `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups
+  allow-modals`: the browser gives it an opaque origin — no access to the
+  Workbench's cookies, storage, API or credentials — even when it is opened as
+  a top-level tab. `Service-Worker-Allowed` is stripped from every proxied
+  response, so a previewed page cannot register a worker over the Workbench.
+  What a share *does* expose is your app itself, to anyone with the link: its
+  pages, and any endpoint it serves. Share a dev server you would be content
+  for the recipient to use, and revoke it when you are done. The panel asks
+  before opening a share full screen for the same reason.
+- **Rate limiting of `/s/` is a traefik-mode feature.** The Traefik overlay
+  gives the share path its own limit, like the login's. Caddy has no built-in
+  rate limiter, so in standalone and behind-proxy modes the share path is not
+  rate-limited by agentbox; the token's 128 bits are what stop guessing there,
+  and a fronting proxy can add a limit. Traefik counts requests per
+  `CF-Connecting-IP` by default, which is right behind Cloudflare and
+  spoofable without it — set `AGENTBOX_CLIENT_IP_HEADER` empty when nothing
+  fronts Traefik.
 - **WebSocket upgrades are origin-checked.** The same-origin policy does not
   cover websocket handshakes, so a page in another tab could otherwise open
   `/workbench/ws/events` or `/workbench/ws/terminal` on your cached

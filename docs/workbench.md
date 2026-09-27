@@ -96,11 +96,14 @@ one and it loads in the panel, with device widths and an editable path.
 Before it mounts the frame the panel probes the port and shows a calm state —
 checking, or "nothing is serving on port N yet" with a Retry — so the common
 case of a dev server that has not finished starting is a message rather than a
-flash of an error page. If a request does reach a port that is refused or is
-answering with a bare gateway error, the bridge returns its own branded page
-with a Retry instead of letting Cloudflare or the browser render a raw 502. A
-plain application error (a framework's own 500 overlay) still comes through
-untouched.
+flash of an error page. If a page load does reach a port where nothing is
+answering — refused, or silent for 90 seconds before starting a response — the
+bridge returns its own branded page with a Retry instead of letting Cloudflare
+or the browser render a raw 502. A script's request gets a plain `502` it can
+handle, and anything the app itself sends, error statuses included, comes
+through untouched, so a framework's error overlay or a deliberate `503` still
+shows. Once a response has started there is no timeout, so server-sent events
+and long downloads are left alone.
 
 There are two ways to reach it, and the difference matters.
 
@@ -170,23 +173,36 @@ https://code.example.com/s/<token>/
 
 The token is 128 bits from a cryptographic RNG, so the link is unguessable, and
 it is served by the proxy *without* the login — anyone you send it to can open
-it. A share is never created for you: a port is private until you press Share.
-While a share is live the panel keeps a "Public — anyone with this link can
-view this" banner in view and marks the port in the list, so a public preview
-is never a surprise. The link **expires after 24 hours** by default; **Extend**
-pushes that back out and **Revoke** kills it immediately — the next request to a
-revoked, expired or unknown token is a plain 404 that reveals nothing.
+it. A share is never created for you: a port is private until you press Share,
+and sharing it again returns the same link. agentbox's own services — the
+editor, the terminals, the Workbench itself — cannot be shared at all. While a
+share is live the panel keeps a "Public — anyone with this link can view this"
+banner in view and marks the port in the list, so a public preview is never a
+surprise. The link **expires after 24 hours** by default; **Extend** pushes that
+back out and **Revoke** kills it immediately — the next request to a revoked,
+expired or unknown token is a plain 404 that reveals nothing, and anyone
+already connected (a live-reload socket, a stream) is cut off too.
 
-What you are exposing is your own app's dev server, by your choice. The
-sandbox's own isolation does not change: the shared page reaches only the one
-mapped loopback port, the same credential-stripping applies, and the `/s/` path
-is rate-limited the way the login is. Full-screen of a shared preview opens its
-`/s/` link, so what you see and what a viewer sees are the same page.
+What you are exposing is your own app, by your choice, to anyone holding the
+link. The shared page reaches only that one loopback port, with your login
+stripped from every request. Because it is served on the box's own hostname,
+every shared response also carries a `sandbox` Content-Security-Policy: the
+page gets an opaque origin, so it cannot read the Workbench's cookies or
+storage or call its API, even opened in a tab of its own. The same sandbox has
+a cost for the shared app: like a path preview it runs without cookies,
+storage, same-origin requests or live reload, so share something that renders
+from plain page loads. In traefik mode the `/s/` path is rate-limited the way
+the login is; standalone and behind-proxy modes have no rate limiter of their
+own, and rely on the token being unguessable.
 
-Sharing is on by default (`--preview path`). An operator can turn it off
-entirely with `--preview off`, which hides the Share action and 404s every
-share link. Minted shares live under `~/.agentbox/shares/` on the home volume,
-so a link survives a restart.
+Full-screen of a shared preview opens its `/s/` link, so what you see and what
+a viewer sees are the same page, and it asks first even when a preview domain
+is set, because that link is on the box's own address.
+
+Sharing is on by default (`--preview path`), still opt-in per port. An operator
+can turn it off entirely with `--preview off`, which hides the Share action and
+404s every share link. Minted shares live under `~/.agentbox/shares/` on the
+home volume, so a link survives a restart.
 
 ## Review
 
