@@ -223,7 +223,7 @@ for CADDYFILE in $CADDYFILES; do
     # --- 1. Nothing unauthenticated reaches the sandbox -----------------------
     before="$(hits)"
     for p in / /vscode/ /vscode/static/x.js /terminal/ /terminal/ws /terminal/token /shell/ /monitor/ \
-        /workbench/ /workbench/api/health /workbench/preview/8080/ /api/rpc "/s/$TOKEN32/" /a/abc/ /app/3000/; do
+        /workbench/ /api/health /preview/8080/ /api/rpc "/s/$TOKEN32/" /a/abc/ /app/3000/; do
         req GET "$p" -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate'
         if [ "$STATUS" = 302 ] && [[ "$(header Location)" == /login\?next=* ]]; then :; else fail "navigation to $p: $STATUS"; fi
         req GET "$p" -H 'Accept: application/json'
@@ -239,7 +239,7 @@ for CADDYFILE in $CADDYFILES; do
     variants=(
         "/login/../vscode/" "/login/..%2f..%2fvscode/" "/login/%2e%2e/terminal/" "/login/%2E%2E/terminal/"
         "/login/assets/../../terminal/" "/login/assets/..%2f..%2f..%2fshell/" "/login/assets/%2e%2e/%2e%2e/monitor/"
-        "/_gate/../vscode/" "/_gate/login/../../workbench/api/health" "/_gate/..%5cterminal/" "/_gate/login%2f..%2f..%2fvscode/"
+        "/_gate/../vscode/" "/_gate/login/../../api/health" "/_gate/..%5cterminal/" "/_gate/login%2f..%2f..%2fvscode/"
         "/cli/../shell/" "/cli/..%2fvscode/" "/cli/install/../../terminal/"
         "//vscode/" "//terminal/ws" "/./terminal/" "/%2e/vscode/" "/%2e%2e/vscode/" "/login;/../vscode/"
         "/login\\..\\vscode/" "/settings/devices/../../vscode/" "/login%00/../vscode/" "/LOGIN/../vscode/"
@@ -268,12 +268,25 @@ for CADDYFILE in $CADDYFILES; do
         "Host: gate:7900"
     )
     for h in "${header_tricks[@]}"; do
-        for p in /vscode/ /terminal/ /workbench/api/health; do
+        for p in /vscode/ /terminal/ /api/health; do
             req GET "$p" -H "$h" -H 'Accept: application/json'
             [ "$STATUS" = 401 ] || fail "header trick '$h' on $p -> $STATUS"
         done
     done
     pass "${#header_tricks[@]} header tricks (the old Basic credentials included) open nothing"
+
+    # The WebDAV mount lets filename characters through the path guard (under
+    # /api/dav/ only its prefix is judged), but it is behind sign-in all the
+    # same; the editor channel is not served from outside at all.
+    for p in "/api/dav/a;b" "/api/dav/a%5Cb" "/api/dav/..%2f..%2fvscode/" "/api/dav/%2e%2e/%2e%2e/terminal/" \
+        "/api/dav/../../vscode/" "/api/dav/..%5c..%5cshell/" "/api/davx;y" "/ws/editor" "/ws/editor/x"; do
+        req PROPFIND "$p" -H 'Depth: 0'
+        case "$STATUS" in 400|401|404) ;; *) fail "unauthenticated PROPFIND $p -> $STATUS $BODY" ;; esac
+        req PUT "$p" --data 'x'
+        case "$STATUS" in 400|401|404) ;; *) fail "unauthenticated PUT $p -> $STATUS $BODY" ;; esac
+    done
+    ws /ws/editor -H "Origin: $ORIGIN"
+    [ "$STATUS" = 404 ] || fail "unauthenticated editor-channel WebSocket -> $STATUS"
 
     # Odd request targets. Caddy may answer `OPTIONS *` itself; either way the
     # hit count below is what matters.
@@ -306,7 +319,7 @@ for CADDYFILE in $CADDYFILES; do
     routes=(
         "/vscode/|8080|/" "/vscode/static/out/main.js?v=1|8080|/static/out/main.js?v=1"
         "/terminal/|7681|/terminal/" "/terminal/token|7681|/terminal/token" "/shell/|7683|/shell/"
-        "/monitor/|7682|/monitor/" "/workbench/api/health|7800|/workbench/api/health" "/|7800|/"
+        "/monitor/|7682|/monitor/" "/api/health|7800|/api/health" "/|7800|/"
         "/api/files/list?path=%2Fworkspace|7800|/api/files/list?path=%2Fworkspace"
     )
     for r in "${routes[@]}"; do
@@ -341,9 +354,9 @@ for CADDYFILE in $CADDYFILES; do
 
     # --- 3. Another site cannot use the session ------------------------------
     before="$(hits)"
-    req POST /workbench/api/rpc -H "Cookie: $SESSION" -H 'Origin: https://evil.example' --data '{}'
+    req POST /api/rpc -H "Cookie: $SESSION" -H 'Origin: https://evil.example' --data '{}'
     [ "$STATUS" = 403 ] || fail "cross-site POST -> $STATUS"
-    req POST /workbench/api/rpc -H "Cookie: $SESSION" --data '{}'
+    req POST /api/rpc -H "Cookie: $SESSION" --data '{}'
     [ "$STATUS" = 403 ] || fail "POST without Origin -> $STATUS"
     ws /terminal/ws -H "Cookie: $SESSION" -H 'Origin: https://evil.example'
     [ "$STATUS" = 403 ] || fail "cross-site WebSocket -> $STATUS"
@@ -354,7 +367,7 @@ for CADDYFILE in $CADDYFILES; do
     else
         fail "a cross-site request reached an upstream"
     fi
-    req POST /workbench/api/rpc -H "Cookie: $SESSION" -H "Origin: $ORIGIN" --data '{}'
+    req POST /api/rpc -H "Cookie: $SESSION" -H "Origin: $ORIGIN" --data '{}'
     [ "$STATUS" = 200 ] || fail "same-origin POST -> $STATUS"
 
     # --- a device token, end to end (approving needs the password again) -------
@@ -379,9 +392,49 @@ for CADDYFILE in $CADDYFILES; do
         fail "device login issued no token: $BODY"
     fi
 
+    # --- the WebDAV mount and the editor channel ---------------------------------
+    # What `agentbox mount` sends: a device token, and names with ; or a
+    # backslash. Under /api/dav/ the gate judges only the prefix, so each path
+    # — including ones that try to climb out — must arrive at the bridge
+    # exactly as sent, and at no other upstream. (Caddy writes a percent
+    # escape's hex in capitals on the way through, which names the same bytes;
+    # the gate itself forwards the path untouched, as its unit tests show.)
+    if [ -n "$TOKEN" ]; then
+        ok=1
+        for p in "/api/dav/a;b.txt" "/api/dav/a%3Bb%5Cc" "/api/dav/dir%20x/50%25.txt" "/api/dav/..%2f..%2fvscode/" \
+            "/api/dav/%2e%2e/%2e%2e/terminal/" "/api/dav/../../vscode/" "/api/dav/..%5c..%5cshell/"; do
+            want="$(printf '%s' "$p" | sed -E 's/%([0-9a-fA-F]{2})/%\U\1/g')"
+            req PROPFIND "$p" -H "Authorization: Bearer $TOKEN" -H 'Depth: 0'
+            if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"port":7800,'* ]] && [[ "$BODY" == *"\"url\":\"$want\""* ]]; then :; else
+                fail "WebDAV $p -> $STATUS $BODY"; ok=0
+            fi
+            case "$BODY" in *'"authorization"'*) fail "the token reached the sandbox via $p"; ok=0 ;; esac
+        done
+        [ "$ok" = 0 ] || pass "WebDAV names reach the bridge exactly as sent, and nothing under /api/dav/ reaches another upstream"
+        ok=1
+        for p in "/api/davx;y" "//api/dav/a;b" "/api%2fdav/..%2fvscode/" "/./api/dav/a;b"; do
+            req PROPFIND "$p" -H "Authorization: Bearer $TOKEN" -H 'Depth: 0'
+            [ "$STATUS" = 400 ] || { fail "a path resembling the WebDAV mount got its exemption: $p -> $STATUS"; ok=0; }
+        done
+        [ "$ok" = 0 ] || pass "nothing that merely resembles /api/dav/ is let through"
+    fi
+    before="$(hits)"
+    for p in /ws/editor /ws/editor/x; do
+        req GET "$p" -H "Cookie: $SESSION"
+        [ "$STATUS" = 404 ] || fail "signed-in GET $p -> $STATUS"
+        ws "$p" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
+        [ "$STATUS" = 404 ] || fail "signed-in WebSocket to $p -> $STATUS"
+        [ -z "$TOKEN" ] || { ws "$p" -H "Authorization: Bearer $TOKEN"; [ "$STATUS" = 404 ] || fail "token WebSocket to $p -> $STATUS"; }
+    done
+    if [ "$(hits)" = "$before" ]; then
+        pass "the editor channel is not served from outside, signed in or not"
+    else
+        fail "a request for the editor channel reached the sandbox"
+    fi
+
     # --- service workers ----------------------------------------------------------
     before="$(hits)"
-    for p in /sw.js /workbench/sw.js /workbench/preview/3000/sw.js /terminal/sw.js /login /_gate/sw.js; do
+    for p in /sw.js /workbench/sw.js /preview/3000/sw.js /terminal/sw.js /login /_gate/sw.js; do
         req GET "$p" -H "Cookie: $SESSION" -H 'Service-Worker: script'
         [ "$STATUS" = 403 ] || fail "a service worker's script from $p -> $STATUS"
         req GET "$p" -H 'Service-Worker: script'
