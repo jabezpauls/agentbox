@@ -231,54 +231,86 @@ written through it.
 | `POST trash {paths}` · `GET trash` · `POST trash/:id/restore {to?}` · `DELETE trash/:id` · `DELETE trash` | the trash |
 | `GET search?q=&path=&limit=` | file names, for the palette (`fd` when present) |
 
-Nothing is deleted outright except from the trash, and `overwrite` on a move
-or copy puts what it replaces in the trash too. The trash and upload scratch
-space live in `.agentbox/` at the top of each root, so moving something in or
-out is a rename on the same volume. Uploads nobody has touched for a day are
-swept.
+Nothing is deleted outright except from the trash. What happens to a file
+that is replaced depends on whether the operation is a delete or a save:
+
+| Operation | What it replaces goes |
+| --- | --- |
+| trash, WebDAV `DELETE` | to the trash |
+| move or copy with `overwrite`, WebDAV `COPY`/`MOVE` over an existing name | to the trash |
+| upload with `overwrite` | to the trash |
+| `write` with `overwrite`, WebDAV `PUT` over a file | nowhere: it is a save, replaced in place in one step, as an editor would |
+
+A file replaced in place or by an upload keeps its mode, so a script stays
+executable. The trash and upload scratch space live in `.agentbox/` at the top
+of each root, so moving something in or out is a rename on the same volume;
+that folder can be neither copied nor moved. Uploads nobody has touched for a
+day are swept.
 
 Everything is safe to repeat, because networks drop answers: a chunk can be
 resent at any offset up to what has arrived (a chunk further on is refused
 with the offset to resume from), finishing twice answers the same, and a
 second trash of the same path reports it as already gone.
 
-Downloads carry `Content-Security-Policy: sandbox` and `nosniff`. `inline`
-shows pictures, PDF and text in the browser; HTML and SVG are only ever shown
-as their source text, never rendered on the box's origin.
+Downloads carry `Content-Security-Policy: sandbox` and `nosniff`, and no file
+can be loaded as a script, worker or stylesheet (those requests get a 403, and
+scripts are labelled `text/plain` besides). `inline` shows pictures, PDF and
+text in the browser; HTML and SVG are only ever shown as their source text,
+never rendered on the box's origin. PDFs keep the sandbox: Chromium's and
+Firefox's built-in viewers both work under it, at the top level and in a
+frame — but Chromium refuses a PDF in a frame that has a `sandbox` attribute,
+so frame the raw URL without one (the header already isolates it).
+
+A zip streams as the folder is read and stops if the download is abandoned; a
+`HEAD` builds nothing. Folder listings are read and sorted once and kept for a
+few seconds, so paging through a big folder does not re-read it for every
+page.
 
 Linux filenames are bytes, not text. A name that is not valid UTF-8 travels
 with each stray byte as a lone surrogate (U+DC80 + byte), so it can be listed,
 renamed, downloaded and deleted like any other; send its `path` back exactly
-as received. In a zip such names show a replacement character.
+as received. In a zip such names show a replacement character, a name that
+looks like a drive letter (`C:notes.txt`) gets an underscore, and names made
+alike that way get a ` (2)` suffix.
 
 ### WebDAV
 
 `/api/dav/` serves the workspace over WebDAV, which is what `agentbox mount`
 puts in Finder, the GNOME file manager (`gio mount`) or `rclone`. It is the
 same files API underneath — the same confinement, and deleting sends things to
-the trash — with three differences. Symlinks inside the workspace appear as
-what they point at, and links that lead out do not appear at all. The
+the trash — with these differences. Symlinks inside the workspace appear as
+what they point at; links that lead out do not appear at all, and neither do
+links that lead back to a folder above or on the way (`proj/up -> ..`), which
+every client that walks a mount would otherwise follow for ever. The
 `.agentbox/` folder is not part of the mount. Custom ("dead") WebDAV
 properties are not stored; clients that only read and write files never
-notice, and Windows' timestamps are applied as modification times.
+notice, and Windows' timestamps are applied as modification times. Locks are
+held in memory, at most a thousand at once.
 
-macOS writes `._` and `.DS_Store` files beside everything on a network volume;
-deleting those removes them for good rather than filling the trash. To stop
-Finder writing `.DS_Store` files there at all:
+macOS writes `._` files and `.DS_Store` beside everything on a network volume,
+and Windows `Thumbs.db` and `desktop.ini`; deleting a file by exactly one of
+those names removes it for good rather than filling the trash (a folder by
+such a name still goes to the trash). To stop Finder writing `.DS_Store` files
+there at all:
 `defaults write com.apple.desktopservices DSDontWriteNetworkStores true`.
 
 ### System, projects and the editor
 
-- `GET /api/system` — CPU and memory against the sandbox's own limits (read
-  from its cgroup), PIDs, free space on both volumes, uptime, the fifteen
-  busiest processes, and the versions of agentbox, herdr, code-server and each
-  agent CLI on `PATH`.
+- `GET /api/system` — how the sandbox is doing, in two views. The sandbox is
+  several containers (editor, terminals, monitor, Workbench) sharing one
+  process table, each with its own limits, so `sandbox` sums CPU and resident
+  memory over every process, and `container` is the Workbench container's own
+  cgroup — its use and its limits, and where the agents it starts run. Also
+  free space on both volumes, uptime, the fifteen busiest processes, and the
+  versions of agentbox, herdr, code-server and each agent CLI on `PATH`.
 - `GET /api/projects` — a card per top-level folder of the workspace: git
   branch, uncommitted changes, ahead/behind, last change, the panes working in
   it and the servers it runs. `POST /api/projects {name}` makes an empty one;
   `POST /api/projects/clone {url, name?}` clones one (https, ssh, git or
   `user@host:path` URLs), with progress on the events socket as
-  `project.clone`.
+  `project.clone`; `DELETE /api/projects/clone/:id` cancels it, and a clone
+  gives up after ten minutes. Credentials in the URL are never repeated in
+  events or messages.
 - `POST /api/editor/open {path, line?, column?, wait?}` opens a file in the
   editor, at the line, and answers `{delivered}`. The editor is joined to the
   bridge by the **agentbox connect** extension baked into the image, over

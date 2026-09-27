@@ -19,8 +19,9 @@ certificate and starts the stack. It prints the password once.
 | Path | What it is |
 | --- | --- |
 | `/login` | The sign-in page; every other path sends you here first |
+| `/` | The app: the Workbench and, as they arrive, the other surfaces |
 | `/vscode/` | VS Code in the browser — files, editor, integrated terminal, extensions |
-| `/workbench` | The Workbench: many agents, live terminals, previews, review |
+| `/workbench` | The Workbench: many agents, live terminals, previews, review. Old `/workbench/…` links redirect here |
 | `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
 | `/shell` | A plain bash shell, pleasant on a phone |
 | `/monitor` | Live CPU, memory and process usage for the sandbox |
