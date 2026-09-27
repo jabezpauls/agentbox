@@ -94,17 +94,27 @@ export class ShareStore {
     await fsp.rename(tmp, this.file);
   }
 
-  /** Mint a share for `port`, pruning dead entries in the same write. */
-  async create(port: number): Promise<ShareView> {
+  /**
+   * Mint a share for `port`, pruning dead entries in the same write. A port
+   * has at most one live share: asking again returns the existing link rather
+   * than scattering several public URLs for the same thing. `ttlMs` exists for
+   * tests; the API always uses the default.
+   */
+  async create(port: number, ttlMs = DEFAULT_TTL_MS): Promise<ShareView> {
     return this.lock(async () => {
       const now = Date.now();
       const live = (await this.load()).filter((s) => isLive(s, now));
+      const existing = live.find((s) => s.port === port);
+      if (existing) {
+        await this.persist(live);
+        return toView(existing);
+      }
       const share: Share = {
         id: randomUUID().replace(/-/g, "").slice(0, 12),
         token: randomBytes(16).toString("hex"),
         port,
         created: new Date(now).toISOString(),
-        expires: new Date(now + DEFAULT_TTL_MS).toISOString(),
+        expires: new Date(now + ttlMs).toISOString(),
         revoked: false,
       };
       await this.persist([...live, share]);
@@ -133,8 +143,8 @@ export class ShareStore {
     return hit ? hit.port : null;
   }
 
-  /** Revoke a share by id; true if one was live to revoke. Immediate. */
-  async revoke(id: string): Promise<boolean> {
+  /** Revoke a share by id; the share that was revoked, or null. Immediate. */
+  async revoke(id: string): Promise<ShareView | null> {
     return this.lock(async () => {
       const now = Date.now();
       const shares = await this.load();
@@ -143,7 +153,7 @@ export class ShareStore {
       // comes back, and pruning here keeps the file from accreting tombstones.
       const kept = shares.filter((s) => s.id !== id && isLive(s, now));
       await this.persist(kept);
-      return target !== undefined;
+      return target ? toView(target) : null;
     });
   }
 

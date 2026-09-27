@@ -24,7 +24,7 @@ async function main(argv: string[]): Promise<void> {
 
   // Ports that belong to the sandbox's own services, flagged so the UI can tell
   // infrastructure apart from the dev servers an agent starts.
-  const systemPorts = [config.port, 8080, 7681, 7682, 7683];
+  const systemPorts = config.infraPorts;
   // Only ports opened by a process running under the workspace root auto-preview;
   // host daemons sharing the namespace (systemd-resolved on :53, etc.) are
   // classified as infrastructure so the app does not open onto them.

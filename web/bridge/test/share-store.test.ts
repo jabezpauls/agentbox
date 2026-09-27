@@ -35,10 +35,10 @@ describe("ShareStore", () => {
   it("revokes a share so its token 404s immediately", async () => {
     const store = new ShareStore(dir);
     const share = await store.create(3000);
-    expect(await store.revoke(share.id)).toBe(true);
+    expect((await store.revoke(share.id))?.token).toBe(share.token);
     expect(await store.resolve(share.token)).toBeNull();
     // A second revoke finds nothing live.
-    expect(await store.revoke(share.id)).toBe(false);
+    expect(await store.revoke(share.id)).toBeNull();
   });
 
   it("stops resolving once a share has expired", async () => {
@@ -84,6 +84,25 @@ describe("ShareStore", () => {
     // The revoked record is gone from disk, not merely hidden.
     const rows = JSON.parse(await fsp.readFile(path.join(dir, "shares.json"), "utf8")) as unknown[];
     expect(rows).toHaveLength(1);
+  });
+
+  it("returns the live share when the same port is shared again", async () => {
+    const store = new ShareStore(dir);
+    const a = await store.create(3000);
+    const b = await store.create(3000);
+    expect(b.token).toBe(a.token);
+    expect(await store.list()).toHaveLength(1);
+    // A different port is its own share.
+    const c = await store.create(3001);
+    expect(c.token).not.toBe(a.token);
+  });
+
+  it("mints a fresh share for a port once its old one has expired", async () => {
+    const store = new ShareStore(dir);
+    const a = await store.create(3000, 1);
+    await new Promise((r) => setTimeout(r, 10));
+    const b = await store.create(3000);
+    expect(b.token).not.toBe(a.token);
   });
 
   it("writes the store file with owner-only permissions", async () => {

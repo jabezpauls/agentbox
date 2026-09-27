@@ -11,9 +11,10 @@ import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
 import { registerPreviewRoutes } from "./routes/preview.js";
 import { registerReviewRoutes } from "./routes/review.js";
-import { registerPublicShareRoutes, registerShareApiRoutes } from "./routes/share.js";
+import { registerPublicShareRoutes, registerShareApiRoutes, startExpirySweep, type ShareDeps } from "./routes/share.js";
 import { ReviewStore } from "./review/store.js";
 import { ShareStore } from "./share/store.js";
+import { LiveShares } from "./share/live.js";
 import { pathGuard } from "./path-guard.js";
 
 /**
@@ -36,6 +37,8 @@ export interface AppDeps {
   review?: ReviewStore;
   /** Public preview share store; defaults to one rooted at the configured dir. */
   shares?: ShareStore;
+  /** How often to cut connections on expired shares; tests shorten it. */
+  shareSweepMs?: number;
   /** Terminal stream registry; defaults to one bound to herdr's socket. */
   streams?: TerminalStreams;
 }
@@ -56,19 +59,35 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const review = deps.review ?? new ReviewStore(config.reviewDir);
   const shares = deps.shares ?? new ShareStore(config.sharesDir);
+  const live = new LiveShares();
+  const infra = new Set(config.infraPorts);
+  const shareDeps: ShareDeps = {
+    store: shares,
+    live,
+    refusedPort: (port) => {
+      if (infra.has(port)) return true;
+      const addr = app.server.address();
+      if (typeof addr === "object" && addr && addr.port === port) return true;
+      // Whatever the classifier currently calls infrastructure (a host daemon
+      // sharing the namespace, say) is off limits too.
+      return deps.ports?.current().some((p) => p.port === port && p.system) ?? false;
+    },
+  };
+  const stopSweep = startExpirySweep(shares, live, deps.shareSweepMs ?? 30_000);
+  app.addHook("onClose", async () => stopSweep());
 
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
   // The public share route lives at the server root, outside the base-path
   // scope: Caddy's unauthenticated public branch forwards `/s/…` to the bridge
   // unchanged, so it must not sit under `/workbench`.
-  registerPublicShareRoutes(app, config, shares);
+  registerPublicShareRoutes(app, config, shareDeps);
 
   await app.register(
     async (scope) => {
       registerApiRoutes(scope, config, deps.hub, { ports: deps.ports });
       registerReviewRoutes(scope, config, review);
-      registerShareApiRoutes(scope, config, shares);
+      registerShareApiRoutes(scope, config, shareDeps);
       registerEventsWs(scope, deps.hub, deps.ports);
       registerTerminalWs(scope, streams);
       await registerPreviewRoutes(scope, config);

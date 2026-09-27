@@ -6,6 +6,12 @@ export interface Config {
   sharesDir: string;
   /** True when previews may be shared publicly under `/s/<token>/`. */
   previewSharing: boolean;
+  /**
+   * agentbox's own listeners inside the shared namespace: the bridge, the
+   * editor and the three ttyd services. Flagged as system ports in the panel,
+   * and never shareable — a public link must not reach a shell.
+   */
+  infraPorts: number[];
 }
 export function defaultSocketPath(env = process.env): string {
   if (env.HERDR_SOCKET_PATH) return env.HERDR_SOCKET_PATH;
@@ -14,8 +20,10 @@ export function defaultSocketPath(env = process.env): string {
 }
 export function loadConfig(env = process.env): Config {
   const base = (env.WORKBENCH_BASE_PATH ?? "/workbench").replace(/\/+$/, "") || "";
+  const port = Number(env.WORKBENCH_PORT ?? 7800);
   return {
-    port: Number(env.WORKBENCH_PORT ?? 7800), basePath: base,
+    port, basePath: base,
+    infraPorts: [port, 8080, 7681, 7682, 7683].filter((p) => p > 0),
     staticDir: env.WORKBENCH_STATIC_DIR ?? null, socketPath: defaultSocketPath(env),
     workspaceRoot: env.WORKBENCH_WORKSPACE_ROOT ?? "/workspace",
     previewDomain: env.WORKBENCH_PREVIEW_DOMAIN || null,
