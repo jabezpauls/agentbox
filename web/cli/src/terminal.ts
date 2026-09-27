@@ -157,7 +157,9 @@ export interface ProcessHooks {
   off(event: string, listener: (...args: unknown[]) => void): unknown;
 }
 
-export const EXIT_SIGNALS: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGTERM: 15 };
+/** The signals that end a program. Windows has no SIGQUIT, and refuses a listener for it. */
+export const EXIT_SIGNALS: Record<string, number> =
+  process.platform === "win32" ? { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } : { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGTERM: 15 };
 
 /**
  * Restore the terminal on every way out of the process: `exit` (which also
