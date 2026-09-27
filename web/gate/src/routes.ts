@@ -7,6 +7,7 @@
  * (`/shell` and `/shell/…`, never `/shellfish`), so a route's reach is exactly
  * what its name says.
  */
+import { isDavPath } from "./path-guard.js";
 
 /** The sandbox services the gate forwards to. All share the `code` namespace. */
 export type UpstreamName = "code" | "terminal" | "shell" | "monitor" | "bridge";
@@ -16,6 +17,8 @@ export type Route =
   | { kind: "gate" }
   /** A fixed redirect that needs no authentication and reveals nothing. */
   | { kind: "redirect"; location: string }
+  /** Not served from outside at all, signed in or not. */
+  | { kind: "notFound" }
   /** Forwarded to a sandbox service; `target` is the raw path and query to request there. */
   | { kind: "upstream"; upstream: UpstreamName; target: string };
 
@@ -45,8 +48,23 @@ const TTYD: ReadonlyArray<readonly [string, UpstreamName]> = [
 /** Where the editor lives. code-server uses relative URLs, so the prefix is stripped. */
 export const EDITOR_PREFIX = "/vscode";
 
+/**
+ * The bridge's editor channel: the socket the VS Code extension inside the
+ * sandbox holds open to receive "Open in editor". It is for that extension
+ * alone; a browser, or anything else through the front door, posing as the
+ * editor would be sent the files the owner opens. The bridge refuses anything
+ * that is not local, and the gate does not forward it at all.
+ */
+export const EDITOR_CHANNEL = "/ws/editor";
+
 export function route(path: string, query: string | null): Route {
   const qs = query === null ? "" : `?${query}`;
+
+  // Everything under the WebDAV mount goes to the bridge, raw: the path guard
+  // lets its filename characters through on that condition (see path-guard.ts).
+  if (isDavPath(path)) return { kind: "upstream", upstream: "bridge", target: `${path}${qs}` };
+
+  if (underSegment(path, EDITOR_CHANNEL)) return { kind: "notFound" };
 
   if (GATE_EXACT.has(path) || GATE_PREFIXES.some((p) => underSegment(path, p))) {
     return { kind: "gate" };

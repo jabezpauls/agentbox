@@ -26,10 +26,28 @@ export function splitTarget(url: string): RawTarget {
 }
 
 /**
+ * The bridge's WebDAV mount. WebDAV names files in its path, and a filename
+ * may hold `;`, a backslash, `%` — anything but `/` and NUL — so a Finder or
+ * rclone request for such a file carries exactly the forms the guard refuses.
+ * Under this prefix only the prefix itself is held to the strict form: the
+ * route table sends everything beneath it to the bridge, raw and to nowhere
+ * else, and the bridge's WebDAV handler decodes each segment itself and
+ * refuses `.`, `..`, encoded slashes and NUL before a path reaches the
+ * filesystem. So no reading of such a path can land anywhere but there.
+ */
+export const DAV_PREFIX = "/api/dav";
+
+/** True when `path` is the WebDAV mount or lies beneath it. */
+export function isDavPath(path: string): boolean {
+  return path === DAV_PREFIX || path.startsWith(`${DAV_PREFIX}/`);
+}
+
+/**
  * True when a raw path may be routed. Origin-form only: an absolute-form
  * target (`GET http://host/x`) or `*` is not something a browser or the proxy
  * sends, so it is refused rather than interpreted.
  */
 export function isRoutablePath(path: string): boolean {
+  if (isDavPath(path)) return true;
   return path.startsWith("/") && !AMBIGUOUS.test(path);
 }

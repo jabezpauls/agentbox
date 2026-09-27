@@ -212,6 +212,10 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, 308, "moved", { location: r.location });
       return;
     }
+    if (r.kind === "notFound") {
+      plain(res, 404, "not found");
+      return;
+    }
 
     const subject = core.authenticate(req);
     if (!subject) {
@@ -242,7 +246,8 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     if (!isRoutablePath(path)) return refuseUpgrade(socket, 400, "Bad Request");
     const info = settle(req);
     const r = route(path, query);
-    // The gate's own routes take no upgrades (yet); nor does a redirect.
+    // The gate's own routes take no upgrades (yet); nor does a redirect, nor
+    // the editor channel, which is for the extension inside the sandbox alone.
     if (r.kind !== "upstream") return refuseUpgrade(socket, 404, "Not Found");
     const subject = core.authenticate(req);
     if (!subject) return refuseUpgrade(socket, 401, "Unauthorized");
