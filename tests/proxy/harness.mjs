@@ -9,7 +9,8 @@
 //     crossed the gate and that nothing crossed it at all. A WebSocket
 //     handshake is accepted with the same report base64-encoded in `X-Echo`,
 //     then closed. A path containing "swa" is answered with
-//     `Service-Worker-Allowed: /`, which must never reach a browser.
+//     `Service-Worker-Allowed: /`, which must never reach a browser as that:
+//     the gate drops it, or for the editor moves it under /vscode/.
 //
 //   node harness.mjs signins <base-url> <n> <password> [Header=value ...]
 //     A client: n sign-in attempts at <base-url>, wrong passwords and then the

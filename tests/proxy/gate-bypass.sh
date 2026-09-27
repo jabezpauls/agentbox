@@ -11,7 +11,8 @@
 #  2. a signed-in request reaches the right upstream at the right path, and
 #     neither the gate's cookies nor Authorization arrive there, for plain
 #     requests and WebSocket upgrades, by session and by device token; no
-#     service worker outside the editor, and no Service-Worker-Allowed;
+#     service worker outside the editor, and no Service-Worker-Allowed but
+#     the editor's own, moved under /vscode/;
 #  3. state-changing and WebSocket requests from another site are refused;
 #  4. sign-in is rate-limited before bcrypt, keyed on an address the client
 #     cannot choose: the sandbox cannot even reach the proxy; forged headers
@@ -393,11 +394,17 @@ for CADDYFILE in $CADDYFILES; do
     fi
     req GET /vscode/static/sw.js -H "Cookie: $SESSION" -H 'Service-Worker: script'
     { [ "$STATUS" = 200 ] && [[ "$BODY" == *'"port":8080'* ]]; } || fail "code-server's own worker -> $STATUS"
-    for p in /vscode/swa.js /workbench/swa.js; do
+    # The upstreams answer "swa" paths with Service-Worker-Allowed: /. From
+    # the sandbox's own servers it is dropped; code-server's is moved under
+    # the editor's prefix, the widest scope its worker can then claim.
+    for p in /workbench/swa.js /terminal/swa.js; do
         req GET "$p" -H "Cookie: $SESSION"
         [ -z "$(header Service-Worker-Allowed)" ] || fail "Service-Worker-Allowed reached the browser from $p"
     done
-    pass "code-server's workers still load, and no response widens a worker's scope"
+    req GET /vscode/swa.js -H "Cookie: $SESSION"
+    [ "$(header Service-Worker-Allowed)" = /vscode/ ] \
+        || fail "code-server's Service-Worker-Allowed: / arrived as '$(header Service-Worker-Allowed)', not /vscode/"
+    pass "code-server's workers still load, and no response widens a worker's scope past /vscode/"
 
     # --- 4. Rate limits and lockout, keyed on the real client ----------------
     # The sandbox cannot even reach the proxy: it is on `internal`, the proxy
