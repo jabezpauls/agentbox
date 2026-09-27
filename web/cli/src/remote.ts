@@ -5,6 +5,48 @@
  * behind still gets a useful `status`.
  */
 
+/** A file or folder, as the files API describes it. */
+export interface FileEntry {
+  name: string;
+  /** Absolute, on the box. */
+  path: string;
+  type: "file" | "dir" | "symlink" | "other";
+  size: number;
+  mtime: number;
+  target?: string;
+  targetType?: "file" | "dir" | "other" | null;
+  git?: string | null;
+  rawName?: true;
+}
+
+/** `GET /api/files/list`: one page of a folder. */
+export interface FileListing {
+  path: string;
+  root: string;
+  entries: FileEntry[];
+  total: number;
+  offset: number;
+  truncated: boolean;
+}
+
+/** A chunked upload in progress. */
+export interface UploadSession {
+  id: string;
+  path: string;
+  size: number;
+  /** Bytes accepted so far: the next chunk goes at this offset. */
+  received: number;
+  overwrite: boolean;
+  created: number;
+  updated: number;
+  done: boolean;
+}
+
+export interface TrashResult {
+  trashed: Array<{ id: string; originalPath: string }>;
+  missing: string[];
+}
+
 export interface AppSummary {
   id: string;
   name?: string;
