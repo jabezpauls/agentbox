@@ -264,7 +264,8 @@ so frame the raw URL without one (the header already isolates it).
 A zip streams as the folder is read and stops if the download is abandoned; a
 `HEAD` builds nothing. Folder listings are read and sorted once and kept for a
 few seconds, so paging through a big folder does not re-read it for every
-page.
+page; any change to the folder is seen at once, and a folder changed in the
+last two seconds is always read afresh.
 
 Linux filenames are bytes, not text. A name that is not valid UTF-8 travels
 with each stray byte as a lone surrogate (U+DC80 + byte), so it can be listed,
@@ -302,7 +303,9 @@ there at all:
   memory over every process, and `container` is the Workbench container's own
   cgroup — its use and its limits, and where the agents it starts run. Also
   free space on both volumes, uptime, the fifteen busiest processes, and the
-  versions of agentbox, herdr, code-server and each agent CLI on `PATH`.
+  versions of agentbox (`AGENTBOX_VERSION`, which the installer and
+  `agentbox update` take from the checkout), herdr, code-server and each agent
+  CLI on `PATH`.
 - `GET /api/projects` — a card per top-level folder of the workspace: git
   branch, uncommitted changes, ahead/behind, last change, the panes working in
   it and the servers it runs. `POST /api/projects {name}` makes an empty one;
