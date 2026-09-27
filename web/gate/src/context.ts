@@ -6,7 +6,7 @@ import type { DeviceFlow } from "./device.js";
 import type { PasswordChecker } from "./password.js";
 import type { LoginLimiter, WindowLimiter } from "./ratelimit.js";
 import type { Store } from "./store.js";
-import { isRoutablePath, splitTarget } from "./path-guard.js";
+import { isStrictPath, splitTarget } from "./path-guard.js";
 import { underSegment } from "./routes.js";
 
 /** What the gate established about a request before routing it. */
@@ -75,7 +75,9 @@ export function safeNext(raw: unknown): string {
   if (/[^\x21-\x7e]/.test(raw)) return "/";
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
   const { path } = splitTarget(raw);
-  if (!isRoutablePath(path)) return "/";
+  // The strict form, without the WebDAV mount's exemption: that is for
+  // filenames on their way to the bridge, not for a place to be sent.
+  if (!isStrictPath(path)) return "/";
   if (underSegment(path, "/login") || underSegment(path, "/_gate")) return "/";
   return raw;
 }

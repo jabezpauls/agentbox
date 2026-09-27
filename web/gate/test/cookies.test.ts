@@ -114,5 +114,9 @@ describe("where sign-in sends you next", () => {
     for (const bad of ["//evil.example/", "/\\evil.example", "https://evil.example/", "evil", "/a/../b", "/login", "/login?next=/x", "/_gate/logout", "/a\nb", "/€", "/é", "", undefined, 3]) {
       expect(safeNext(bad), String(bad)).toBe("/");
     }
+    // The WebDAV mount's exemption is for its names, not for somewhere to land.
+    for (const bad of ["/api/dav/..%2f..%2flogin", "/api/dav/a;b", "/api/dav/../../_gate/x", "/api/dav/%5c"]) {
+      expect(safeNext(bad), String(bad)).toBe("/");
+    }
   });
 });
