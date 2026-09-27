@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -363,6 +363,35 @@ describe("a clone that does not finish", () => {
     expect(p.cancel(id)).toBe(false);
     expect(fs.existsSync(path.join(f.workspace, "cancel-me"))).toBe(false);
     await until(() => fs.readdirSync(path.join(f.workspace, ".agentbox", "clones")).length === 0);
+  });
+
+  it("sends no kill once a stopped clone has exited, when its group id may be someone else's", async () => {
+    const kill = vi.spyOn(process, "kill");
+    try {
+      const p = projects({ cloneKillAfterMs: 400 });
+      const { id } = await p.clone({ url: stallUrl, name: "exits-on-term" });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(p.cancel(id)).toBe(true);
+      await until(() => last(id)?.phase === "cancelled");
+      await new Promise((r) => setTimeout(r, 800));
+      expect(kill.mock.calls.filter(([, sig]) => sig === "SIGTERM")).toHaveLength(1);
+      expect(kill.mock.calls.filter(([, sig]) => sig === "SIGKILL")).toEqual([]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
+  it("kills a stopped clone that does not exit", async () => {
+    // A "git" that ignores TERM, as does the child it waits on.
+    const bin = path.join(f.base, "stubborn-git");
+    fs.writeFileSync(bin, "#!/bin/sh\ntrap '' TERM\nsleep 30 &\nwait\n", { mode: 0o755 });
+    const p = projects({ git: bin, cloneKillAfterMs: 300 });
+    const { id } = await p.clone({ url: "https://example.invalid/r.git", name: "stubborn" });
+    await new Promise((r) => setTimeout(r, 200));
+    const at = Date.now();
+    expect(p.cancel(id)).toBe(true);
+    await until(() => last(id)?.phase === "cancelled", 5000);
+    expect(Date.now() - at).toBeGreaterThanOrEqual(250);
   });
 
   it("gives up after its time limit", async () => {

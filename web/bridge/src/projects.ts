@@ -29,6 +29,8 @@ export interface ProjectsDeps {
   portsTtlMs?: number;
   /** How long a clone may run ({@link CLONE_TIMEOUT_MS} by default). */
   cloneTimeoutMs?: number;
+  /** How long a stopped clone has to exit before it is killed (5 s by default). */
+  cloneKillAfterMs?: number;
   events: BridgeEvents;
   /** The git binary (tests). */
   git?: string;
@@ -87,7 +89,17 @@ interface Clone {
   child: ChildProcess;
   /** Why it is being stopped, once it is: cancelled, or timed out. */
   reason: string | null;
+  /** The time limit. */
   timer: ReturnType<typeof setTimeout> | null;
+  /** Once stopped: the kill, should it not exit. */
+  kill: ReturnType<typeof setTimeout> | null;
+}
+
+/** A clone has exited: nothing may signal its process group again. */
+function settled(clone: Clone): void {
+  if (clone.timer) clearTimeout(clone.timer);
+  if (clone.kill) clearTimeout(clone.kill);
+  clone.timer = clone.kill = null;
 }
 
 /**
@@ -278,7 +290,7 @@ export class Projects {
       // all of them, not just git.
       detached: true,
     });
-    const clone: Clone = { name, child, reason: null, timer: null };
+    const clone: Clone = { name, child, reason: null, timer: null, kill: null };
     this.clones.set(id, clone);
     // A clone that has not finished in ten minutes is stuck (a stalled
     // network, a server that never answers) rather than slow.
@@ -311,13 +323,13 @@ export class Projects {
       }
     });
     child.on("error", (err) => {
-      if (clone.timer) clearTimeout(clone.timer);
+      settled(clone);
       this.clones.delete(id);
       void removeTree(scratch).catch(() => {});
       emit({ phase: "error", message: err.message });
     });
     child.on("close", (code) => {
-      if (clone.timer) clearTimeout(clone.timer);
+      settled(clone);
       if (!this.clones.delete(id)) return;
       void (async () => {
         if (clone.reason !== null) {
@@ -350,7 +362,10 @@ export class Projects {
     clone.reason = reason;
     signalGroup(clone.child, "SIGTERM");
     // git exits on TERM; if something under it does not, it is not waited for.
-    setTimeout(() => signalGroup(clone.child, "SIGKILL"), 5000).unref?.();
+    // Cleared once the clone exits: by then its group id may belong to
+    // someone else.
+    clone.kill = setTimeout(() => signalGroup(clone.child, "SIGKILL"), this.deps.cloneKillAfterMs ?? 5000);
+    clone.kill.unref?.();
   }
 
   /** Cancel a clone in progress; false when there is none by that id. */
@@ -364,7 +379,7 @@ export class Projects {
   /** Stop any clone still running (the bridge is shutting down). */
   stop(): void {
     for (const clone of this.clones.values()) {
-      if (clone.timer) clearTimeout(clone.timer);
+      settled(clone);
       signalGroup(clone.child, "SIGTERM");
     }
     this.clones.clear();
