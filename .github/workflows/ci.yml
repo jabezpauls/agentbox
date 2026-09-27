@@ -148,6 +148,23 @@ jobs:
         run: npm run e2e -w app
         working-directory: web
 
+      - name: The CLI bundle starts on the oldest Node it supports
+        run: docker run --rm -v "$PWD/web/cli/dist:/cli:ro" node:20.0.0-alpine node /cli/agentbox.mjs --help
+      - name: Install ttyd for the CLI's end-to-end run
+        # The release the sandbox image pins (TTYD_VERSION in
+        # images/workspace/Dockerfile), checksum-verified.
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /usr/local/bin/ttyd" | sha256sum -c -
+          sudo chmod 0755 /usr/local/bin/ttyd
+      - name: The CLI end to end
+        # The built bundle against a real gate, bridge, herdr and ttyd: device
+        # sign-in, status, attach and shell, the files round trip with a
+        # resumed upload, mount --no-mount with a WebDAV client and rclone,
+        # install and update, and `curl … | sh` in a clean node:22 container.
+        run: npm run e2e -w cli
+        working-directory: web
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -175,7 +192,11 @@ jobs:
           docker run --rm agentbox/workspace:ci code-server --list-extensions \
             | grep -x agentbox.agentbox-connect
       - name: Build the gate image
-        run: docker build -t agentbox/gate:ci -f images/gate/Dockerfile .
+        run: docker build --build-arg AGENTBOX_VERSION=ci-1 -t agentbox/gate:ci -f images/gate/Dockerfile .
+      - name: The gate must carry the CLI it serves, stamped with its version
+        run: |
+          docker run --rm --entrypoint node agentbox/gate:ci /app/cli/agentbox.mjs --version | grep -x 'agentbox ci-1'
+          docker run --rm --entrypoint grep agentbox/gate:ci -q '@@AGENTBOX_URL@@' /app/cli/install
       - name: The gate must run unprivileged, and its admin command work
         run: |
           test "$(docker run --rm --entrypoint id agentbox/gate:ci -u)" = 10001
