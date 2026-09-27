@@ -2,7 +2,9 @@
 # Thin wrapper so day-to-day operations do not require remembering which
 # compose overlay is in use — it is read from .env.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+# Resolved before the cd below, so sibling scripts are found from any cwd.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 [ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
 MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
 DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
@@ -11,10 +13,14 @@ DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
 PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
 [ -n "$PREVIEW_DOMAIN" ] && DC+=(-f docker-compose.previews.yml)
 
-# Replace (or add) a single KEY=value line in .env, atomically and 0600.
+# Replace (or add) a single KEY=value line in .env, atomically and 0600. A
+# newline in the value would smuggle in a second key, so it is refused.
 set_env() {
     local key="$1" val="$2" tmp
-    tmp="$(mktemp)"
+    case "$val" in
+        *$'\n'*|*$'\r'*) echo "value for $key may not contain a newline" >&2; exit 1 ;;
+    esac
+    tmp="$(mktemp .env.XXXXXX)"
     grep -v "^${key}=" .env > "$tmp" || true
     printf '%s=%s\n' "$key" "$val" >> "$tmp"
     install -m 600 "$tmp" .env
@@ -35,22 +41,44 @@ case "${1:-help}" in
         # take effect on the rebuild; --mode swaps the overlay in place.
         shift
         ISOLATE="false"
+        # Validate every flag before writing any, so a bad value late in the
+        # list cannot leave the earlier ones half-applied.
+        PENDING=()
         while [ $# -gt 0 ]; do
+            val="${2:-}"
+            case "$val" in
+                *$'\n'*|*$'\r'*) echo "option values may not contain a newline" >&2; exit 1 ;;
+            esac
             case "$1" in
-                --agents)         set_env AGENTBOX_AGENTS "${2:-}"; shift 2 ;;
-                --preview)        set_env AGENTBOX_PREVIEW_MODE "${2:-}"; shift 2 ;;
-                --preview-domain) set_env AGENTBOX_PREVIEW_DOMAIN "${2:-}"; shift 2 ;;
-                --mode)           set_env AGENTBOX_MODE "${2:-}"; shift 2 ;;
-                --edge-network)   set_env AGENTBOX_EDGE_NETWORK "${2:-}"; shift 2 ;;
-                --cert-resolver)  set_env AGENTBOX_CERT_RESOLVER "${2:-}"; shift 2 ;;
-                --cpus)           set_env AGENTBOX_CPUS "${2:-}"; shift 2 ;;
-                --memory)         set_env AGENTBOX_MEMORY "${2:-}"; shift 2 ;;
-                --proxy-cpus)     set_env AGENTBOX_PROXY_CPUS "${2:-}"; shift 2 ;;
-                --proxy-memory)   set_env AGENTBOX_PROXY_MEMORY "${2:-}"; shift 2 ;;
+                --agents)
+                    case "$val" in
+                        *[!a-z0-9,_-]*) echo "--agents takes a comma-separated list, e.g. claude,codex" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_AGENTS=$val"); shift 2 ;;
+                --preview)
+                    case "$val" in
+                        off|path) ;;
+                        *) echo "--preview must be off or path" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_PREVIEW_MODE=$val"); shift 2 ;;
+                --mode)
+                    case "$val" in
+                        standalone|behind-proxy|traefik) ;;
+                        *) echo "--mode must be standalone, behind-proxy or traefik" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_MODE=$val"); shift 2 ;;
+                --preview-domain) PENDING+=("AGENTBOX_PREVIEW_DOMAIN=$val"); shift 2 ;;
+                --edge-network)   PENDING+=("AGENTBOX_EDGE_NETWORK=$val"); shift 2 ;;
+                --cert-resolver)  PENDING+=("AGENTBOX_CERT_RESOLVER=$val"); shift 2 ;;
+                --cpus)           PENDING+=("AGENTBOX_CPUS=$val"); shift 2 ;;
+                --memory)         PENDING+=("AGENTBOX_MEMORY=$val"); shift 2 ;;
+                --proxy-cpus)     PENDING+=("AGENTBOX_PROXY_CPUS=$val"); shift 2 ;;
+                --proxy-memory)   PENDING+=("AGENTBOX_PROXY_MEMORY=$val"); shift 2 ;;
                 --isolate-host)   ISOLATE="true"; shift ;;
                 *) echo "unknown update option: $1" >&2; exit 1 ;;
             esac
         done
+        for kv in "${PENDING[@]}"; do set_env "${kv%%=*}" "${kv#*=}"; done
         git pull --ff-only
         # Recompute the overlays in case --mode or --preview-domain just changed.
         MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
@@ -61,7 +89,7 @@ case "${1:-help}" in
         docker compose "${OVERLAYS[@]}" up -d
         if [ "$ISOLATE" = "true" ]; then
             # shellcheck source=scripts/isolate-host.sh
-            . "$(dirname "$0")/isolate-host.sh"
+            . "$SCRIPT_DIR/isolate-host.sh"
             agentbox_isolate_host "${OVERLAYS[@]}"
         fi
         ;;

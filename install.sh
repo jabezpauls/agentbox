@@ -26,8 +26,12 @@ PROXY_CPUS="1"
 PROXY_MEMORY="256m"
 AGENTS="claude,codex"
 ISOLATE_HOST="false"
+PUBLIC_URL=""
 ASSUME_YES="false"
 INTERACTIVE="false"
+# Names of the settings given on the command line. Those override .env; every
+# other setting keeps what an existing install already has.
+EXPLICIT=" "
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -65,29 +69,67 @@ USAGE
 # Any argument at all means non-interactive; no arguments triggers the prompts.
 [ $# -eq 0 ] && INTERACTIVE="true"
 
+# flag <VAR> <value>: set a setting from the command line and remember that it
+# was given, so an existing .env does not override it.
+flag() {
+    case "$2" in
+        *$'\n'*|*$'\r'*) die "option values may not contain a newline" ;;
+    esac
+    printf -v "$1" '%s' "$2"
+    EXPLICIT="$EXPLICIT$1 "
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --domain)        DOMAIN="${2:-}"; shift 2 ;;
-        --mode)          MODE="${2:-}"; shift 2 ;;
-        --bind)          BIND="${2:-}"; shift 2 ;;
-        --edge-network)  EDGE_NETWORK="${2:-}"; shift 2 ;;
-        --cert-resolver) CERT_RESOLVER="${2:-}"; shift 2 ;;
-        --user)          USERNAME="${2:-}"; shift 2 ;;
-        --password)      PASSWORD="${2:-}"; shift 2 ;;
-        --preview-domain) PREVIEW_DOMAIN="${2:-}"; shift 2 ;;
-        --preview)       PREVIEW_MODE="${2:-}"; shift 2 ;;
-        --agents)        AGENTS="${2:-}"; shift 2 ;;
+        --domain)        flag DOMAIN "${2:-}"; shift 2 ;;
+        --mode)          flag MODE "${2:-}"; shift 2 ;;
+        --bind)          flag BIND "${2:-}"; shift 2 ;;
+        --edge-network)  flag EDGE_NETWORK "${2:-}"; shift 2 ;;
+        --cert-resolver) flag CERT_RESOLVER "${2:-}"; shift 2 ;;
+        --user)          flag USERNAME "${2:-}"; shift 2 ;;
+        --password)      flag PASSWORD "${2:-}"; shift 2 ;;
+        --preview-domain) flag PREVIEW_DOMAIN "${2:-}"; shift 2 ;;
+        --preview)       flag PREVIEW_MODE "${2:-}"; shift 2 ;;
+        --agents)        flag AGENTS "${2:-}"; shift 2 ;;
         --isolate-host)  ISOLATE_HOST="true"; shift ;;
-        --cpus)          CPUS="${2:-}"; shift 2 ;;
-        --memory)        MEMORY="${2:-}"; shift 2 ;;
-        --proxy-cpus)    PROXY_CPUS="${2:-}"; shift 2 ;;
-        --proxy-memory)  PROXY_MEMORY="${2:-}"; shift 2 ;;
+        --cpus)          flag CPUS "${2:-}"; shift 2 ;;
+        --memory)        flag MEMORY "${2:-}"; shift 2 ;;
+        --proxy-cpus)    flag PROXY_CPUS "${2:-}"; shift 2 ;;
+        --proxy-memory)  flag PROXY_MEMORY "${2:-}"; shift 2 ;;
         --dir)           INSTALL_DIR="${2:-}"; shift 2 ;;
         --yes|-y)        ASSUME_YES="true"; shift ;;
         -h|--help)       usage; exit 0 ;;
         *)               die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+# --- Existing settings ------------------------------------------------------
+# Re-running the installer — to add --isolate-host, say — must not quietly
+# reset an install to the defaults: a traefik box flipping to standalone would
+# try to take :80/:443. So an existing .env supplies every setting that was not
+# given on the command line, and the rewrite below keeps every key it does not
+# manage (API keys, TZ, anything added by hand).
+ENV_FILE="$INSTALL_DIR/.env"
+# The keys this installer manages, and the setting each one holds.
+MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
+AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
+AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_DOMAIN:PREVIEW_DOMAIN
+AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
+AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
+if [ -f "$ENV_FILE" ]; then
+    for pair in $MANAGED; do
+        key="${pair%%:*}"; var="${pair#*:}"
+        case "$EXPLICIT" in *" $var "*) continue ;; esac
+        # A present-but-empty key is a choice (no agents, no preview domain).
+        grep -q "^$key=" "$ENV_FILE" || continue
+        printf -v "$var" '%s' "$(grep -m1 "^$key=" "$ENV_FILE" | cut -d= -f2-)"
+    done
+fi
+# The public URL follows the domain whenever the domain was just given, or no
+# URL is recorded yet. It is left blank for localhost: https://localhost is
+# never a link anyone else can open.
+case "$EXPLICIT" in *" DOMAIN "*) PUBLIC_URL="" ;; esac
 
 # --- Interactive walk-through -----------------------------------------------
 # Ask the same questions the flags answer, each with its safe default already
@@ -154,9 +196,21 @@ if [ "$MODE" = "standalone" ] || [ "$MODE" = "traefik" ]; then
     [ -z "$DOMAIN" ] && die "--domain is required for $MODE mode"
 fi
 [ -z "$DOMAIN" ] && DOMAIN="localhost"
+if [ -z "$PUBLIC_URL" ] && [ "$DOMAIN" != "localhost" ]; then
+    PUBLIC_URL="https://$DOMAIN"
+fi
+case "$AGENTS" in
+    *[!a-z0-9,_-]*) die "--agents takes a comma-separated list of agent names (e.g. claude,codex)" ;;
+esac
+
+# AGENTBOX_INSTALL_ENV_ONLY=1 writes .env and stops, without touching Docker or
+# the checkout. It exists so tests/install/ can check what a re-run preserves.
+ENV_ONLY="${AGENTBOX_INSTALL_ENV_ONLY:-}"
 
 # --- Docker -----------------------------------------------------------------
-if ! command -v docker >/dev/null 2>&1; then
+if [ -n "$ENV_ONLY" ]; then
+    [ -d "$INSTALL_DIR" ] || die "no install at $INSTALL_DIR"
+elif ! command -v docker >/dev/null 2>&1; then
     log "Docker not found; installing via get.docker.com"
     [ "$ASSUME_YES" = "true" ] || {
         read -rp "Install Docker now? [y/N] " reply </dev/tty
@@ -164,11 +218,15 @@ if ! command -v docker >/dev/null 2>&1; then
     }
     curl -fsSL https://get.docker.com | sh
 fi
-docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required (docker compose)"
-docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon; add yourself to the docker group, or use rootless Docker, then re-run"
+if [ -z "$ENV_ONLY" ]; then
+    docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required (docker compose)"
+    docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon; add yourself to the docker group, or use rootless Docker, then re-run"
+fi
 
 # --- Source -----------------------------------------------------------------
-if [ -d "$INSTALL_DIR/.git" ]; then
+if [ -n "$ENV_ONLY" ]; then
+    :
+elif [ -d "$INSTALL_DIR/.git" ]; then
     log "Updating existing install at $INSTALL_DIR"
     # A local checkout may have no upstream, or a pinned one. Failing to update
     # must not abort an otherwise valid install.
@@ -189,8 +247,9 @@ KEPT="false"
 if [ -z "$PASSWORD" ] && [ -f .env ] && grep -q '^AGENTBOX_PASSWORD_HASH=.\+' .env; then
     KEPT="true"
     log "Keeping the existing password"
-    HASH_ESCAPED="$(grep '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2-)"
-    HASH="$HASH_ESCAPED"
+    # Stored Compose-escaped ('$$'); undo that so it is escaped exactly once
+    # below, rather than doubling on every re-run and breaking the login.
+    HASH="$(grep -m1 '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2- | sed 's/[$][$]/$/g')"
 else
     if [ -z "$PASSWORD" ]; then
         PASSWORD="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
@@ -209,7 +268,22 @@ HASH_ESCAPED="$(printf '%s' "$HASH" | sed 's/[$]/$$/g')"
 # --- Configuration ----------------------------------------------------------
 log "Writing .env"
 umask 077
-cat > .env <<ENVFILE
+NEW_ENV="$(mktemp .env.XXXXXX)"
+if [ -f .env ]; then
+    # Keep every line this installer does not manage — API keys, TZ, comments,
+    # settings added by hand — exactly as it was.
+    managed_re="^(AGENTBOX_PASSWORD_HASH"
+    for pair in $MANAGED; do managed_re="$managed_re|${pair%%:*}"; done
+    managed_re="$managed_re)="
+    grep -Ev "$managed_re" .env > "$NEW_ENV" || true
+else
+    {
+        printf 'TZ=%s\n' "$(cat /etc/timezone 2>/dev/null || echo UTC)"
+        printf 'ANTHROPIC_API_KEY=%s\n' "${ANTHROPIC_API_KEY:-}"
+        printf 'OPENAI_API_KEY=%s\n' "${OPENAI_API_KEY:-}"
+    } > "$NEW_ENV"
+fi
+cat >> "$NEW_ENV" <<ENVFILE
 AGENTBOX_DOMAIN=$DOMAIN
 AGENTBOX_MODE=$MODE
 AGENTBOX_BIND=$BIND
@@ -220,16 +294,15 @@ AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_PREVIEW_DOMAIN=$PREVIEW_DOMAIN
 AGENTBOX_PREVIEW_MODE=$PREVIEW_MODE
 AGENTBOX_AGENTS=$AGENTS
-AGENTBOX_PUBLIC_URL=https://$DOMAIN
+AGENTBOX_PUBLIC_URL=$PUBLIC_URL
 AGENTBOX_CPUS=$CPUS
 AGENTBOX_MEMORY=$MEMORY
 AGENTBOX_PROXY_CPUS=$PROXY_CPUS
 AGENTBOX_PROXY_MEMORY=$PROXY_MEMORY
-TZ=$(cat /etc/timezone 2>/dev/null || echo UTC)
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
 ENVFILE
-chmod 600 .env
+chmod 600 "$NEW_ENV"
+mv "$NEW_ENV" .env
+[ -n "$ENV_ONLY" ] && { log "Wrote .env (env-only run; nothing else done)"; exit 0; }
 
 # --- Launch -----------------------------------------------------------------
 # The preview overlay is an add-on, independent of the mode: it is composed in
