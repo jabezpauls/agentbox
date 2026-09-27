@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
+import { setProxyTimeouts } from "../src/routes/proxy-core.js";
 import type { SessionHub } from "../src/herdr/session.js";
 
 const stubHub = {
@@ -16,11 +17,22 @@ const stubHub = {
   stop: () => {},
 } as unknown as SessionHub;
 
+/** A page load, as a browser sends it for a frame or a top-level document. */
+const NAV = { "sec-fetch-dest": "iframe", accept: "text/html,*/*" };
+/** A script's fetch. */
+const XHR = { "sec-fetch-dest": "empty", accept: "application/json" };
+
 let app: FastifyInstance;
 let bridgePort: number;
-let badGateway: http.Server;
-let badPort: number;
+const servers: http.Server[] = [];
 let closedPort: number;
+
+async function serve(handler: http.RequestListener): Promise<number> {
+  const srv = http.createServer(handler);
+  await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  servers.push(srv);
+  return (srv.address() as AddressInfo).port;
+}
 
 /** Reserve a port, then free it, so nothing is listening there. */
 async function freePort(): Promise<number> {
@@ -31,15 +43,10 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-beforeAll(async () => {
-  badGateway = http.createServer((_req, res) => {
-    res.writeHead(503, { "content-type": "text/plain" });
-    res.end("upstream is warming up");
-  });
-  await new Promise<void>((resolve) => badGateway.listen(0, "127.0.0.1", resolve));
-  badPort = (badGateway.address() as AddressInfo).port;
-  closedPort = await freePort();
+const url = (port: number, path = "/"): string => `http://127.0.0.1:${bridgePort}/workbench/preview/${port}${path}`;
 
+beforeAll(async () => {
+  closedPort = await freePort();
   const config = loadConfig({
     WORKBENCH_PORT: "0",
     WORKBENCH_BASE_PATH: "/workbench",
@@ -52,13 +59,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  setProxyTimeouts({ connectMs: 10_000, firstByteMs: 90_000 });
   await app.close();
-  await new Promise<void>((resolve) => badGateway.close(() => resolve()));
+  for (const s of servers) {
+    s.closeAllConnections();
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
 });
 
 describe("preview fallback", () => {
-  it("serves a branded 200 page, not a 5xx, when the port is refused", async () => {
-    const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${closedPort}/`);
+  it("serves the branded page for a page load on a refused port", async () => {
+    const res = await fetch(url(closedPort), { headers: NAV });
     expect(res.status).toBe(200);
     expect(res.headers.get("x-preview-upstream")).toBe("down");
     const body = await res.text();
@@ -66,52 +77,110 @@ describe("preview fallback", () => {
     expect(body).toContain("Retry");
   });
 
-  it("serves the error variant, not a bare 502, on a gateway status", async () => {
-    const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${badPort}/`);
+  it("treats a missing Sec-Fetch-Dest with an HTML Accept as a page load", async () => {
+    const res = await fetch(url(closedPort), { headers: { accept: "text/html" } });
     expect(res.status).toBe(200);
-    expect(res.headers.get("x-preview-upstream")).toBe("down");
-    expect(await res.text()).toContain(`Port ${badPort} returned an error`);
+    expect(await res.text()).toContain("Nothing is serving");
   });
 
-  it("marks the fallback on a HEAD probe without a body", async () => {
-    const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${closedPort}/`, {
-      method: "HEAD",
-    });
-    expect(res.status).toBe(200);
+  it("answers a script's request on a refused port with a marked 502, not a page", async () => {
+    const res = await fetch(url(closedPort, "/api/data"), { method: "POST", headers: XHR, body: "{}" });
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-preview-upstream")).toBe("down");
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("marks a HEAD probe without a body", async () => {
+    const res = await fetch(url(closedPort), { method: "HEAD", headers: XHR });
     expect(res.headers.get("x-preview-upstream")).toBe("down");
     expect(await res.text()).toBe("");
   });
 
-  it("passes a real upstream through untouched", async () => {
-    const real = http.createServer((_req, res) => {
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end("hello from the app");
+  it("passes an upstream's own 503 through untouched, for a page load and a fetch", async () => {
+    const port = await serve((_req, res) => {
+      res.writeHead(503, { "content-type": "text/plain", "retry-after": "5" });
+      res.end("app is warming up");
     });
-    await new Promise<void>((resolve) => real.listen(0, "127.0.0.1", resolve));
-    const port = (real.address() as AddressInfo).port;
-    try {
-      const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${port}/`);
-      expect(res.status).toBe(200);
+    for (const headers of [NAV, XHR]) {
+      const res = await fetch(url(port), { headers });
+      expect(res.status).toBe(503);
       expect(res.headers.get("x-preview-upstream")).toBeNull();
-      expect(await res.text()).toBe("hello from the app");
-    } finally {
-      await new Promise<void>((resolve) => real.close(() => resolve()));
+      expect(res.headers.get("retry-after")).toBe("5");
+      expect(await res.text()).toBe("app is warming up");
     }
   });
 
-  it("still passes a plain 500 through so an app's own error page shows", async () => {
-    const erroring = http.createServer((_req, res) => {
+  it("passes a plain 500 through so an app's own error page shows", async () => {
+    const port = await serve((_req, res) => {
       res.writeHead(500, { "content-type": "text/html" });
       res.end("<h1>App error overlay</h1>");
     });
-    await new Promise<void>((resolve) => erroring.listen(0, "127.0.0.1", resolve));
-    const port = (erroring.address() as AddressInfo).port;
-    try {
-      const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${port}/`);
-      expect(res.status).toBe(500);
-      expect(await res.text()).toContain("App error overlay");
-    } finally {
-      await new Promise<void>((resolve) => erroring.close(() => resolve()));
-    }
+    const res = await fetch(url(port), { headers: NAV });
+    expect(res.status).toBe(500);
+    expect(await res.text()).toContain("App error overlay");
+  });
+
+  it("passes a real upstream through untouched", async () => {
+    const port = await serve((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("hello from the app");
+    });
+    const res = await fetch(url(port), { headers: NAV });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-preview-upstream")).toBeNull();
+    expect(await res.text()).toBe("hello from the app");
+  });
+
+  it("strips Service-Worker-Allowed from proxied responses", async () => {
+    const port = await serve((_req, res) => {
+      res.writeHead(200, { "service-worker-allowed": "/", "content-type": "text/javascript" });
+      res.end("self.addEventListener('fetch', () => {})");
+    });
+    const res = await fetch(url(port, "/sw.js"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("service-worker-allowed")).toBeNull();
+  });
+
+  describe("timeouts", () => {
+    it("gives up on an upstream that never starts its response", async () => {
+      setProxyTimeouts({ firstByteMs: 150 });
+      try {
+        const port = await serve(() => {
+          // Accept the request and never answer.
+        });
+        const res = await fetch(url(port), { headers: NAV });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("x-preview-upstream")).toBe("down");
+      } finally {
+        setProxyTimeouts({ firstByteMs: 90_000 });
+      }
+    });
+
+    it("never times out a stream once its response has started", async () => {
+      // An SSE-style response: headers at once, then events well past the
+      // first-byte window. The old socket-idle timeout cut these off.
+      setProxyTimeouts({ firstByteMs: 150 });
+      try {
+        const port = await serve((_req, res) => {
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          res.flushHeaders();
+          let n = 0;
+          const tick = setInterval(() => {
+            n += 1;
+            res.write(`data: ${n}\n\n`);
+            if (n === 4) {
+              clearInterval(tick);
+              res.end();
+            }
+          }, 200);
+        });
+        const res = await fetch(url(port, "/events"), { headers: { accept: "text/event-stream" } });
+        expect(res.status).toBe(200);
+        const body = await res.text();
+        expect(body).toContain("data: 4");
+      } finally {
+        setProxyTimeouts({ firstByteMs: 90_000 });
+      }
+    });
   });
 });

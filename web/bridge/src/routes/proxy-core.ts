@@ -36,13 +36,51 @@ const CREDENTIAL_HEADERS = new Set(["authorization", "cookie"]);
 
 const MAX_PENDING_BYTES = 1024 * 1024;
 
-/** Upstream failures that mean "nothing is serving here", not "the app errored". */
-const DOWN_ERRNOS = new Set(["ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "ECONNRESET", "ETIMEDOUT"]);
-/** Upstream statuses that a bare gateway returns when the app is not up. A 500
- * from a framework is the app rendering its own error and is passed through. */
-const DOWN_STATUSES = new Set([502, 503, 504]);
-/** Cap on how long the proxy waits for the upstream to answer at all. */
-const UPSTREAM_TIMEOUT_MS = 10_000;
+/**
+ * How long to wait for the TCP connection to the upstream. Loopback either
+ * connects at once or is refused, so this only matters for a wedged listener.
+ */
+let connectTimeoutMs = 10_000;
+/**
+ * How long to wait for the upstream's response to *start* — its status line.
+ * Generous, because a dev server's first compile can take a while, and kept
+ * under Cloudflare's 100s origin timeout so the bridge answers before the edge
+ * does. Once headers arrive there is no timeout at all: an SSE stream or a
+ * long-lived download is the app's business.
+ */
+let firstByteTimeoutMs = 90_000;
+
+/** Shorten the upstream windows so tests can observe them; never used in production. */
+export function setProxyTimeouts(t: { connectMs?: number; firstByteMs?: number }): void {
+  if (t.connectMs !== undefined) connectTimeoutMs = t.connectMs;
+  if (t.firstByteMs !== undefined) firstByteTimeoutMs = t.firstByteMs;
+}
+
+/** Headers the proxy never passes back from an upstream. */
+const DROPPED_RESPONSE_HEADERS = new Set([
+  // Would let a previewed page register a service worker scoped above its own
+  // prefix — over the Workbench itself.
+  "service-worker-allowed",
+]);
+
+/**
+ * The sandbox a public share is served under. An opaque origin: the shared
+ * page gets none of the box's cookies, storage or same-origin access, even when
+ * opened as a top-level tab where no iframe `sandbox` attribute applies.
+ */
+export const SHARE_SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals";
+
+/**
+ * True for a request that is loading a page (a top-level navigation or a frame)
+ * rather than a script's fetch. Only these may be answered with the branded
+ * fallback page; an XHR or fetch must see a real failure status it can handle.
+ */
+function isNavigation(req: FastifyRequest): boolean {
+  const dest = req.headers["sec-fetch-dest"];
+  if (typeof dest === "string") return dest === "document" || dest === "iframe" || dest === "frame";
+  const accept = String(req.headers.accept ?? "");
+  return accept.includes("text/html");
+}
 
 /** ws only permits these close codes to be sent back to a peer. */
 function sendableCloseCode(code: number): number {
@@ -61,6 +99,13 @@ export interface ProxyTarget {
   port: number;
   targetPath: string;
   prefix: string;
+  /** Serve every response under {@link SHARE_SANDBOX_CSP} (public shares). */
+  sandbox?: boolean;
+  /**
+   * Register a way to tear this exchange down; returns its unregister. Lets a
+   * revoked or expired share cut an open stream or socket immediately.
+   */
+  track?: (close: () => void) => () => void;
 }
 
 // Rewrite a root-relative Location so it stays inside the proxy's prefix,
@@ -90,10 +135,11 @@ function rewriteSetCookie(cookie: string, prefix: string): string {
 function buildResponseHeaders(
   upstreamHeaders: IncomingHttpHeaders,
   prefix: string,
+  sandbox: boolean,
 ): http.OutgoingHttpHeaders {
   const out: http.OutgoingHttpHeaders = {};
   for (const [key, value] of Object.entries(upstreamHeaders)) {
-    if (value === undefined || HOP_BY_HOP.has(key)) continue;
+    if (value === undefined || HOP_BY_HOP.has(key) || DROPPED_RESPONSE_HEADERS.has(key)) continue;
     if (key === "location" && typeof value === "string") {
       out[key] = rewriteLocation(value, prefix);
     } else if (key === "set-cookie") {
@@ -102,6 +148,14 @@ function buildResponseHeaders(
     } else {
       out[key] = value;
     }
+  }
+  if (sandbox) {
+    // Added alongside any policy the app sets: browsers enforce every CSP
+    // header, so the app can tighten this but never loosen it.
+    const csp: string = "content-security-policy";
+    const existing = out[csp];
+    const list = existing === undefined ? [] : Array.isArray(existing) ? existing.map(String) : [String(existing)];
+    out[csp] = [...list, SHARE_SANDBOX_CSP];
   }
   return out;
 }
@@ -114,13 +168,9 @@ function buildResponseHeaders(
  * themes. `X-Preview-Upstream: down` marks it so the panel's probe can tell it
  * apart from a real 200 without parsing the body.
  */
-export function fallbackPage(port: number, kind: "down" | "error"): string {
-  const title =
-    kind === "error" ? `Port ${port} returned an error` : `Nothing is serving on port ${port}`;
-  const detail =
-    kind === "error"
-      ? "The server on this port answered with an error. It may still be starting, or it may have crashed — check the pane that launched it."
-      : "No server has answered on this port yet. If you just started one, give it a moment and retry.";
+export function fallbackPage(port: number): string {
+  const title = `Nothing is serving on port ${port}`;
+  const detail = "No server has answered on this port yet. If you just started one, give it a moment and retry.";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -185,26 +235,43 @@ export function fallbackPage(port: number, kind: "down" | "error"): string {
 </html>`;
 }
 
-function sendFallback(reply: FastifyReply, port: number, kind: "down" | "error"): void {
+/**
+ * Answer for an upstream that never responded: the branded page for a page
+ * load, a plain 502 for a script's request. Both carry `X-Preview-Upstream:
+ * down` so the panel's probe can recognise either without reading a body.
+ */
+function sendUpstreamDown(req: FastifyRequest, reply: FastifyReply, port: number, sandbox: boolean): void {
   const clientRes = reply.raw;
   if (clientRes.headersSent || clientRes.destroyed) return;
-  const body = Buffer.from(fallbackPage(port, kind), "utf8");
-  clientRes.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
+  const headers: http.OutgoingHttpHeaders = { "cache-control": "no-store", "x-preview-upstream": "down" };
+  if (sandbox) headers["content-security-policy"] = SHARE_SANDBOX_CSP;
+  if (isNavigation(req)) {
+    const body = Buffer.from(fallbackPage(port), "utf8");
+    clientRes.writeHead(200, {
+      ...headers,
+      "content-type": "text/html; charset=utf-8",
+      "content-length": String(body.length),
+    });
+    if (req.method === "HEAD") clientRes.end();
+    else clientRes.end(body);
+    return;
+  }
+  const body = Buffer.from(JSON.stringify({ error: "nothing is serving on this port" }), "utf8");
+  clientRes.writeHead(502, {
+    ...headers,
+    "content-type": "application/json",
     "content-length": String(body.length),
-    "cache-control": "no-store",
-    // Lets the panel's probe distinguish this from a real upstream 200 without
-    // reading the body (a HEAD carries no body at all).
-    "x-preview-upstream": "down",
   });
-  if (reply.request.method === "HEAD") clientRes.end();
+  if (req.method === "HEAD") clientRes.end();
   else clientRes.end(body);
 }
 
 /**
  * Reverse-proxy one HTTP request to `127.0.0.1:<port>`. The reply must already
- * be hijacked. On an upstream that is refused, unreachable or answers with a
- * bare gateway status, a branded fallback page is served in place of the error.
+ * be hijacked. When the upstream cannot be reached at all — refused,
+ * unreachable, or silent past the connect/first-byte window — a page load gets
+ * the branded fallback and a script's request a marked 502. Anything the
+ * upstream actually sends, error statuses included, is passed through as-is.
  */
 export function proxyHttpRequest(
   req: FastifyRequest,
@@ -213,6 +280,7 @@ export function proxyHttpRequest(
   log: FastifyBaseLogger,
 ): void {
   const { port, targetPath, prefix } = target;
+  const sandbox = target.sandbox === true;
   const clientReq = req.raw;
   const clientRes = reply.raw;
 
@@ -223,55 +291,60 @@ export function proxyHttpRequest(
   }
   requestHeaders.host = `127.0.0.1:${port}`;
 
-  let settled = false;
+  // `started` flips once the upstream's status line arrives; before that any
+  // failure is "nothing is serving", after it the stream is the app's own.
+  let started = false;
+  let untrack = (): void => {};
   const proxyReq = http.request(
     { host: "127.0.0.1", port, method: req.method, path: targetPath, headers: requestHeaders },
     (proxyRes) => {
-      settled = true;
+      started = true;
+      clearTimeout(firstByte);
       if (clientRes.destroyed) {
         proxyRes.destroy();
         return;
       }
-      const status = proxyRes.statusCode ?? 502;
-      // A bare gateway status means the port answered but the app is not up;
-      // show the branded page rather than passing a 502 the edge would style.
-      if (DOWN_STATUSES.has(status) && !clientRes.headersSent) {
-        proxyRes.resume();
-        sendFallback(reply, port, "error");
-        return;
-      }
-      clientRes.writeHead(status, proxyRes.statusMessage, buildResponseHeaders(proxyRes.headers, prefix));
+      clientRes.writeHead(
+        proxyRes.statusCode ?? 502,
+        proxyRes.statusMessage,
+        buildResponseHeaders(proxyRes.headers, prefix, sandbox),
+      );
       proxyRes.pipe(clientRes);
       proxyRes.on("error", () => clientRes.destroy());
     },
   );
 
-  proxyReq.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
-    // No answer at all within the window: treat it as not-up rather than let the
-    // socket hang until the client or the edge gives up with an error page.
-    if (!settled && !clientRes.headersSent) {
-      settled = true;
-      sendFallback(reply, port, "down");
-    }
+  const giveUp = (): void => {
+    if (started) return;
+    started = true;
+    sendUpstreamDown(req, reply, port, sandbox);
     proxyReq.destroy();
+  };
+  const firstByte = setTimeout(giveUp, firstByteTimeoutMs);
+  firstByte.unref?.();
+  proxyReq.on("socket", (sock) => {
+    if (!sock.connecting) return;
+    const connect = setTimeout(giveUp, connectTimeoutMs);
+    connect.unref?.();
+    sock.once("connect", () => clearTimeout(connect));
+    sock.once("close", () => clearTimeout(connect));
   });
 
+  if (target.track) {
+    untrack = target.track(() => {
+      proxyReq.destroy();
+      clientRes.destroy();
+    });
+  }
+
   // A browser disconnect (or upstream failure) must never throw or leak the
-  // opposite stream: log at debug and tear the pair down. A connection that was
-  // refused or dropped before any bytes arrived becomes the branded page.
+  // opposite stream: log at debug and tear the pair down.
   proxyReq.on("error", (err: NodeJS.ErrnoException) => {
     log.debug({ err }, "preview upstream request error");
-    if (!clientRes.headersSent) {
-      if (!settled && DOWN_ERRNOS.has(err.code ?? "")) {
-        settled = true;
-        sendFallback(reply, port, "down");
-        return;
-      }
-      try {
-        clientRes.writeHead(502);
-      } catch {
-        // headers already flushed
-      }
+    if (!started && !clientRes.headersSent) {
+      clearTimeout(firstByte);
+      giveUp();
+      return;
     }
     clientRes.destroy();
   });
@@ -284,7 +357,11 @@ export function proxyHttpRequest(
     proxyReq.destroy();
   });
   // Client went away mid-flight: abort the upstream so it does not leak.
-  clientRes.on("close", () => proxyReq.destroy());
+  clientRes.on("close", () => {
+    clearTimeout(firstByte);
+    untrack();
+    proxyReq.destroy();
+  });
   clientReq.on("aborted", () => proxyReq.destroy());
 
   clientReq.pipe(proxyReq);
@@ -319,6 +396,12 @@ export function proxyWebSocket(
   headers.host = `127.0.0.1:${port}`;
 
   const upstream = new WebSocket(`ws://127.0.0.1:${port}${targetPath}`, offered, { headers });
+  const untrack = target.track
+    ? target.track(() => {
+        closeClient(1008, "share ended");
+        closeUpstream(1000, "share ended");
+      })
+    : (): void => {};
   const pending: { data: Buffer; binary: boolean }[] = [];
   let pendingBytes = 0;
 
@@ -371,7 +454,10 @@ export function proxyWebSocket(
     log.debug({ err }, "preview upstream websocket error");
     closeClient(1011, "upstream error");
   });
-  socket.on("close", (code, reason) => closeUpstream(code, reason));
+  socket.on("close", (code, reason) => {
+    untrack();
+    closeUpstream(code, reason);
+  });
   socket.on("error", (err) => {
     log.debug({ err }, "preview client websocket error");
     closeUpstream(1011, "client error");
