@@ -2,6 +2,12 @@ import os from "node:os"; import path from "node:path";
 export interface Config {
   port: number; staticDir: string | null; socketPath: string;
   workspaceRoot: string; previewDomain: string | null; reviewDir: string; publicUrl: string | null;
+  /**
+   * The files API's second root, hidden in the app by default. A separate
+   * volume from the workspace, which is why the trash and upload scratch space
+   * are kept per root rather than in one place.
+   */
+  homeRoot: string;
   /** Where minted public share records live; on the home volume, like reviews. */
   sharesDir: string;
   /** True when previews may be shared publicly under `/s/<token>/`. */
@@ -25,6 +31,7 @@ export function loadConfig(env = process.env): Config {
     infraPorts: [port, 8080, 7681, 7682, 7683].filter((p) => p > 0),
     staticDir: env.WORKBENCH_STATIC_DIR ?? null, socketPath: defaultSocketPath(env),
     workspaceRoot: env.WORKBENCH_WORKSPACE_ROOT ?? "/workspace",
+    homeRoot: env.WORKBENCH_HOME_ROOT ?? (env.HOME || os.homedir()),
     previewDomain: env.WORKBENCH_PREVIEW_DOMAIN || null,
     // Review sessions live on the home volume so they survive restarts and
     // updates, which is what lets an agent block on a poll across a redeploy.

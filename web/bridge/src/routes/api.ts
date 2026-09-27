@@ -24,6 +24,8 @@ export function registerApiRoutes(
     // Surfaced to the app: the directory picker composes absolute cwds under
     // the workspace root, and preview full-screen needs the preview domain.
     workspaceRoot: config.workspaceRoot,
+    // The files API's second root, so the app can offer it without guessing.
+    homeRoot: config.homeRoot,
     previewDomain: config.previewDomain,
     // Whether the panel may offer a Share action; off hides it entirely.
     previewSharing: config.previewSharing,

@@ -5,6 +5,7 @@ import { buildApp } from "./app.js";
 import { PortsWatcher } from "./ports.js";
 import { ensureReviewRoot } from "./review/store.js";
 import { ensureSharesRoot } from "./share/store.js";
+import { FilesService } from "./files/service.js";
 
 const USAGE = "Usage: workbench-bridge [--help]\n\nRuns the Workbench bridge server that proxies browser clients to herdr.";
 
@@ -36,7 +37,12 @@ async function main(argv: string[]): Promise<void> {
   // Minted public share links persist here too, for the same reason.
   ensureSharesRoot(config.sharesDir);
 
-  const app = await buildApp(config, { hub, ports });
+  // The files API's roots, trash and uploads. Abandoned uploads are swept here
+  // rather than in buildApp, so a test server never touches a real volume.
+  const files = new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+  const stopFiles = files.startMaintenance();
+
+  const app = await buildApp(config, { hub, ports, files });
   await app.listen({ host: "0.0.0.0", port: config.port });
   console.log(`[workbench] listening on 0.0.0.0:${config.port}`);
 
@@ -50,6 +56,7 @@ async function main(argv: string[]): Promise<void> {
       .catch(() => {})
       .finally(() => {
         ports.stop();
+        stopFiles();
         hub.stop();
         process.exit(0);
       });

@@ -17,6 +17,8 @@ import { ReviewStore } from "./review/store.js";
 import { ShareStore } from "./share/store.js";
 import { LiveShares } from "./share/live.js";
 import { pathGuard } from "./path-guard.js";
+import { FilesService } from "./files/service.js";
+import { registerFilesRoutes } from "./files/routes.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -42,6 +44,8 @@ export interface AppDeps {
   shareSweepMs?: number;
   /** Terminal stream registry; defaults to one bound to herdr's socket. */
   streams?: TerminalStreams;
+  /** The files API's roots, trash and uploads; defaults to the configured roots. */
+  files?: FilesService;
 }
 
 /**
@@ -94,7 +98,11 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // branch reaches; `/s/…` is forwarded to the bridge unchanged.
   registerPublicShareRoutes(app, config, shareDeps);
 
+  const files =
+    deps.files ?? new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
+  registerFilesRoutes(app, files);
   registerReviewRoutes(app, config, review);
   registerShareApiRoutes(app, config, shareDeps);
   registerEventsWs(app, deps.hub, deps.ports);

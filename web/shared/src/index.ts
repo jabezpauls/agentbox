@@ -87,3 +87,64 @@ export interface DirEntry { name: string; path: string }
 /** A minted public preview share, as the owner's API returns it. */
 export interface PreviewShare { id: string; token: string; port: number; created: string; expires: string; url: string }
 export interface RpcRequest { method: string; params?: Record<string, unknown> }
+
+/**
+ * Files. The API serves two roots: the workspace (`/workspace`) and home
+ * (`/home/coder`, hidden in the app by default). Every path it takes or returns
+ * is absolute; a relative one is taken against the workspace root, and `~` or
+ * `~/…` against home.
+ *
+ * Linux filenames are bytes. A byte that is not valid UTF-8 travels as the
+ * lone surrogate U+DC80 + (byte − 0x80), so every name round-trips exactly:
+ * send a `path` back unchanged in a JSON body, and through
+ * {@link encodePathParam} in a query string. Such entries carry `rawName`.
+ */
+export type FileRoot = "workspace" | "home";
+export type FileType = "file" | "dir" | "symlink" | "other";
+export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "ignored" | "conflicted";
+export interface FileEntry {
+  name: string; path: string; type: FileType;
+  /** Bytes; 0 for a directory. */
+  size: number;
+  /** Milliseconds since the epoch. */
+  mtime: number;
+  /** A symlink's link text, exactly as written. */
+  target?: string;
+  /** What a symlink leads to; null when it is broken or leads out of its root. */
+  targetType?: Exclude<FileType, "symlink"> | null;
+  /** Working-tree status when the entry is inside a git repository; null when clean. */
+  git?: GitFileStatus | null;
+  /** The name is not valid UTF-8 (see above). */
+  rawName?: true;
+}
+/** `GET /api/files/list`: a directory, capped at `limit` entries per page. */
+export interface FileListing {
+  path: string; root: FileRoot; entries: FileEntry[];
+  /** Entries in the directory after the hidden filter, across all pages. */
+  total: number; offset: number;
+  /** More entries follow this page. */
+  truncated: boolean;
+}
+/** Something in the trash, with where it came from. */
+export interface TrashItem {
+  id: string; name: string; originalPath: string; root: FileRoot; type: FileType;
+  /** Bytes for a file; null for a directory. */
+  size: number | null;
+  trashedAt: number;
+}
+/** A chunked upload in progress (or just finished). */
+export interface UploadSession {
+  id: string; path: string; size: number;
+  /** Bytes accepted so far; the next chunk goes at this offset. */
+  received: number;
+  overwrite: boolean; created: number; updated: number; done: boolean;
+}
+/** Percent-encode a (possibly byte-escaped) path for a query string. */
+export function encodePathParam(path: string): string {
+  let out = "";
+  for (const ch of path) {
+    const cp = ch.codePointAt(0) ?? 0;
+    out += cp >= 0xdc80 && cp <= 0xdcff ? `%${(cp - 0xdc00).toString(16).toUpperCase()}` : encodeURIComponent(ch);
+  }
+  return out;
+}
