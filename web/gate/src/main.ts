@@ -9,6 +9,10 @@ async function main(argv: string[]): Promise<void> {
     console.log(USAGE);
     return;
   }
+  // Everything the gate creates is its own alone: the store, and the admin
+  // socket, which would otherwise exist with default permissions for the
+  // moment between listen() and chmod().
+  process.umask(0o077);
   const config = loadConfig();
   const gate = await buildGate(config);
   await gate.app.listen({ host: config.host, port: config.port });
