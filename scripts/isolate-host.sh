@@ -67,6 +67,28 @@ table inet agentbox {
 NFT
 }
 
+# The systemd unit that re-applies the rules at boot.
+_ih_render_unit() {
+    local nft="$1" rules="$2"
+    cat <<UNIT
+[Unit]
+Description=agentbox sandbox egress isolation
+After=firewalld.service docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$nft -f $rules
+# '-': the table may already be gone (a flush, a firewall reload), and a stop
+# that fails on that would leave the unit failed for no reason.
+ExecStop=-$nft delete table inet agentbox
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
 agentbox_isolate_host() {
     local unit="/etc/systemd/system/agentbox-egress.service"
     local rules="/etc/nftables/agentbox-egress.nft"
@@ -92,23 +114,7 @@ agentbox_isolate_host() {
     _ih_render_rules "$subnet" | $sudo tee "$rules" >/dev/null
     $sudo "$nft" -c -f "$rules" || { _ih_die "the rendered rules did not parse; left $rules for inspection"; return 1; }
 
-    $sudo tee "$unit" >/dev/null <<UNIT
-[Unit]
-Description=agentbox sandbox egress isolation
-After=firewalld.service docker.service
-Wants=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=$nft -f $rules
-# '-': the table may already be gone (a flush, a firewall reload), and a stop
-# that fails on that would leave the unit failed for no reason.
-ExecStop=-$nft delete table inet agentbox
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+    _ih_render_unit "$nft" "$rules" | $sudo tee "$unit" >/dev/null
 
     $sudo systemctl daemon-reload
     $sudo systemctl enable agentbox-egress.service >/dev/null \

@@ -21,6 +21,18 @@ NET="agentbox-isolate-test-$$"
 cleanup() { rm -rf "$WORK"; docker network rm "$NET" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+unit="$(_ih_render_unit /usr/sbin/nft /etc/nftables/agentbox-egress.nft)"
+if grep -qx 'ExecStop=-/usr/sbin/nft delete table inet agentbox' <<<"$unit"; then
+    pass "stopping the unit tolerates a table that is already gone (ExecStop=-)"
+else
+    fail "the unit's ExecStop fails when the table is missing: $(grep ExecStop <<<"$unit")"
+fi
+if grep -qx 'ExecStart=/usr/sbin/nft -f /etc/nftables/agentbox-egress.nft' <<<"$unit"; then
+    pass "the unit applies the rules file"
+else
+    fail "the unit's ExecStart: $(grep ExecStart <<<"$unit")"
+fi
+
 _ih_render_rules 10.201.12.0/24 > "$WORK/a.nft"
 _ih_render_rules 10.99.0.0/24 > "$WORK/b.nft"
 
