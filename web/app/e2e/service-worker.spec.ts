@@ -77,6 +77,13 @@ test("code-server's own worker registers under /vscode/, and no higher", async (
       res.end(`self.addEventListener("fetch", () => {});`);
       return;
     }
+    // A compromised editor asking for more than its root, with a dot segment
+    // the browser would resolve after the gate had prefixed it.
+    if (req.url?.startsWith("/_static/out/browser/climb.js")) {
+      res.writeHead(200, { "content-type": "text/javascript", "service-worker-allowed": "/%2e%2e/" });
+      res.end(`self.addEventListener("fetch", () => {});`);
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html" });
     res.end("<!doctype html><title>editor</title>");
   });
@@ -93,12 +100,18 @@ test("code-server's own worker registers under /vscode/, and no higher", async (
         (r) => new URL(r.scope).pathname,
         (e: Error) => `refused: ${e.name}`,
       );
-      return { own, root };
+      const climb = await navigator.serviceWorker.register("_static/out/browser/climb.js", { scope: "/" }).then(
+        (r) => new URL(r.scope).pathname,
+        (e: Error) => `refused: ${e.name}`,
+      );
+      return { own, root, climb };
     });
     // Its own root is the editor's prefix: allowed, as code-server needs.
     expect(outcome.own).toBe("/vscode/");
     // The box's root is not: the gate rewrote "/" to "/vscode/", never passed it.
     expect(outcome.root).toBe("refused: SecurityError");
+    // Nor can a Service-Worker-Allowed that would climb out of /vscode/.
+    expect(outcome.climb).toBe("refused: SecurityError");
     await page.evaluate(async () => {
       for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
     });

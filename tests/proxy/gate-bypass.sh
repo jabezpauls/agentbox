@@ -404,6 +404,13 @@ for CADDYFILE in $CADDYFILES; do
     req GET /vscode/swa.js -H "Cookie: $SESSION"
     [ "$(header Service-Worker-Allowed)" = /vscode/ ] \
         || fail "code-server's Service-Worker-Allowed: / arrived as '$(header Service-Worker-Allowed)', not /vscode/"
+    # Any other value from the editor is dropped: under /vscode, dot segments
+    # (encoded or not), backslashes and URLs would resolve back above it.
+    for v in %2F%252e%252e%2F %2F.%252e%2F %2F%252E.%2F %252f %2F%5C https%3A%2F%2Fevil.example%2F %2F_static%2F; do
+        req GET "/vscode/swa.js?swa=$v" -H "Cookie: $SESSION"
+        [ -z "$(header Service-Worker-Allowed)" ] \
+            || fail "the editor's Service-Worker-Allowed ($v) arrived as '$(header Service-Worker-Allowed)'"
+    done
     pass "code-server's workers still load, and no response widens a worker's scope past /vscode/"
 
     # --- 4. Rate limits and lockout, keyed on the real client ----------------

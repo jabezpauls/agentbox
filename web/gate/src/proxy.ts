@@ -55,15 +55,15 @@ const OWN_RESPONSE_HEADERS = new Set(["referrer-policy", "x-content-type-options
  * directory — from a page in the sandbox, over the whole box, the sign-in page
  * included. So no upstream may send it as it stands. The editor is served
  * under a prefix it does not know about, and asks for `/` meaning its own
- * root: for that upstream alone the value is moved under the prefix (`/`
- * becomes `/vscode/`), never above it. Anything else — another upstream, or a
- * value that is not a plain path — is dropped.
+ * root: for that upstream alone, exactly `/` becomes `/vscode/`. Every other
+ * value, from any upstream, is dropped. Nothing is appended to the prefix:
+ * the browser resolves the value as a URL, so a path after it could climb
+ * back out (`/%2e%2e/` under `/vscode` resolves to `/`), and no filter over
+ * paths is as sure as not taking one.
  */
 export function serviceWorkerAllowed(value: string, prefix: string | undefined): string | null {
-  if (prefix === undefined) return null;
-  const v = value.trim();
-  if (!v.startsWith("/") || v.startsWith("//") || /[\\\s]|\.\./.test(v)) return null;
-  return `${prefix}${v}`;
+  if (prefix === undefined || value.trim() !== "/") return null;
+  return `${prefix}/`;
 }
 
 export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [

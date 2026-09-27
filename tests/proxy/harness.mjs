@@ -9,8 +9,9 @@
 //     crossed the gate and that nothing crossed it at all. A WebSocket
 //     handshake is accepted with the same report base64-encoded in `X-Echo`,
 //     then closed. A path containing "swa" is answered with
-//     `Service-Worker-Allowed: /`, which must never reach a browser as that:
-//     the gate drops it, or for the editor moves it under /vscode/.
+//     `Service-Worker-Allowed: /` (or the value of its `swa=` query
+//     parameter), which must never reach a browser as that: the gate drops
+//     it, or for the editor turns exactly `/` into /vscode/.
 //
 //   node harness.mjs signins <base-url> <n> <password> [Header=value ...]
 //     A client: n sign-in attempts at <base-url>, wrong passwords and then the
@@ -33,7 +34,9 @@ function serve() {
       req.resume();
       req.on("end", () => {
         const headers = { "content-type": "application/json" };
-        if (req.url.includes("swa")) headers["service-worker-allowed"] = "/";
+        if (req.url.includes("swa")) {
+            headers["service-worker-allowed"] = new URL(req.url, "http://x").searchParams.get("swa") ?? "/";
+        }
         res.writeHead(200, headers);
         res.end(JSON.stringify(report(port, req)));
       });

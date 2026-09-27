@@ -42,13 +42,31 @@ describe("service workers", () => {
   });
 
   it("the editor's scope is moved under /vscode/, never above it", async () => {
+    // Only exactly "/" is taken, and becomes the editor's prefix. Anything else
+    // is dropped: appended to /vscode, the browser would resolve dot segments,
+    // encoded or not, and backslashes back out of it.
     const cases: Array<[string, string | undefined]> = [
       ["/", "/vscode/"],
-      ["/_static/out/", "/vscode/_static/out/"],
-      ["https://evil.example/", undefined],
-      ["//evil.example/", undefined],
+      [" / ", "/vscode/"],
+      ["/_static/out/", undefined],
+      ["/%2e%2e/", undefined],
+      ["/.%2e/", undefined],
+      ["/%2E./", undefined],
+      ["/%2e%2e", undefined],
+      ["/%2f", undefined],
+      ["%2f", undefined],
+      ["/%2F%2e%2e%2F", undefined],
+      ["/\\", undefined],
+      ["\\", undefined],
+      ["/..\\", undefined],
       ["/../", undefined],
+      ["/./", undefined],
+      ["//", undefined],
+      ["//evil.example/", undefined],
+      ["https://evil.example/", undefined],
+      ["http://127.0.0.1/", undefined],
       ["relative/", undefined],
+      ["", undefined],
     ];
     try {
       for (const [sent, seen] of cases) {
