@@ -1,0 +1,4 @@
+# Standalone, not behind Cloudflare: Caddy is the edge. It trusts no one in
+# front of it, so the client address is the address a request arrives from,
+# and any forwarding header a client sends is ignored.
+client_ip_headers X-Forwarded-For

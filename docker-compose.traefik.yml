@@ -13,11 +13,18 @@
 # the host. The gate keeps authenticating every request inside the stack, so the
 # sandbox is never reachable unauthenticated even from another container on
 # that network — and the gate itself is not on that network at all.
+#
+# AGENTBOX_CLOUDFLARE (on by default here) says the hostname is proxied through
+# Cloudflare: Caddy then trusts Cloudflare's published ranges as well as
+# Traefik when working out a client's address, and Traefik's own outer limit
+# counts per CF-Connecting-IP. Set it to off when nothing fronts Traefik.
 services:
   proxy:
     networks:
-      - internal
+      - front
       - edge
+    environment:
+      AGENTBOX_TRUST: proxied-${AGENTBOX_CLOUDFLARE:-on}
     volumes:
       - ./proxy/Caddyfile.behind-proxy:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -30,31 +37,31 @@ services:
       - traefik.http.routers.agentbox.tls=true
       - traefik.http.routers.agentbox.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
       - traefik.http.services.agentbox.loadbalancer.server.port=8080
-      - traefik.http.routers.agentbox.middlewares=agentbox-ratelimit,agentbox-headers
+      # The outer limit is chosen by AGENTBOX_CLOUDFLARE, the same switch Caddy
+      # reads, so the two can never disagree about who the client is.
+      - traefik.http.routers.agentbox.middlewares=agentbox-ratelimit-cf-${AGENTBOX_CLOUDFLARE:-on},agentbox-headers
       # An outer limit, in front of the gate's own sign-in limits and lockout.
       # Normal use is a handful of requests a second — the editor's assets, a
       # port poll, a review poll — so a ceiling well above that is invisible to
       # a person and ruinous to a flood.
-      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.average=60
-      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.burst=120
-      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.period=1s
+      #
       # Behind Cloudflare every request arrives from a Cloudflare address, so
-      # rate limiting on the peer address would pool every visitor into one
-      # bucket. Count against the original client instead. Set
-      # AGENTBOX_CLIENT_IP_HEADER empty when nothing fronts Traefik.
-      - traefik.http.middlewares.agentbox-ratelimit.ratelimit.sourcecriterion.requestheadername=${AGENTBOX_CLIENT_IP_HEADER:-CF-Connecting-IP}
+      # counting per peer would pool every visitor into one bucket: count per
+      # CF-Connecting-IP instead. (A client that reaches Traefik directly can set
+      # that header, but only to escape this outer limit: the gate keys its own
+      # limits on the address Caddy works out, which it cannot forge.)
+      - traefik.http.middlewares.agentbox-ratelimit-cf-on.ratelimit.average=60
+      - traefik.http.middlewares.agentbox-ratelimit-cf-on.ratelimit.burst=120
+      - traefik.http.middlewares.agentbox-ratelimit-cf-on.ratelimit.period=1s
+      - traefik.http.middlewares.agentbox-ratelimit-cf-on.ratelimit.sourcecriterion.requestheadername=CF-Connecting-IP
+      # Without Cloudflare, per peer address — Traefik's default criterion.
+      - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.average=60
+      - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.burst=120
+      - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.period=1s
       - traefik.http.middlewares.agentbox-headers.headers.stsseconds=31536000
       - traefik.http.middlewares.agentbox-headers.headers.stsincludesubdomains=false
       - traefik.http.middlewares.agentbox-headers.headers.referrerpolicy=no-referrer
       - traefik.http.middlewares.agentbox-headers.headers.contenttypenosniff=true
-
-  gate:
-    environment:
-      # The gate keys its sign-in limits on this header from the proxy: right
-      # behind Cloudflare, spoofable without it — set AGENTBOX_CLIENT_IP_HEADER
-      # empty in .env when nothing fronts Traefik, and the gate falls back to
-      # the proxy's X-Forwarded-For (which is then Traefik's address).
-      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER-CF-Connecting-IP}
 
 networks:
   edge:

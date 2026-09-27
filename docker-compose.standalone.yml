@@ -6,6 +6,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Caddy is the edge: it trusts no one in front of it, unless the DNS
+      # record is proxied through Cloudflare (AGENTBOX_CLOUDFLARE=on).
+      AGENTBOX_TRUST: standalone-${AGENTBOX_CLOUDFLARE:-off}
     volumes:
       - ./proxy/Caddyfile.standalone:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

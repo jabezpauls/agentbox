@@ -162,7 +162,9 @@ services:
     cpus: ${AGENTBOX_GATE_CPUS:-1}
     mem_limit: ${AGENTBOX_GATE_MEMORY:-256m}
     pids_limit: 128
+    # `front` to hear from the proxy, `internal` to reach the sandbox's services.
     networks:
+      - front
       - internal
     depends_on:
       - code
@@ -173,10 +175,9 @@ services:
       # truth: ./scripts/agentbox passwd changes the password there.
       AGENTBOX_PASSWORD_HASH: ${AGENTBOX_PASSWORD_HASH:?run install.sh to generate a password hash}
       AGENTBOX_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
-      # Which header carries the client's address on a request from the proxy.
-      # Empty: the proxy's own X-Forwarded-For. The traefik overlay sets
-      # CF-Connecting-IP. Only the proxy's connections are believed.
-      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER:-}
+      # The one peer whose X-Agentbox-Client-IP (the client address the proxy
+      # worked out) is believed. Everyone else, the sandbox included, is keyed
+      # on the address it connects from.
       GATE_TRUSTED_PROXIES: proxy
     volumes:
       - gate:/data
@@ -199,17 +200,28 @@ services:
     cpus: ${AGENTBOX_PROXY_CPUS:-1}
     mem_limit: ${AGENTBOX_PROXY_MEMORY:-256m}
     pids_limit: 256
+    # `front` only: the sandbox is on `internal` and cannot reach the proxy at
+    # all, so nothing inside it can send a request that arrives at the gate
+    # from the proxy's address.
     networks:
-      - internal
+      - front
     environment:
       AGENTBOX_DOMAIN: ${AGENTBOX_DOMAIN:-localhost}
+      # An extra header to read the client address from, after the standard
+      # ones, when the peer is a trusted proxy (see proxy/trust/).
+      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER:-}
     volumes:
+      - ./proxy/trust:/etc/caddy/trust:ro
       - caddy_data:/data
       - caddy_config:/config
 
 networks:
   internal:
     name: agentbox_internal
+    driver: bridge
+  # The proxy and the gate, and nothing else.
+  front:
+    name: agentbox_front
     driver: bridge
 
 volumes:

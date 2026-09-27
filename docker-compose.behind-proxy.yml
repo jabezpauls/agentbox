@@ -1,10 +1,14 @@
 # Behind-proxy mode: the stack binds to loopback only, so an existing reverse
-# proxy (Traefik, nginx, another Caddy) keeps ports 80/443 and terminates TLS.
-# Point that proxy at AGENTBOX_BIND.
+# proxy (Traefik, nginx, another Caddy, cloudflared) keeps ports 80/443 and
+# terminates TLS. Point that proxy at AGENTBOX_BIND.
 services:
   proxy:
     ports:
       - "${AGENTBOX_BIND:-127.0.0.1:8443}:8080"
+    environment:
+      # Trust the proxy in front (it reaches Caddy from a private address), and
+      # Cloudflare's edge when AGENTBOX_CLOUDFLARE=on.
+      AGENTBOX_TRUST: proxied-${AGENTBOX_CLOUDFLARE:-off}
     volumes:
       - ./proxy/Caddyfile.behind-proxy:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

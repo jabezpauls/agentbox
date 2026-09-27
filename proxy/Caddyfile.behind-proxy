@@ -1,20 +1,32 @@
 # Behind-proxy (and traefik): no TLS and no ACME here — the host's existing
-# reverse proxy terminates TLS and forwards to this listener, which hands every
-# request to the gate. The gate authenticates at this hop, so the sandbox is
-# never reachable unauthenticated, even from the host.
+# reverse proxy, or Traefik, terminates TLS and forwards to this listener, which
+# hands every request to the gate. The gate authenticates at this hop, so the
+# sandbox is never reachable unauthenticated, even from the host.
 {
 	admin off
 	auto_https off
+	servers {
+		# Who Caddy trusts in front of itself when working out a client's
+		# address: the proxy that forwards to it (a private address), and
+		# Cloudflare's edge when the box is behind Cloudflare (proxy/trust/,
+		# chosen by the compose overlay from AGENTBOX_CLOUDFLARE).
+		import /etc/caddy/trust/{$AGENTBOX_TRUST}.caddy
+	}
 }
 
 :8080 {
 	encode zstd gzip
 
+	# The client address, as Caddy worked it out, in a header of its own. A
+	# client's own copy is dropped first; the gate believes this header only on
+	# connections from this container, which shares a network with the gate
+	# alone.
+	request_header -X-Agentbox-Client-IP
+
 	# The original Host passes through unchanged — so the proxy in front must
 	# forward it too — and Caddy sets X-Forwarded-For, -Proto and -Host itself.
-	# The gate believes those only on connections from this container; to key
-	# rate limits on the real client behind another proxy, name the header that
-	# proxy sets in AGENTBOX_CLIENT_IP_HEADER. WebSocket upgrades and streamed
-	# responses pass through as they are.
-	reverse_proxy gate:7900
+	# WebSocket upgrades and streamed responses pass through as they are.
+	reverse_proxy gate:7900 {
+		header_up X-Agentbox-Client-IP {client_ip}
+	}
 }

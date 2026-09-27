@@ -3,16 +3,28 @@
 # gets in and where each path goes (see web/gate).
 {
 	admin off
+	servers {
+		# Who Caddy trusts in front of itself when working out a client's
+		# address: nobody, or Cloudflare's edge (proxy/trust/, chosen by the
+		# compose overlay from AGENTBOX_CLOUDFLARE).
+		import /etc/caddy/trust/{$AGENTBOX_TRUST}.caddy
+	}
 }
 
 {$AGENTBOX_DOMAIN} {
 	encode zstd gzip
 
+	# The client address, as Caddy worked it out, in a header of its own. A
+	# client's own copy is dropped first; the gate believes this header only on
+	# connections from this container, which shares a network with the gate
+	# alone.
+	request_header -X-Agentbox-Client-IP
+
 	# The original Host passes through unchanged — the gate and the services
 	# behind it compare a WebSocket's Origin against it — and Caddy sets
-	# X-Forwarded-For, -Proto and -Host itself, replacing any a client sent,
-	# since it trusts no proxy in front of it. The gate believes those headers
-	# only on connections from this container. WebSocket upgrades and
-	# streamed responses (terminals, long polls) pass through as they are.
-	reverse_proxy gate:7900
+	# X-Forwarded-For, -Proto and -Host itself. WebSocket upgrades and streamed
+	# responses (terminals, long polls) pass through as they are.
+	reverse_proxy gate:7900 {
+		header_up X-Agentbox-Client-IP {client_ip}
+	}
 }

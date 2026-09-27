@@ -1,0 +1,13 @@
+# Behind another reverse proxy (behind-proxy mode: the host's nginx, Caddy or
+# cloudflared; traefik mode: Traefik on the edge network). That proxy reaches
+# Caddy from a private address — the Docker network's gateway, or Traefik's
+# container — so private ranges are trusted, and X-Forwarded-For is walked from
+# the right past them: the first address that is not private is the client.
+# AGENTBOX_CLIENT_IP_HEADER, when set, is consulted after it.
+#
+# What this cannot tell apart: a client that itself has a private address (a
+# LAN, another container on the same network) can put whatever it likes
+# further left in X-Forwarded-For. See docs/security.md.
+trusted_proxies static private_ranges
+client_ip_headers X-Forwarded-For {$AGENTBOX_CLIENT_IP_HEADER}
+trusted_proxies_strict
