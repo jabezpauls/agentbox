@@ -62,6 +62,10 @@ test("with two-factor on, sign-in asks for the code and accepts it", async ({ pa
 
   try {
     expect((await gateApi(page, "POST", "/_gate/logout")).status).toBe(204);
+    // Signing in and enrolling spent three of this address's five password
+    // checks a minute (setup and confirm each take the password); the sign-in
+    // below takes three more, so it comes from an address of its own.
+    await asClient(page, "203.0.113.15");
     await page.goto("/workbench/");
     await expect(page).toHaveURL(/\/login\?next=/);
 
