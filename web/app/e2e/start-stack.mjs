@@ -137,6 +137,8 @@ const gate = spawn(process.execPath, [gateEntry], {
     GATE_ADMIN_SOCKET: path.join(root, "gate-admin.sock"),
     GATE_UPSTREAM_HOST: "127.0.0.1",
     GATE_BRIDGE_PORT: String(port),
+    // No code-server here; a spec stands one in on this port when it needs it.
+    GATE_CODE_PORT: process.env.E2E_CODE_PORT ?? "7808",
     GATE_TRUSTED_PROXIES: "127.0.0.1",
     AGENTBOX_USER: process.env.E2E_USER ?? "e2e",
     AGENTBOX_PASSWORD_HASH: seed,

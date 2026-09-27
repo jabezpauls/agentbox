@@ -26,18 +26,97 @@ describe("service workers", () => {
     expect(editor.json()).toMatchObject({ echo: "code", url: "/static/out/sw.js" });
   });
 
-  it("can never claim a scope above their script: Service-Worker-Allowed is stripped", async () => {
-    h.echoes.code.respondWith = [["Service-Worker-Allowed", "/"]];
+  it("can never claim a scope above their script: the sandbox's Service-Worker-Allowed is stripped", async () => {
     h.echoes.bridge.respondWith = [["Service-Worker-Allowed", "/"]];
+    h.echoes.terminal.respondWith = [["Service-Worker-Allowed", "/"]];
     try {
-      for (const p of ["/vscode/sw.js", "/workbench/x.js"]) {
+      for (const p of ["/workbench/x.js", "/terminal/x.js"]) {
         const res = await request(h.base, "GET", p, { headers: { cookie } });
         expect(res.status, p).toBe(200);
         expect(res.headers["service-worker-allowed"], p).toBeUndefined();
       }
     } finally {
-      h.echoes.code.respondWith = [];
       h.echoes.bridge.respondWith = [];
+      h.echoes.terminal.respondWith = [];
+    }
+  });
+
+  it("the editor's scope is moved under /vscode/, never above it", async () => {
+    const cases: Array<[string, string | undefined]> = [
+      ["/", "/vscode/"],
+      ["/_static/out/", "/vscode/_static/out/"],
+      ["https://evil.example/", undefined],
+      ["//evil.example/", undefined],
+      ["/../", undefined],
+      ["relative/", undefined],
+    ];
+    try {
+      for (const [sent, seen] of cases) {
+        h.echoes.code.respondWith = [["Service-Worker-Allowed", sent]];
+        const res = await request(h.base, "GET", "/vscode/_static/out/browser/serviceWorker.js", { headers: { cookie } });
+        expect(res.headers["service-worker-allowed"], sent).toBe(seen);
+      }
+    } finally {
+      h.echoes.code.respondWith = [];
+    }
+  });
+});
+
+describe("refusals", () => {
+  function trickle(port: number, path: string, headers = ""): Promise<{ closedAfterMs: number; status: string }> {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      let got = "";
+      const sock = net.connect(port, "127.0.0.1", () =>
+        sock.write(`POST ${path} HTTP/1.1\r\nHost: x\r\n${headers}Content-Type: application/json\r\nContent-Length: 1000000\r\n\r\n{`),
+      );
+      const drip = setInterval(() => sock.write(" "), 100);
+      sock.on("data", (d) => (got += d.toString()));
+      sock.on("error", () => {});
+      sock.on("close", () => {
+        clearInterval(drip);
+        resolve({ closedAfterMs: Date.now() - started, status: got.split("\r\n")[0] ?? "" });
+      });
+      setTimeout(() => sock.destroy(), 8_000);
+    });
+  }
+
+  it("close the connection, so a body trickling in behind them cannot hold it", async () => {
+    // Deadlines far away: only the refusal's own Connection: close can end these.
+    const hh = await startHarness({}, { timeouts: { gateRequestMs: 60_000, headersMs: 60_000 } });
+    try {
+      const upstream = await trickle(hh.port, "/workbench/api/rpc");
+      expect(upstream.status).toBe("HTTP/1.1 401 Unauthorized");
+      expect(upstream.closedAfterMs).toBeLessThan(2_000);
+      const gate = await trickle(hh.port, "/_gate/login");
+      expect(gate.status).toBe("HTTP/1.1 403 Forbidden");
+      expect(gate.closedAfterMs).toBeLessThan(2_000);
+    } finally {
+      await hh.close();
+    }
+  });
+
+  it("but an answered request leaves a keep-alive connection open, without piling up listeners", async () => {
+    const hh = await startHarness({}, { timeouts: { gateRequestMs: 300, headersMs: 300 } });
+    try {
+      let serverSide: net.Socket | null = null;
+      hh.gate.server.once("connection", (s: net.Socket) => (serverSide = s));
+      const sock = net.connect(hh.port, "127.0.0.1");
+      let got = "";
+      sock.on("data", (d) => (got += d.toString()));
+      await new Promise<void>((r) => sock.once("connect", () => r()));
+      for (let i = 0; i < 15; i++) sock.write("GET /login/assets/login.css HTTP/1.1\r\nHost: x\r\n\r\n");
+      // Idle for longer than both deadlines.
+      await new Promise((r) => setTimeout(r, 1_000));
+      sock.write("GET /login HTTP/1.1\r\nHost: x\r\n\r\n");
+      await new Promise((r) => setTimeout(r, 300));
+      expect(sock.destroyed).toBe(false);
+      expect(got.match(/HTTP\/1\.1 200 OK/g)?.length).toBe(16);
+      // Sixteen requests on one socket, and no listener left behind per request.
+      expect((serverSide as net.Socket | null)?.listenerCount("close") ?? 99).toBeLessThan(5);
+      sock.destroy();
+    } finally {
+      await hh.close();
     }
   });
 });

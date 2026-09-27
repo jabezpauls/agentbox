@@ -191,6 +191,9 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   app.addHook("onSend", async (_req, reply, payload) => {
     for (const [n, v] of SECURITY_HEADERS) if (!reply.hasHeader(n)) reply.header(n, v);
     if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
+    // A refusal closes the connection, so a body still trickling in behind it
+    // cannot hold the socket.
+    if (reply.statusCode === 302 || reply.statusCode >= 400) reply.header("connection", "close");
     return payload;
   });
 

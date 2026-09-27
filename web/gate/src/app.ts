@@ -74,6 +74,10 @@ const SOCKET_TOUCH_MS = 30_000;
 
 function plain(res: ServerResponse, status: number, text: string, extra: Record<string, string> = {}): void {
   const headers: Record<string, string> = { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...extra };
+  // Every answer here refuses or redirects a request the gate will not pass
+  // on. Closing the connection after it means a body still trickling in — to
+  // a route the gate never reads — cannot hold the socket.
+  headers.connection = "close";
   for (const [n, v] of SECURITY_HEADERS) headers[n] = v;
   res.writeHead(status, headers);
   res.end(`${text}\n`);
@@ -173,11 +177,17 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     // The whole request — its body included — must arrive in time. Watching
     // the request rather than the response matters: the gate may answer early
     // (a refused origin) while a trickled body still holds the connection.
-    const timer = setTimeout(() => req.socket.destroy(), timeouts.gateRequestMs);
+    const socket = req.socket;
+    const timer = setTimeout(() => socket.destroy(), timeouts.gateRequestMs);
     timer.unref();
-    const done = (): void => clearTimeout(timer);
-    req.once("end", done);
-    req.socket.once("close", done);
+    const stop = (): void => clearTimeout(timer);
+    // Removed again when the request ends: a keep-alive socket carries many
+    // requests, and must not collect one listener per request.
+    socket.once("close", stop);
+    req.once("end", () => {
+      stop();
+      socket.off("close", stop);
+    });
     (fastifyHandler as (req: IncomingMessage, res: ServerResponse) => void)(req, res);
   }
 
@@ -218,7 +228,12 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, 403, "request refused: it did not come from this site");
       return;
     }
-    proxyHttp(config.upstreams[r.upstream], req, res, { target: r.target, forwarded: forwarded(info) });
+    proxyHttp(config.upstreams[r.upstream], req, res, {
+      target: r.target,
+      forwarded: forwarded(info),
+      // code-server's own workers may scope themselves to /vscode/, no higher.
+      ...(r.upstream === "code" ? { serviceWorkerPrefix: EDITOR_PREFIX } : {}),
+    });
   }
 
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {

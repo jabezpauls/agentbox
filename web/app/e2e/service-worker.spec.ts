@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -64,6 +65,46 @@ test.beforeAll(async () => {
 test.afterAll(() => {
   server?.kill();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("code-server's own worker registers under /vscode/, and no higher", async ({ page }) => {
+  // A stand-in for code-server on the port the gate forwards /vscode/ to: its
+  // worker script asks for the whole of its root, as code-server's does.
+  const codePort = Number(process.env.E2E_CODE_PORT ?? 7808);
+  const editor = http.createServer((req, res) => {
+    if (req.url?.startsWith("/_static/out/browser/serviceWorker.js")) {
+      res.writeHead(200, { "content-type": "text/javascript", "service-worker-allowed": "/" });
+      res.end(`self.addEventListener("fetch", () => {});`);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<!doctype html><title>editor</title>");
+  });
+  await new Promise<void>((r) => editor.listen(codePort, "127.0.0.1", r));
+  try {
+    await signIn(page, "/vscode/");
+    const outcome = await page.evaluate(async () => {
+      const script = "_static/out/browser/serviceWorker.js";
+      const own = await navigator.serviceWorker.register(script, { scope: "./" }).then(
+        (r) => new URL(r.scope).pathname,
+        (e: Error) => `refused: ${e.message}`,
+      );
+      const root = await navigator.serviceWorker.register(script, { scope: "/" }).then(
+        (r) => new URL(r.scope).pathname,
+        (e: Error) => `refused: ${e.name}`,
+      );
+      return { own, root };
+    });
+    // Its own root is the editor's prefix: allowed, as code-server needs.
+    expect(outcome.own).toBe("/vscode/");
+    // The box's root is not: the gate rewrote "/" to "/vscode/", never passed it.
+    expect(outcome.root).toBe("refused: SecurityError");
+    await page.evaluate(async () => {
+      for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    });
+  } finally {
+    await new Promise<void>((r) => editor.close(() => r()));
+  }
 });
 
 test("the sign-in page clears workers left from before, and keeps the editor's", async ({ page, context }) => {

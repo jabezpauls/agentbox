@@ -47,13 +47,24 @@ const IDENTITY = new Set([
   "x-agentbox-client-ip",
 ]);
 
+/** Response headers the gate sets itself on everything it serves. */
+const OWN_RESPONSE_HEADERS = new Set(["referrer-policy", "x-content-type-options"]);
+
 /**
- * Response headers the gate sets itself on everything it serves, and headers
- * no upstream may send at all. `Service-Worker-Allowed` would let a worker
- * claim a scope above its own script's directory — from a page in the
- * sandbox, over the whole box, the sign-in page included.
+ * `Service-Worker-Allowed` lets a worker claim a scope above its own script's
+ * directory — from a page in the sandbox, over the whole box, the sign-in page
+ * included. So no upstream may send it as it stands. The editor is served
+ * under a prefix it does not know about, and asks for `/` meaning its own
+ * root: for that upstream alone the value is moved under the prefix (`/`
+ * becomes `/vscode/`), never above it. Anything else — another upstream, or a
+ * value that is not a plain path — is dropped.
  */
-const OWN_RESPONSE_HEADERS = new Set(["referrer-policy", "x-content-type-options", "service-worker-allowed"]);
+export function serviceWorkerAllowed(value: string, prefix: string | undefined): string | null {
+  if (prefix === undefined) return null;
+  const v = value.trim();
+  if (!v.startsWith("/") || v.startsWith("//") || /[\\\s]|\.\./.test(v)) return null;
+  return `${prefix}${v}`;
+}
 
 export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ["Referrer-Policy", "no-referrer"],
@@ -81,6 +92,11 @@ export interface ProxyOptions {
   responseHeaders?: (pairs: Array<[string, string]>, upstream: IncomingMessage) => Array<[string, string]>;
   /** Called as the client sends data over an upgraded connection. */
   onClientData?: () => void;
+  /**
+   * The prefix this upstream is served under, when its service workers may
+   * scope themselves to it (the editor's); see serviceWorkerAllowed.
+   */
+  serviceWorkerPrefix?: string;
 }
 
 function connectionTokens(req: IncomingMessage): Set<string> {
@@ -129,7 +145,11 @@ export function forwardRequestHeaders(req: IncomingMessage, fwd: Forwarded, upgr
 }
 
 /** The upstream's response headers as the client will see them. */
-export function filterResponseHeaders(upstream: IncomingMessage, forUpgrade = false): Array<[string, string]> {
+export function filterResponseHeaders(
+  upstream: IncomingMessage,
+  forUpgrade = false,
+  serviceWorkerPrefix?: string,
+): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
   const raw = upstream.rawHeaders;
   for (let i = 0; i + 1 < raw.length; i += 2) {
@@ -138,6 +158,11 @@ export function filterResponseHeaders(upstream: IncomingMessage, forUpgrade = fa
     const lower = name.toLowerCase();
     if (!forUpgrade && HOP_BY_HOP.has(lower)) continue;
     if (OWN_RESPONSE_HEADERS.has(lower)) continue;
+    if (lower === "service-worker-allowed") {
+      const scoped = serviceWorkerAllowed(value, serviceWorkerPrefix);
+      if (scoped !== null) pairs.push([name, scoped]);
+      continue;
+    }
     // A process in the sandbox must not be able to plant or clear the owner's
     // session: that is a way to log them out, or into a session of its choosing.
     if (lower === "set-cookie" && setsOurCookie(value)) continue;
@@ -194,7 +219,7 @@ export function proxyHttp(upstream: Upstream, req: IncomingMessage, res: ServerR
 
   upReq.on("response", (upRes) => {
     clearTimeout(connectTimer);
-    let pairs = filterResponseHeaders(upRes);
+    let pairs = filterResponseHeaders(upRes, false, opts.serviceWorkerPrefix);
     if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
     res.writeHead(upRes.statusCode ?? 502, reasonPhrase(upRes), flatten(pairs));
     pipeline(upRes, res, () => {});
