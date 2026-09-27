@@ -20,7 +20,8 @@ jobs:
             images/workspace/agentbox-workbench \
             images/gate/agentbox-gate \
             scripts/refresh-cloudflare-ips.sh \
-            tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh
+            tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh \
+            tests/dav/clients.sh
 
       - name: Validate Compose files
         run: |
@@ -93,6 +94,24 @@ jobs:
         # spent (a real Traefik and a stand-in Cloudflare edge included), and
         # sign-in locks out.
         run: tests/proxy/gate-bypass.sh
+
+  dav-clients:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build -w bridge
+        working-directory: web
+      - name: Real WebDAV clients against /api/dav
+        # litmus and rclone, each in its own container, against the real
+        # bridge build — what agentbox mount relies on.
+        run: tests/dav/clients.sh
 
   web:
     runs-on: ubuntu-latest
