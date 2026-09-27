@@ -1,6 +1,7 @@
-import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import type { ListeningPort } from "@workbench/shared";
+import { mapLimit } from "./files/entries.js";
 
 /** A raw LISTEN row from `/proc/net/tcp` or `/proc/net/tcp6`. */
 export interface ProcNetTcpRow {
@@ -83,63 +84,66 @@ export function parseProcNetTcp(text: string): ProcNetTcpRow[] {
 
 const PROC_TCP_FILES = ["/proc/net/tcp", "/proc/net/tcp6"];
 
-function readFileOrNull(file: string): string | null {
+async function readFileOrNull(file: string): Promise<string | null> {
   try {
-    return fs.readFileSync(file, "utf8");
+    return await fsp.readFile(file, "utf8");
   } catch {
     return null;
   }
 }
 
 /**
- * Map socket inodes to owning pids by scanning each numeric `/proc/<pid>/fd`
- * symlink for `socket:[inode]`. Failures for processes owned by other users are
- * ignored, so
- * unmapped sockets simply come back with a null pid.
+ * Map the listening sockets' inodes to owning pids by scanning each numeric
+ * `/proc/<pid>/fd` symlink for `socket:[inode]`. Every process's descriptors
+ * is thousands of small reads, so they are made without blocking and the scan
+ * stops looking once every wanted socket is found. Failures for processes
+ * owned by other users are ignored, so unmapped sockets come back with a null
+ * pid. A socket held by several processes (a server and its forks) goes to
+ * the lowest pid, the one that opened it.
  */
-function buildInodePidMap(): Map<number, number> {
+async function buildInodePidMap(wanted: Set<number>): Promise<Map<number, number>> {
   const map = new Map<number, number>();
   let pids: string[];
   try {
-    pids = fs.readdirSync("/proc");
+    pids = (await fsp.readdir("/proc")).filter((n) => /^\d+$/.test(n));
   } catch {
     return map;
   }
-  for (const name of pids) {
-    if (!/^\d+$/.test(name)) continue;
+  await mapLimit(pids, 16, async (name) => {
+    if (map.size >= wanted.size) return;
     const pid = Number(name);
     let fds: string[];
     try {
-      fds = fs.readdirSync(`/proc/${name}/fd`);
+      fds = await fsp.readdir(`/proc/${name}/fd`);
     } catch {
-      continue;
+      return;
     }
     for (const fd of fds) {
       let link: string;
       try {
-        link = fs.readlinkSync(`/proc/${name}/fd/${fd}`);
+        link = await fsp.readlink(`/proc/${name}/fd/${fd}`);
       } catch {
         continue;
       }
       const match = /^socket:\[(\d+)\]$/.exec(link);
-      if (match) {
-        const inode = Number(match[1]);
-        if (!map.has(inode)) map.set(inode, pid);
-      }
+      if (!match) continue;
+      const inode = Number(match[1]);
+      const held = map.get(inode);
+      if (wanted.has(inode) && (held === undefined || pid < held)) map.set(inode, pid);
     }
-  }
+  });
   return map;
 }
 
-function readComm(pid: number): string | null {
-  const raw = readFileOrNull(`/proc/${pid}/comm`);
+async function readComm(pid: number): Promise<string | null> {
+  const raw = await readFileOrNull(`/proc/${pid}/comm`);
   return raw ? raw.trim() || null : null;
 }
 
 /** The working directory of a pid, or null when `/proc` will not reveal it. */
-function readCwd(pid: number): string | null {
+async function readCwd(pid: number): Promise<string | null> {
   try {
-    return fs.readlinkSync(`/proc/${pid}/cwd`);
+    return await fsp.readlink(`/proc/${pid}/cwd`);
   } catch {
     return null;
   }
@@ -208,7 +212,7 @@ export async function listListeningPorts(opts: {
   const rows: ProcNetTcpRow[] = [];
   let readable = false;
   for (const file of PROC_TCP_FILES) {
-    const text = readFileOrNull(file);
+    const text = await readFileOrNull(file);
     if (text !== null) {
       readable = true;
       rows.push(...parseProcNetTcp(text));
@@ -216,21 +220,18 @@ export async function listListeningPorts(opts: {
   }
   if (rows.length === 0) return { ports: [], readable };
 
-  const inodePid = buildInodePidMap();
-  const commCache = new Map<number, string | null>();
-  const cwdCache = new Map<number, string | null>();
+  const inodePid = await buildInodePidMap(new Set(rows.map((r) => r.inode)));
+  const owners = new Map<number, { process: string | null; cwd: string | null }>();
+  for (const pid of new Set(inodePid.values())) {
+    owners.set(pid, { process: await readComm(pid), cwd: await readCwd(pid) });
+  }
 
   const byPort = new Map<number, ListeningPort>();
   for (const row of rows) {
     const pid = inodePid.get(row.inode) ?? null;
-    let process: string | null = null;
-    let cwd: string | null = null;
-    if (pid !== null) {
-      if (!commCache.has(pid)) commCache.set(pid, readComm(pid));
-      process = commCache.get(pid) ?? null;
-      if (!cwdCache.has(pid)) cwdCache.set(pid, readCwd(pid));
-      cwd = cwdCache.get(pid) ?? null;
-    }
+    const owner = pid === null ? undefined : owners.get(pid);
+    const process = owner?.process ?? null;
+    const cwd = owner?.cwd ?? null;
     const entry: ListeningPort = {
       port: row.port,
       pid,

@@ -25,6 +25,8 @@ export interface ProjectsDeps {
   snapshot: () => Promise<Pick<SessionSnapshot, "panes">>;
   /** Listening sockets with their owning process's cwd. */
   scanPorts: () => Promise<ListeningPort[]>;
+  /** How long one scan is reused (2 s by default). */
+  portsTtlMs?: number;
   events: BridgeEvents;
   /** The git binary (tests). */
   git?: string;
@@ -84,8 +86,22 @@ export function parseProgress(line: string): { stage: string; percent: number } 
  */
 export class Projects {
   private readonly clones = new Map<string, { name: string; child: ChildProcess }>();
+  private scan: { at: number; value: Promise<ListeningPort[]> } | null = null;
 
   constructor(private readonly deps: ProjectsDeps) {}
+
+  /**
+   * Listening ports with their owners' working directories. A scan reads
+   * every process's descriptors, so one is shared for a couple of seconds —
+   * Home asks for the cards more often than servers come and go.
+   */
+  private ports(): Promise<ListeningPort[]> {
+    const now = Date.now();
+    if (!this.scan || now - this.scan.at > (this.deps.portsTtlMs ?? 2000)) {
+      this.scan = { at: now, value: this.deps.scanPorts().catch(() => [] as ListeningPort[]) };
+    }
+    return this.scan.value;
+  }
 
   private get root(): string {
     return this.deps.files.roots.workspace.path;
@@ -105,7 +121,7 @@ export class Projects {
       .filter((n) => !n.startsWith("."));
     const [snap, ports] = await Promise.all([
       this.deps.snapshot().catch(() => ({ panes: [] as PaneInfo[] })),
-      this.deps.scanPorts().catch(() => [] as ListeningPort[]),
+      this.ports(),
     ]);
     const projects = await mapLimit(names, 4, (name) => this.describe(name, rootReal, snap.panes, ports).catch(() => null));
     return projects

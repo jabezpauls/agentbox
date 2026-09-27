@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -75,6 +75,17 @@ describe("isSystemPort", () => {
     expect(
       isSystemPort({ port: 3000, systemPorts: set(), cwd: "/workspace-evil/app", workspaceRoot: "/workspace" }),
     ).toBe(true);
+  });
+});
+
+describe("listListeningPorts without blocking", () => {
+  it("reads /proc with no synchronous calls", async () => {
+    const calls = ["readdirSync", "readlinkSync", "readFileSync"].map((m) => vi.spyOn(fs, m as "readdirSync"));
+    const scan = await listListeningPorts({ systemPorts: [] });
+    const sync = calls.reduce((n, c) => n + c.mock.calls.length, 0);
+    for (const c of calls) c.mockRestore();
+    expect(scan.readable).toBe(true);
+    expect(sync).toBe(0);
   });
 });
 

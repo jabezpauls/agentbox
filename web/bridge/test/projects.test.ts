@@ -113,6 +113,27 @@ describe("the project cards", () => {
     expect(notes).toMatchObject({ git: null, agents: [], listeners: [] });
   });
 
+  it("reuses a port scan for a moment rather than rescanning for every request", async () => {
+    let scans = 0;
+    const projects = new Projects({
+      files: f.files,
+      snapshot: async () => ({ panes: [] }),
+      scanPorts: async () => {
+        scans += 1;
+        return [];
+      },
+      events: new BridgeEvents(),
+      portsTtlMs: 150,
+    });
+    await projects.list();
+    await projects.list();
+    await projects.list();
+    expect(scans).toBe(1);
+    await new Promise((r) => setTimeout(r, 200));
+    await projects.list();
+    expect(scans).toBe(2);
+  });
+
   it("still lists projects when herdr and /proc cannot answer", async () => {
     const projects = new Projects({
       files: f.files,
