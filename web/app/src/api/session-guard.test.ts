@@ -7,7 +7,7 @@ function fakeWindow(responses: Response[]) {
   const fetchMock = vi.fn(async () => responses.shift() ?? new Response("{}"));
   const win = {
     fetch: fetchMock,
-    location: { pathname: "/workbench/", search: "?review=abc", assign },
+    location: { pathname: "/workbench", search: "?review=abc", assign },
     document: {
       visibilityState: "visible",
       addEventListener: (type: string, fn: () => void) => (listeners[type] = fn),
@@ -22,7 +22,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("the session guard", () => {
   it("builds a sign-in link that comes back to the same place", () => {
-    expect(loginUrl({ pathname: "/workbench/", search: "?review=abc" })).toBe("/login?next=%2Fworkbench%2F%3Freview%3Dabc");
+    expect(loginUrl({ pathname: "/workbench", search: "?review=abc" })).toBe("/login?next=%2Fworkbench%3Freview%3Dabc");
   });
 
   it("tells the gate's answer apart from any other 401", () => {
@@ -34,11 +34,11 @@ describe("the session guard", () => {
   it("sends the page to sign in once, and still hands the response back", async () => {
     const { win, assign } = fakeWindow([signInFirst(), signInFirst()]);
     installSessionGuard(win);
-    const res = await win.fetch("/workbench/api/health");
+    const res = await win.fetch("/api/health");
     expect(res.status).toBe(401);
-    await win.fetch("/workbench/api/health");
+    await win.fetch("/api/health");
     expect(assign).toHaveBeenCalledTimes(1);
-    expect(assign).toHaveBeenCalledWith("/login?next=%2Fworkbench%2F%3Freview%3Dabc");
+    expect(assign).toHaveBeenCalledWith("/login?next=%2Fworkbench%3Freview%3Dabc");
   });
 
   it("leaves ordinary answers alone", async () => {

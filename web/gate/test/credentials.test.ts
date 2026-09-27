@@ -120,7 +120,7 @@ describe("sensitive account changes", () => {
     h = await startHarness();
     const cookie = await login(h);
     const start = (await request(h.base, "POST", "/_gate/device/start", { body: { name: "cli" } })).json<{ userCode: string }>();
-    expect((await request(h.base, "GET", "/workbench/api/health", { headers: { cookie } })).status).toBe(200);
+    expect((await request(h.base, "GET", "/api/health", { headers: { cookie } })).status).toBe(200);
     expect((await request(h.base, "GET", "/_gate/sessions", { headers: { cookie } })).status).toBe(200);
     expect((await as(h, cookie, "DELETE", "/_gate/sessions?others=1")).status).toBe(200);
     expect((await as(h, cookie, "POST", "/_gate/device/deny", { userCode: start.userCode })).status).toBe(200);

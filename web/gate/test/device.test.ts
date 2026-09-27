@@ -73,7 +73,7 @@ describe("the device login", () => {
     expect(through.json<{ headers: Record<string, string> }>().headers.authorization).toBeUndefined();
     expect((await request(h.base, "GET", "/_gate/version", { headers: bearer })).json()).toEqual({ version: "9.9.9-test" });
     // No Origin needed: a token is not an ambient credential.
-    expect((await request(h.base, "POST", "/workbench/api/rpc", { headers: bearer, body: "{}" })).status).toBe(200);
+    expect((await request(h.base, "POST", "/api/rpc", { headers: bearer, body: "{}" })).status).toBe(200);
     const ws = await openWs(`ws://127.0.0.1:${h.port}/terminal/ws`, bearer);
     expect("ws" in ws).toBe(true);
     if ("ws" in ws) ws.ws.close();

@@ -15,7 +15,7 @@ afterAll(async () => h.close());
 describe("service workers", () => {
   it("are refused their script anywhere but the editor, and never reach the sandbox", async () => {
     const before = h.allSeen().length;
-    for (const p of ["/sw.js", "/workbench/sw.js", "/workbench/preview/3000/sw.js", "/terminal/sw.js", "/login", "/_gate/sw.js", "/cli/agentbox.mjs"]) {
+    for (const p of ["/sw.js", "/workbench/sw.js", "/preview/3000/sw.js", "/terminal/sw.js", "/login", "/_gate/sw.js", "/cli/agentbox.mjs"]) {
       const res = await request(h.base, "GET", p, { headers: { cookie, "service-worker": "script" } });
       expect(res.status, p).toBe(403);
     }
@@ -103,7 +103,7 @@ describe("refusals", () => {
     // Deadlines far away: only the refusal's own Connection: close can end these.
     const hh = await startHarness({}, { timeouts: { gateRequestMs: 60_000, headersMs: 60_000 } });
     try {
-      const upstream = await trickle(hh.port, "/workbench/api/rpc");
+      const upstream = await trickle(hh.port, "/api/rpc");
       expect(upstream.status).toBe("HTTP/1.1 401 Unauthorized");
       expect(upstream.closedAfterMs).toBeLessThan(2_000);
       const gate = await trickle(hh.port, "/_gate/login");
@@ -141,7 +141,7 @@ describe("refusals", () => {
 
 describe("same-origin form posts", () => {
   it("are accepted with Origin: null when the browser says Sec-Fetch-Site: same-origin", async () => {
-    const res = await request(h.base, "POST", "/workbench/api/thing", {
+    const res = await request(h.base, "POST", "/api/thing", {
       headers: { cookie, origin: "null", "sec-fetch-site": "same-origin", "content-type": "application/x-www-form-urlencoded" },
       body: "a=1",
     });
@@ -150,7 +150,7 @@ describe("same-origin form posts", () => {
 
   it("are refused with Origin: null from an opaque document, which the browser marks cross-site", async () => {
     for (const site of ["cross-site", "same-site", "none"]) {
-      const res = await request(h.base, "POST", "/workbench/api/thing", {
+      const res = await request(h.base, "POST", "/api/thing", {
         headers: { cookie, origin: "null", "sec-fetch-site": site },
         body: "a=1",
       });
@@ -215,7 +215,7 @@ describe("deadlines", () => {
             host: "127.0.0.1",
             port: hh.port,
             method: "POST",
-            path: "/workbench/api/upload",
+            path: "/api/upload",
             headers: { cookie: c, origin: hh.base, "content-length": "10" },
             agent: false,
           },

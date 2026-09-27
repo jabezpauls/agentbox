@@ -21,14 +21,14 @@ describe("without a session", () => {
   });
 
   it("a script's request gets a 401 that says where to sign in", async () => {
-    const res = await request(h.base, "GET", "/workbench/api/health", { headers: { accept: "application/json" } });
+    const res = await request(h.base, "GET", "/api/health", { headers: { accept: "application/json" } });
     expect(res.status).toBe(401);
     expect(res.headers["x-agentbox-login"]).toBe("/login");
   });
 
   it("reaches no upstream by any route", async () => {
     const before = h.allSeen().length;
-    for (const p of ["/", "/vscode/", "/terminal/", "/terminal/ws", "/shell/", "/monitor/", "/workbench/api/health", "/s/0123456789abcdef0123456789abcdef/", "/a/abc/"]) {
+    for (const p of ["/", "/vscode/", "/terminal/", "/terminal/ws", "/shell/", "/monitor/", "/api/health", "/s/0123456789abcdef0123456789abcdef/", "/a/abc/"]) {
       for (const method of ["GET", "POST", "PUT", "DELETE", "OPTIONS"]) {
         const res = await request(h.base, method, p, { headers: { origin: h.base } });
         expect([302, 401], `${method} ${p}`).toContain(res.status);
@@ -69,7 +69,7 @@ describe("without a session", () => {
       { authorization: "Bearer abx_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
       { authorization: "Bearer not-a-token" },
     ]) {
-      expect((await request(h.base, "GET", "/workbench/api/health", { headers })).status).toBe(401);
+      expect((await request(h.base, "GET", "/api/health", { headers })).status).toBe(401);
     }
   });
 
@@ -89,7 +89,7 @@ describe("with a session", () => {
       ["/terminal/", "terminal", "/terminal/"],
       ["/shell/token", "shell", "/shell/token"],
       ["/monitor/", "monitor", "/monitor/"],
-      ["/workbench/api/health", "bridge", "/workbench/api/health"],
+      ["/api/health", "bridge", "/api/health"],
       ["/", "bridge", "/"],
       ["/api/files/list?path=%2Fworkspace", "bridge", "/api/files/list?path=%2Fworkspace"],
     ];
@@ -107,7 +107,7 @@ describe("with a session", () => {
   });
 
   it("strips every front-door credential before the sandbox sees the request", async () => {
-    const res = await request(h.base, "GET", "/workbench/api/health", {
+    const res = await request(h.base, "GET", "/api/health", {
       headers: {
         cookie: `theme=dark; ${cookie}; __Secure-agentbox-app=grant; other=1`,
         "proxy-authorization": "Basic eA==",
@@ -126,7 +126,7 @@ describe("with a session", () => {
   });
 
   it("forwards request bodies intact", async () => {
-    const res = await request(h.base, "POST", "/workbench/api/rpc", {
+    const res = await request(h.base, "POST", "/api/rpc", {
       headers: sameOrigin(h, { cookie }),
       body: { method: "session.snapshot", params: {} },
     });
@@ -142,7 +142,7 @@ describe("with a session", () => {
             host: "127.0.0.1",
             port: h.port,
             method,
-            path: "/workbench/api/thing",
+            path: "/api/thing",
             headers: { cookie, origin: h.base, "transfer-encoding": "chunked", "content-type": "text/plain" },
             agent: false,
           },
@@ -164,11 +164,11 @@ describe("with a session", () => {
   it("refuses a state-changing request from another site, and it never reaches the sandbox", async () => {
     const before = h.allSeen().length;
     for (const headers of [{ cookie }, { cookie, origin: "https://evil.example" }, { cookie, origin: "null" }, { cookie, "sec-fetch-site": "cross-site" }]) {
-      const res = await request(h.base, "POST", "/workbench/api/rpc", { headers, body: "{}" });
+      const res = await request(h.base, "POST", "/api/rpc", { headers, body: "{}" });
       expect(res.status).toBe(403);
     }
     expect(h.allSeen().length).toBe(before);
-    const ok = await request(h.base, "POST", "/workbench/api/rpc", { headers: { cookie, "sec-fetch-site": "same-origin" }, body: "{}" });
+    const ok = await request(h.base, "POST", "/api/rpc", { headers: { cookie, "sec-fetch-site": "same-origin" }, body: "{}" });
     expect(ok.status).toBe(200);
   });
 
@@ -179,7 +179,7 @@ describe("with a session", () => {
       ["Set-Cookie", "app-session=kept; Path=/"],
     ];
     try {
-      const res = await request(h.base, "GET", "/workbench/api/health", { headers: { cookie } });
+      const res = await request(h.base, "GET", "/api/health", { headers: { cookie } });
       expect(res.headers["set-cookie"]).toEqual(["app-session=kept; Path=/"]);
     } finally {
       h.echoes.bridge.respondWith = [];
@@ -187,7 +187,7 @@ describe("with a session", () => {
   });
 
   it("adds the gate's security headers, and frame-ancestors on HTML", async () => {
-    const json = await request(h.base, "GET", "/workbench/api/health", { headers: { cookie } });
+    const json = await request(h.base, "GET", "/api/health", { headers: { cookie } });
     expect(json.headers["referrer-policy"]).toBe("no-referrer");
     expect(json.headers["x-content-type-options"]).toBe("nosniff");
     expect(json.headers["content-security-policy"]).toBeUndefined();
