@@ -58,9 +58,11 @@ services:
       - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.average=60
       - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.burst=120
       - traefik.http.middlewares.agentbox-ratelimit-cf-off.ratelimit.period=1s
+      # HSTS stays with whatever terminates TLS. No Referrer-Policy here: the
+      # gate sets its own, `same-origin` on its sign-in and approval pages so
+      # their forms carry a real Origin, and Traefik's would override it.
       - traefik.http.middlewares.agentbox-headers.headers.stsseconds=31536000
       - traefik.http.middlewares.agentbox-headers.headers.stsincludesubdomains=false
-      - traefik.http.middlewares.agentbox-headers.headers.referrerpolicy=no-referrer
       - traefik.http.middlewares.agentbox-headers.headers.contenttypenosniff=true
 
 networks:

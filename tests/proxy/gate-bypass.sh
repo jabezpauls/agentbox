@@ -496,13 +496,23 @@ if [ "$RUN_TRAEFIK" = 1 ]; then
     start_caddy "$ROOT/proxy/Caddyfile.behind-proxy" test-traefik-cloudflare || fail "caddy did not start"
     fresh_gate || fail "the gate did not come back"
     mkdir -p "$WORK/traefik"
-    cat > "$WORK/traefik/dynamic.yml" <<'EOF'
+    # The response headers the traefik overlay sets, taken from its labels, so
+    # one that would override the gate's own shows up here.
+    overlay_headers="$(sed -n 's/^ *- traefik\.http\.middlewares\.agentbox-headers\.headers\.\([a-z]*\)=\(.*\)$/        \1: \2/p' \
+        "$ROOT/docker-compose.traefik.yml")"
+    [ -n "$overlay_headers" ] || fail "no agentbox-headers labels found in docker-compose.traefik.yml"
+    cat > "$WORK/traefik/dynamic.yml" <<EOF
 http:
   routers:
     agentbox:
-      rule: PathPrefix(`/`)
+      rule: PathPrefix(\`/\`)
       entryPoints: [web]
       service: agentbox
+      middlewares: [agentbox-headers]
+  middlewares:
+    agentbox-headers:
+      headers:
+$overlay_headers
   services:
     agentbox:
       loadBalancer:
@@ -522,6 +532,14 @@ EOF
     if ! wait_for "http://127.0.0.1:$TPORT/login"; then
         fail "traefik did not route to the proxy"; docker logs "$TRAEFIK_C" >&2 || true
     else
+        # The sign-in page's forms need their real Origin: the gate serves it
+        # with Referrer-Policy: same-origin, and the overlay must not replace it.
+        rp="$(curl -s -D - -o /dev/null "http://127.0.0.1:$TPORT/login" | tr -d '\r' | grep -i '^referrer-policy:' | sed 's/^[^:]*: *//' | paste -sd, -)"
+        if [ "$rp" = same-origin ]; then
+            pass "through Traefik, the sign-in page keeps the gate's Referrer-Policy: same-origin"
+        else
+            fail "through Traefik, the sign-in page's Referrer-Policy is '$rp'"
+        fi
         # A client that reaches Traefik directly, forging Cloudflare's header
         # and X-Forwarded-For anew each time: Traefik appends its real address,
         # Caddy finds it untrusted, and that is the key.
