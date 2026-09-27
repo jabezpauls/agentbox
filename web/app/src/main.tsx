@@ -5,6 +5,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "./theme/tokens.css";
 import "./app.css";
+import "./styles/shell.css";
 import { App } from "./App.tsx";
 import { installSessionGuard } from "./api/session-guard.ts";
 

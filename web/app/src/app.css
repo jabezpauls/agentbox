@@ -298,20 +298,16 @@
 
 /* --- shell ----------------------------------------------------------------- */
 
-.shell {
+/* The Workbench surface: its sidebar and the stage (tab bar, panes, composer). */
+.wb {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
-.shell[data-sidebar="closed"] {
-  grid-template-columns: 1fr;
-}
-.shell[data-inspector="open"] {
-  grid-template-columns: var(--sidebar-w) 1fr var(--inspector-w);
-}
-.shell[data-sidebar="closed"][data-inspector="open"] {
-  grid-template-columns: 1fr var(--inspector-w);
+.wb[data-sidebar="closed"] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .sidebar {
@@ -321,7 +317,7 @@
   background: var(--surface);
   overflow: hidden;
 }
-.shell[data-sidebar="closed"] .sidebar {
+.wb[data-sidebar="closed"] .sidebar {
   display: none;
 }
 
@@ -349,26 +345,29 @@
 
 .sidebar-inner {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
 }
 
 .sidebar-head {
   display: flex;
   align-items: center;
+  gap: 2px;
   height: var(--tabbar-h);
-  padding: 0 var(--sp-3);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
   border-bottom: 1px solid var(--border);
 }
-.brand {
+.sidebar-title {
+  flex: 1;
+  margin: 0;
   font-size: var(--fs-md);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 
 /* The drag edge lives inside the sidebar so the cursor lands on it without a
    layout column of its own. The width transition is suppressed while dragging
-   (see .shell[data-resizing]) so the panel tracks the pointer 1:1. */
+   (see .wb[data-resizing]) so the panel tracks the pointer 1:1. */
 .sidebar-resize {
   position: absolute;
   top: 0;
@@ -900,12 +899,13 @@
 /* --- responsive: sidebar becomes a sheet ----------------------------------- */
 
 @media (max-width: 900px) {
-  .shell,
-  .shell[data-sidebar="open"] {
+  .wb,
+  .wb[data-sidebar="open"] {
     grid-template-columns: 1fr;
   }
+  /* A sheet over the stage, inside the surface: the rail stays reachable. */
   .sidebar {
-    position: fixed;
+    position: absolute;
     inset: 0 auto 0 0;
     z-index: var(--z-float);
     width: min(var(--sidebar-w), 82vw);
@@ -916,13 +916,13 @@
   .sidebar-resize {
     display: none;
   }
-  .shell[data-sidebar="open"] .sidebar {
+  .wb[data-sidebar="open"] .sidebar {
     display: block;
     transform: translateX(0);
   }
-  .shell[data-sidebar="open"] .sidebar-scrim {
+  .wb[data-sidebar="open"] .sidebar-scrim {
     display: block;
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: var(--z-scrim);
     border: 0;
@@ -1773,6 +1773,10 @@
 .toast.is-error {
   --st: var(--danger);
 }
+.toast.is-success {
+  --st: var(--success);
+}
+.toast.is-info,
 .toast.is-app {
   --st: var(--accent);
 }
@@ -2476,20 +2480,4 @@
 .review-actions {
   display: flex;
   gap: var(--sp-2);
-}
-
-@media (max-width: 900px) {
-  .shell[data-inspector="open"],
-  .shell[data-sidebar="closed"][data-inspector="open"] {
-    grid-template-columns: 1fr;
-  }
-  .inspector {
-    position: fixed;
-    inset: 0;
-    z-index: var(--z-float);
-    border-left: 0;
-  }
-  .inspector-resize {
-    display: none;
-  }
 }

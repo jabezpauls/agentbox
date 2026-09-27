@@ -16,6 +16,7 @@ import { machine, reflectHud } from "../keys/machine.ts";
 import { TerminalSocket, type ConnState } from "./stream.ts";
 import { terminalTheme } from "./themes.ts";
 import { registerTerminal } from "./registry.ts";
+import { handleChord } from "../shell/actions.ts";
 
 interface Props {
   paneId: string;
@@ -115,6 +116,13 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // swallowed from xterm (return false), so the terminal only sees input.
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true;
+        // The app's ⌃⌥ chords — another surface, the palette, the dock — work
+        // from inside a terminal too; no terminal program uses them.
+        if (handleChord(e)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
         // ⌘/Ctrl+K opens the command palette even while a terminal is focused.
         if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
           e.preventDefault();

@@ -96,7 +96,7 @@ describe("TabBar accessibility", () => {
     expect(menu).toBeInTheDocument();
 
     // Focus moves to a control outside the menu, as Tab would take it.
-    const outside = screen.getByRole("button", { name: "Toggle inspector" });
+    const outside = screen.getByRole("button", { name: "New tab" });
     fireEvent.blur(menu, { relatedTarget: outside });
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();

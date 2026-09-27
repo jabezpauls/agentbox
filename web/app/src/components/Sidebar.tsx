@@ -1,30 +1,22 @@
 import { useRef, useState } from "react";
-import { Monitor, Moon, PanelLeftClose, Sun } from "lucide-react";
+import { PanelLeftClose, Plus } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
-import type { Theme } from "../theme/useTheme.ts";
 import { WorkspaceRow } from "./WorkspaceRow.tsx";
 import { AgentList } from "./AgentList.tsx";
 
 interface Props {
-  theme: Theme;
-  onCycleTheme(): void;
   onCollapse(): void;
 }
 
-const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const;
-const THEME_LABEL = { system: "Follow the system theme", light: "Light theme", dark: "Dark theme" } as const;
-
-const CONN_TEXT = { connecting: "Connecting", open: "Connected", closed: "Reconnecting" } as const;
-const CONN_TITLE = {
-  connecting: "Opening the connection to herdr.",
-  open: "Connected to herdr.",
-  closed: "The connection dropped. Reconnecting.",
-} as const;
-
-export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
+/**
+ * The Workbench's own column: workspaces with their tabs, and every agent.
+ * The app's rail carries the brand, the theme and the connection light now,
+ * so this column is only the herdr session.
+ */
+export function Sidebar({ onCollapse }: Props) {
   const session = useApp((s) => s.session);
-  const status = useApp((s) => s.status);
+  const setUi = useApp((s) => s.setUi);
   const focusWorkspace = useApp((s) => s.focusWorkspace);
   const focusTab = useApp((s) => s.focusTab);
   const focusPane = useApp((s) => s.focusPane);
@@ -63,12 +55,21 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
     setSidebarWidth(useApp.getState().ui.sidebarWidth);
   };
 
-  const ThemeIcon = THEME_ICON[theme];
-
   return (
     <div className="sidebar-inner">
       <div className="sidebar-head">
-        <span className="brand">Workbench</span>
+        <h1 className="sidebar-title">Workbench</h1>
+        <button
+          className="icon-btn"
+          onClick={() => setUi({ dialog: { kind: "workspace.new" } })}
+          title="New workspace (⌃B ⇧N)"
+          aria-label="New workspace"
+        >
+          <Plus size={15} />
+        </button>
+        <button className="icon-btn" onClick={onCollapse} title="Hide sidebar (⌘B)" aria-label="Hide sidebar">
+          <PanelLeftClose size={15} />
+        </button>
       </div>
 
       <nav className="sidebar-scroll" aria-label="Workspaces and agents">
@@ -104,21 +105,6 @@ export function Sidebar({ theme, onCycleTheme, onCollapse }: Props) {
           <AgentList session={session} onFocusPane={focusPane} />
         </section>
       </nav>
-
-      <footer className="sidebar-foot">
-        <span className={`conn-pill is-${status}`} title={CONN_TITLE[status]}>
-          <span className="conn-dot" aria-hidden="true" />
-          {CONN_TEXT[status]}
-        </span>
-        <div className="foot-actions">
-          <button className="icon-btn" onClick={onCycleTheme} title={THEME_LABEL[theme]} aria-label={THEME_LABEL[theme]}>
-            <ThemeIcon size={15} />
-          </button>
-          <button className="icon-btn" onClick={onCollapse} title="Hide sidebar (⌘B)" aria-label="Hide sidebar">
-            <PanelLeftClose size={15} />
-          </button>
-        </div>
-      </footer>
 
       <div
         className={`sidebar-resize${resizing ? " is-dragging" : ""}`}

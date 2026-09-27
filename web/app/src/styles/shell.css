@@ -1,0 +1,676 @@
+/* The app's frame: rail, surfaces, dock, bottom bar and sheets, and the
+ * primitives every surface shares (tooltip, menu, page header). Tokens live
+ * in theme/tokens.css; the house rules are the ones at the top of app.css. */
+
+:root {
+  --rail-w: 56px;
+  --bottombar-h: 56px;
+  --page-max: 1120px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- frame ------------------------------------------------------------------ */
+
+.app {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.app-main {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Every surface in one stack. A hidden one keeps its size — terminals must
+   not see a zero-sized box — and is inert (see SurfaceHost). */
+.surfaces,
+.surface {
+  position: absolute;
+  inset: 0;
+}
+.surface {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.surface:not([data-active]) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* --- rail ------------------------------------------------------------------- */
+
+.rail {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  width: var(--rail-w);
+  min-height: 0;
+  padding: var(--sp-2) 0 var(--sp-3);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 2;
+}
+
+/* The mark: an ink tile, the only filled object in the chrome. */
+.rail-brand {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: 2px 0 var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--text);
+  color: var(--surface);
+}
+
+.rail-items,
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.rail-foot {
+  margin-top: auto;
+}
+
+.rail-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rail-item:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rail-item:active {
+    transform: scale(0.96);
+  }
+}
+.rail-item.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+/* rubl's signature: a 3px accent bar hanging off the rail's inner edge. */
+.rail-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 3px;
+  height: 20px;
+  translate: 0 -50%;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+.rail-item.is-on {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* Something on this surface needs you. A light, ringed in the rail's own
+   surface; the item's accessible name says it in words. */
+.rail-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.conn-pill.is-compact {
+  justify-content: center;
+  width: 28px;
+  height: 20px;
+  margin-top: var(--sp-2);
+  padding: 0;
+}
+
+/* --- tooltip ---------------------------------------------------------------- */
+
+.tip-anchor {
+  display: contents;
+}
+
+/* Inverted: ink ground, surface text — the one inverted surface in the app. */
+.tooltip {
+  position: fixed;
+  z-index: calc(var(--z-toast) - 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.tooltip.is-right {
+  translate: 0 -50%;
+  transform-origin: left center;
+}
+.tooltip.is-top {
+  translate: -50% -100%;
+  transform-origin: bottom center;
+}
+.tooltip.is-bottom {
+  translate: -50% 0;
+  transform-origin: top center;
+}
+.tooltip-keys {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: color-mix(in srgb, var(--surface) 68%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tooltip:not(.is-instant) {
+    animation: pop-in var(--dur-fast) var(--ease-out);
+  }
+}
+
+/* --- menu ------------------------------------------------------------------- */
+
+.menu {
+  position: fixed;
+  z-index: var(--z-float);
+  min-width: 200px;
+  max-width: 320px;
+  padding: var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+.menu:not([data-placed]) {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* The one place --ease-spring is spent: a floating surface scaling in from
+     the corner nearest what opened it. */
+  .menu[data-placed] {
+    animation: pop-in var(--dur-base) var(--ease-spring);
+  }
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.menu-item:hover,
+.menu-item:focus {
+  outline: none;
+  background: var(--surface-2);
+}
+.menu-item.is-danger {
+  color: var(--danger);
+}
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.menu-icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  flex: none;
+  color: var(--text-2);
+}
+.menu-item.is-danger .menu-icon {
+  color: inherit;
+}
+.menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-keys {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+.menu-sep {
+  height: 1px;
+  margin: var(--sp-1) 6px;
+  background: var(--border);
+}
+.menu-heading {
+  padding: 6px var(--sp-2) 2px;
+}
+
+/* --- pages ------------------------------------------------------------------ */
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.page-inner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
+}
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-5);
+}
+.page-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.page-head-text {
+  min-width: 0;
+}
+.page-title {
+  margin: 0;
+  font-size: var(--fs-page);
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--text);
+  outline: none;
+}
+.page-sub {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.page-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.page-section + .page-section {
+  margin-top: var(--sp-8);
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 28px;
+  margin-bottom: var(--sp-2);
+}
+.section-count {
+  color: var(--text-3);
+}
+
+.empty.is-compact {
+  padding: var(--sp-5) var(--sp-4);
+}
+
+.field-error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.input.is-invalid {
+  border-color: var(--danger);
+}
+.field-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+/* A 2px accent sweep along the top of whatever is waiting: shown in place of
+   blanking what is there. Static under reduced motion. */
+.progress-sweep {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 5;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.progress-sweep::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: var(--accent);
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .progress-sweep::after {
+    left: -40%;
+    width: 40%;
+    opacity: 1;
+    background: linear-gradient(90deg, transparent, var(--accent) 50%, transparent);
+    animation: sweep 1.05s var(--ease-out) infinite;
+  }
+  @keyframes sweep {
+    to {
+      left: 100%;
+    }
+  }
+}
+
+/* --- editor ----------------------------------------------------------------- */
+
+.editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg);
+}
+.editor-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface);
+}
+.editor-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  background: var(--bg);
+  text-align: center;
+}
+
+/* --- dock ------------------------------------------------------------------- */
+
+.dock {
+  grid-column: 3;
+  grid-row: 1;
+  width: var(--dock-w, 420px);
+  min-width: 0;
+  z-index: 3;
+}
+.dock-resize:focus-visible {
+  outline: none;
+  background: var(--accent);
+}
+
+/* Short of room, the dock floats over the surface rather than squeezing it. */
+@media (max-width: 1000px) {
+  .dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    max-width: calc(100% - var(--rail-w));
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* --- bottom bar and sheets -------------------------------------------------- */
+
+.bottombar {
+  display: none;
+}
+
+.sheet-scrim {
+  align-items: end;
+  padding: 0;
+}
+.sheet {
+  width: min(480px, 100%);
+  max-height: 86dvh;
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-4) max(env(safe-area-inset-bottom), var(--sp-4));
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sheet {
+    animation: sheet-up 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  @keyframes sheet-up {
+    from {
+      translate: 0 100%;
+    }
+  }
+}
+.sheet-grab {
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--sp-1);
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+}
+.sheet-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.sheet-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.sheet-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-3) var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.sheet-tile:active {
+  background: var(--surface-2);
+}
+.sheet-tile.is-active {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.sheet-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 48px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.sheet-row:last-child {
+  border-bottom: 0;
+}
+.sheet-row.is-static {
+  justify-content: space-between;
+  cursor: default;
+}
+.sheet-row.is-danger {
+  color: var(--danger);
+}
+.sheet-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+/* --- phone ------------------------------------------------------------------ */
+
+@media (max-width: 700px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) calc(var(--bottombar-h) + env(safe-area-inset-bottom));
+  }
+  .app-main {
+    grid-column: 1;
+  }
+  .rail {
+    display: none;
+  }
+  .bottombar {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    align-items: stretch;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    z-index: 2;
+  }
+  .bb-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: var(--fs-2xs);
+    font-weight: 500;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bb-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bb-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 28px;
+    border-radius: var(--r-pill);
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+  .bb-icon .rail-dot {
+    top: 2px;
+    right: 10px;
+  }
+  .bb-item.is-active {
+    color: var(--accent);
+  }
+  .bb-item.is-active .bb-icon {
+    background: var(--accent-tint);
+  }
+
+  /* The dock becomes a full-screen sheet over everything. */
+  .dock {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    max-width: none;
+    z-index: var(--z-float);
+    border-left: 0;
+    box-shadow: none;
+  }
+  .dock-resize {
+    display: none;
+  }
+
+  .page-inner {
+    padding: var(--sp-4) var(--sp-4) var(--sp-6);
+  }
+  .page-head-row {
+    flex-wrap: wrap;
+  }
+}

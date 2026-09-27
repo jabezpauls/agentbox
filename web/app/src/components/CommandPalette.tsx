@@ -22,7 +22,7 @@ const ACTIONS: { id: ActionId; label: string }[] = [
   { id: "workspace.close", label: "Close workspace" },
   { id: "agent.nextBlocked", label: "Next blocked agent" },
   { id: "sidebar.toggle", label: "Toggle sidebar" },
-  { id: "inspector.toggle", label: "Toggle inspector" },
+  { id: "inspector.toggle", label: "Toggle the dock" },
   { id: "theme.toggle", label: "Toggle theme" },
 ];
 

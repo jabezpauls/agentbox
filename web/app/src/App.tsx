@@ -1,48 +1,51 @@
 import { useEffect } from "react";
+import type { ProjectCloneEvent } from "@workbench/shared";
 import { connectEvents } from "./api/events.ts";
 import { getHealth, getSession } from "./api/client.ts";
 import { fromSnapshot } from "./store/session.ts";
 import { useApp } from "./store/app.ts";
 import { useTheme } from "./theme/useTheme.ts";
-import { Shell } from "./components/Shell.tsx";
+import { useApps } from "./apps/model.ts";
+import { useProjects } from "./projects/model.ts";
+import { AppShell } from "./shell/AppShell.tsx";
+import { installRouter } from "./shell/router.ts";
+import { useGateSession } from "./shell/session.ts";
 
 export function App() {
-  const { theme, resolved, cycle } = useTheme();
+  const { theme, resolved, cycle, set } = useTheme();
   const applyMessage = useApp((s) => s.applyMessage);
   const setStatus = useApp((s) => s.setStatus);
   const setHealth = useApp((s) => s.setHealth);
   const setUi = useApp((s) => s.setUi);
   const setThemeCycle = useApp((s) => s.setThemeCycle);
+  const setThemeSet = useApp((s) => s.setThemeSet);
+
+  useEffect(() => installRouter(), []);
 
   // Keep the store's mirror of the theme in step with the hook (the source of
-  // truth for the DOM), so other surfaces can read it. Register the cycle so
-  // actions and the palette can toggle the theme too.
+  // truth for the DOM), so other surfaces can read it. Register the cycle and
+  // the setter so actions, Settings and the palette can change it too.
   useEffect(() => {
     setUi({ theme });
   }, [theme, setUi]);
 
   useEffect(() => {
     setThemeCycle(cycle);
-    return () => setThemeCycle(null);
-  }, [cycle, setThemeCycle]);
+    setThemeSet(set);
+    return () => {
+      setThemeCycle(null);
+      setThemeSet(null);
+    };
+  }, [cycle, set, setThemeCycle, setThemeSet]);
 
-  // Learn the sharing setting and the picker's root once, and the apps.
+  // Learn the roots and the preview configuration once, and who is signed in.
   useEffect(() => {
     getHealth()
       .then(setHealth)
       .catch(() => {});
     void useApp.getState().refreshApps();
+    void useGateSession.getState().refresh();
   }, [setHealth]);
-
-  // `agentbox-review open` prints a link of the form /workbench?review=<key>.
-  // Opening the drawer on that session is what turns the link the agent handed
-  // over into the thing it meant to show.
-  useEffect(() => {
-    const key = new URLSearchParams(window.location.search).get("review");
-    if (key && /^[0-9a-f]{8}$/.test(key)) {
-      useApp.getState().setInspector({ open: true, tab: "review", reviewKey: key });
-    }
-  }, []);
 
   useEffect(() => {
     // Seed from the REST snapshot so the UI has content before the socket opens,
@@ -60,6 +63,10 @@ export function App() {
     const dispose = connectEvents({
       onMessage: (m) => {
         if (m.kind === "snapshot") socketSeeded = true;
+        // Events for the rest of the app ride the same socket.
+        const kind = (m as { kind: string }).kind;
+        if (kind === "project.clone") useProjects.getState().onClone(m as ProjectCloneEvent);
+        else if (kind === "apps.changed") void useApps.getState().refresh();
         applyMessage(m);
       },
       onStatus: setStatus,
@@ -70,5 +77,5 @@ export function App() {
     };
   }, [applyMessage, setStatus]);
 
-  return <Shell theme={theme} resolved={resolved} onCycleTheme={cycle} />;
+  return <AppShell resolved={resolved} />;
 }

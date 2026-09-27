@@ -5,6 +5,7 @@ import { getSession, listApps, makeApp, rpc, RpcError, type HealthInfo } from ".
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
 import { blockedCount, notifyTransitions, rpcErrorTitle, type Toast } from "../notify.ts";
 import type { Theme } from "../theme/useTheme.ts";
+import { setTitleCount } from "../shell/title.ts";
 
 export interface StoredToast extends Toast {
   id: string;
@@ -16,6 +17,17 @@ export interface StoredToast extends Toast {
   dedupe: string;
   /** Re-run the call that failed. Error toasts offer this as a Retry action. */
   retry?: () => void;
+  /** One action the toast offers — Undo, Open, Show. */
+  action?: { label: string; run(): void };
+  /** What clicking the toast itself does, for toasts that are not about a pane. */
+  open?: () => void;
+}
+
+export interface ToastOpts {
+  retry?: () => void;
+  dedupe?: string;
+  action?: { label: string; run(): void };
+  open?: () => void;
 }
 
 /** At most this many toasts are kept; the stack shows the newest three. */
@@ -70,6 +82,26 @@ function persistPreviewApp(id: string | null): void {
     else localStorage.removeItem(PREVIEW_APP_KEY);
   } catch {
     // Private mode or blocked storage; the choice holds for this session only.
+  }
+}
+const SEEN_KEY = "agentbox.seenDone";
+
+// Which finished agents have been looked at, across reloads, so Home does not
+// bring every finished agent back as news each time the page loads.
+function readSeen(): Record<string, number> {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => typeof e[1] === "number"));
+  } catch {
+    return {};
+  }
+}
+
+function persistSeen(seen: Record<string, number>): void {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // Blocked storage: remembered for this page only.
   }
 }
 const SIDEBAR_KEY = "workbench.sidebarWidth";
@@ -139,6 +171,8 @@ export interface AppState {
   // The theme lives in the useTheme hook (it owns the DOM). App registers its
   // cycle here so actions and the palette can toggle the theme too.
   themeCycle: (() => void) | null;
+  /** Choose a theme outright (Settings, the palette); registered by App like the cycle. */
+  themeSet: ((t: Theme) => void) | null;
   applyMessage(m: EventsMessage): void;
   setStatus(s: ConnStatus): void;
   setHealth(h: HealthInfo): void;
@@ -166,7 +200,7 @@ export interface AppState {
    * not one yet — a new app made of it (the owner's; private).
    */
   openPort(port: number, path?: string): Promise<void>;
-  pushToast(toast: Toast, opts?: { retry?: () => void; dedupe?: string }): void;
+  pushToast(toast: Toast, opts?: ToastOpts): void;
   reportRpcError(method: string, err: unknown, retry?: () => void): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
@@ -174,6 +208,7 @@ export interface AppState {
   markSeen(paneId: string): void;
   dismissToast(id: string): void;
   setThemeCycle(fn: (() => void) | null): void;
+  setThemeSet(fn: ((t: Theme) => void) | null): void;
 }
 
 // Toast ids only need to be unique within a session; the pane and kind make
@@ -184,9 +219,7 @@ function toastId(t: Toast): string {
 
 // Reflect the blocked count in the document title so a background tab shows it.
 function syncTitle(session: Session): void {
-  if (typeof document === "undefined") return;
-  const n = blockedCount(session);
-  document.title = n > 0 ? `(${n}) Workbench` : "Workbench";
+  setTitleCount(blockedCount(session));
 }
 
 // Fire a system notification per toast when the user has granted permission.
@@ -237,9 +270,10 @@ export const useApp = create<AppState>((set, get) => ({
   apps: null,
   health: null,
   ui: initialUi,
-  seenDone: {},
+  seenDone: readSeen(),
   toasts: [],
   themeCycle: null,
+  themeSet: null,
 
   applyMessage(m) {
     switch (m.kind) {
@@ -368,7 +402,14 @@ export const useApp = create<AppState>((set, get) => ({
 
   pushToast(toast, opts) {
     const dedupe = opts?.dedupe ?? `${toast.kind}:${toast.paneId}:${toast.title}:${toast.detail ?? ""}`;
-    const stored: StoredToast = { ...toast, id: toastId(toast), dedupe, ...(opts?.retry ? { retry: opts.retry } : {}) };
+    const stored: StoredToast = {
+      ...toast,
+      id: toastId(toast),
+      dedupe,
+      ...(opts?.retry ? { retry: opts.retry } : {}),
+      ...(opts?.action ? { action: opts.action } : {}),
+      ...(opts?.open ? { open: opts.open } : {}),
+    };
     set((s) => ({ toasts: mergeToast(s.toasts, stored) }));
   },
 
@@ -432,12 +473,20 @@ export const useApp = create<AppState>((set, get) => ({
         void rpc("pane.focus", { pane_id: id }).catch(() => {});
       }),
     );
+    // Looking at a finished agent is acknowledging it: it leaves "needs you".
+    if (session.agents[id]?.agent_status === "done") get().markSeen(id);
   },
 
   markSeen(paneId) {
     const { session } = get();
     const seq = session.agents[paneId]?.state_change_seq ?? 0;
-    set((s) => ({ seenDone: { ...s.seenDone, [paneId]: seq } }));
+    set((s) => {
+      // Only panes that still exist are worth remembering.
+      const seenDone: Record<string, number> = { [paneId]: seq };
+      for (const [k, v] of Object.entries(s.seenDone)) if (k !== paneId && session.panes[k]) seenDone[k] = v;
+      persistSeen(seenDone);
+      return { seenDone };
+    });
   },
 
   dismissToast(id) {
@@ -446,6 +495,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   setThemeCycle(fn) {
     set({ themeCycle: fn });
+  },
+
+  setThemeSet(fn) {
+    set({ themeSet: fn });
   },
 }));
 

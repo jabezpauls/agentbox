@@ -30,7 +30,7 @@ function apply(theme: Theme): void {
   else root.setAttribute("data-theme", theme);
 }
 
-export function useTheme(): { theme: Theme; resolved: Resolved; cycle: () => void } {
+export function useTheme(): { theme: Theme; resolved: Resolved; cycle: () => void; set: (t: Theme) => void } {
   const [theme, setTheme] = useState<Theme>(readStored);
   const [systemDark, setSystemDark] = useState<boolean>(systemPrefersDark);
 
@@ -64,5 +64,5 @@ export function useTheme(): { theme: Theme; resolved: Resolved; cycle: () => voi
     [theme, systemDark],
   );
 
-  return { theme, resolved, cycle };
+  return { theme, resolved, cycle, set: setTheme };
 }

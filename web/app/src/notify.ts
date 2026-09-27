@@ -2,10 +2,11 @@ import type { AgentStatus } from "@workbench/shared";
 import { paneTitle, type Session } from "./store/session.ts";
 
 /**
- * `error` carries an RPC failure; `app` says an app was put in Preview; the
- * others are agent state transitions.
+ * `blocked` and `done` are agent state transitions; `error` a failed call;
+ * `app` says an app was put in Preview; `info` and `success` news from the
+ * rest of the app — an upload finished, something went to the trash.
  */
-export type ToastKind = "blocked" | "done" | "error" | "app";
+export type ToastKind = "blocked" | "done" | "error" | "app" | "info" | "success";
 
 export interface Toast {
   kind: ToastKind;
