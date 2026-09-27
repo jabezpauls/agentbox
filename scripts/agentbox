@@ -41,6 +41,35 @@ set_env() {
     rm -f "$tmp"
 }
 
+# Drop a KEY=value line from .env, atomically and 0600.
+unset_env() {
+    local tmp
+    tmp="$(mktemp .env.XXXXXX)"
+    grep -v "^$1=" .env > "$tmp" || true
+    install -m 600 "$tmp" .env
+    rm -f "$tmp"
+}
+
+# real_ip_header_problem <value>: say what is wrong with a client-IP header
+# name, and succeed, if anything is (see install.sh --real-ip-header). Caddy
+# reads it alongside X-Forwarded-For and CF-Connecting-IP; naming one of those
+# again stops it starting, and it is spliced into Caddy's config.
+real_ip_header_problem() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        "") return 1 ;;
+        cf-connecting-ip)
+            echo "AGENTBOX_REAL_IP_HEADER=CF-Connecting-IP: Cloudflare's header is read with --cloudflare on (and only from Cloudflare's addresses); use that, and leave the header empty" >&2 ;;
+        x-forwarded-for)
+            echo "AGENTBOX_REAL_IP_HEADER=X-Forwarded-For: that header is always read; leave it empty (behind Cloudflare, use --cloudflare on)" >&2 ;;
+        x-agentbox-client-ip)
+            echo "AGENTBOX_REAL_IP_HEADER=X-Agentbox-Client-IP: that header is agentbox's own, written by its proxy for the gate" >&2 ;;
+        *[!a-z0-9-]*)
+            echo "AGENTBOX_REAL_IP_HEADER must be a header name (letters, digits, dashes), e.g. X-Real-IP" >&2 ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
+
 case "${1:-help}" in
     start)   shift; "${DC[@]}" up -d "$@" ;;
     stop)    shift; "${DC[@]}" stop "$@" ;;
@@ -81,6 +110,9 @@ case "${1:-help}" in
                         *) echo "--cloudflare must be on or off" >&2; exit 1 ;;
                     esac
                     PENDING+=("AGENTBOX_CLOUDFLARE=$val"); shift 2 ;;
+                --real-ip-header)
+                    real_ip_header_problem "$val" && exit 1
+                    PENDING+=("AGENTBOX_REAL_IP_HEADER=$val"); shift 2 ;;
                 --mode)
                     case "$val" in
                         standalone|behind-proxy|traefik) ;;
@@ -118,6 +150,22 @@ case "${1:-help}" in
                 set_env AGENTBOX_CLOUDFLARE off
             fi
         fi
+        # That older key also named the header Traefik's rate limit keyed on.
+        # Caddy reads AGENTBOX_REAL_IP_HEADER instead (a name it already reads,
+        # listed twice, would stop it starting): only another header moves
+        # over, and the old key goes.
+        if grep -q '^AGENTBOX_CLIENT_IP_HEADER=' .env; then
+            old="$(grep -m1 '^AGENTBOX_CLIENT_IP_HEADER=' .env | cut -d= -f2-)"
+            if ! grep -q '^AGENTBOX_REAL_IP_HEADER=' .env; then
+                case "$(printf '%s' "$old" | tr '[:upper:]' '[:lower:]')" in
+                    ""|cf-connecting-ip|x-forwarded-for) ;;
+                    *) set_env AGENTBOX_REAL_IP_HEADER "$old" ;;
+                esac
+            fi
+            unset_env AGENTBOX_CLIENT_IP_HEADER
+        fi
+        # A header set by hand is checked before anything restarts.
+        real_ip_header_problem "$(grep -m1 '^AGENTBOX_REAL_IP_HEADER=' .env | cut -d= -f2- || true)" && exit 1
         git pull --ff-only
         # Recompute the overlay in case --mode just changed.
         MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
@@ -220,8 +268,8 @@ agentbox <command>
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
   update [flags]        pull, rebuild, restart; accepts the install flags
-                        (--agents, --preview, --cloudflare, --mode, --cert-resolver,
-                        --edge-network, --cpus, --memory, --proxy-cpus,
+                        (--agents, --preview, --cloudflare, --real-ip-header, --mode,
+                        --cert-resolver, --edge-network, --cpus, --memory, --proxy-cpus,
                         --proxy-memory, --isolate-host)
   passwd [new]          set the sign-in password (prompted, or generated);
                         signs every session out

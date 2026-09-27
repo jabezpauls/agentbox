@@ -178,7 +178,7 @@ start_caddy() {
     # standalone's site address is the domain; point it at a plain listener.
     docker create --name "$CADDY" --network "$NET_FRONT" --network-alias proxy -p 127.0.0.1::8080 \
         -v "$file:/etc/caddy/Caddyfile:ro" -v "$TRUST:/etc/caddy/trust:ro" \
-        -e AGENTBOX_DOMAIN=":8080" -e AGENTBOX_TRUST="$2" -e AGENTBOX_CLIENT_IP_HEADER= \
+        -e AGENTBOX_DOMAIN=":8080" -e AGENTBOX_TRUST="$2" -e AGENTBOX_REAL_IP_HEADER= \
         "$CADDY_IMAGE" >/dev/null
     docker network connect --alias proxy "$NET_EDGE" "$CADDY"
     docker start "$CADDY" >/dev/null

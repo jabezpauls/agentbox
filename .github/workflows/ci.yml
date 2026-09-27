@@ -56,13 +56,20 @@ jobs:
         # Compose validation cannot catch a malformed Caddyfile; an undefined
         # snippet or a renamed directive only fails when the proxy starts.
         # Each Caddyfile with each trust file the overlays can choose, mounted
-        # the way docker-compose.yml mounts them.
+        # the way docker-compose.yml mounts them, with and without a
+        # --real-ip-header. The older AGENTBOX_CLIENT_IP_HEADER is set to what
+        # an .env from before may still hold: Caddy must not read it (listed
+        # twice, a header name stops Caddy starting).
         run: |
           for file in Caddyfile.standalone Caddyfile.behind-proxy; do
             for trust in standalone-off standalone-on proxied-off proxied-on; do
-              docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
-                -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" -e AGENTBOX_CLIENT_IP_HEADER= \
-                caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+              for header in "" X-Real-IP; do
+                echo "== $file $trust header=${header:-none}"
+                docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
+                  -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" \
+                  -e AGENTBOX_REAL_IP_HEADER="$header" -e AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP \
+                  caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+              done
             done
           done
 

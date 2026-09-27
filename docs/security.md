@@ -139,7 +139,11 @@ proxy.
   request arrives from; behind another proxy or Traefik, that proxy (a private
   address), and walking `X-Forwarded-For` from the right past it; behind
   Cloudflare, Cloudflare's published ranges as well, with `CF-Connecting-IP`
-  read only when every hop was trusted. Caddy writes the answer into
+  read only when every hop was trusted. An operator whose proxy writes the
+  visitor's address into a header of its own can have Caddy read it first
+  (`--real-ip-header`, `AGENTBOX_REAL_IP_HEADER`; behind another proxy only):
+  that proxy must overwrite the header on every request, or a visitor can
+  forge it and pick its own budget. Caddy writes the answer into
   `X-Agentbox-Client-IP`, dropping any copy a client sent, and the gate
   believes that header only on connections from the proxy — named `proxy` in
   compose, resolved in the background, and on a network the sandbox is not

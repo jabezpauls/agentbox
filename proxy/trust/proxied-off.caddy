@@ -3,11 +3,15 @@
 # Caddy from a private address — the Docker network's gateway, or Traefik's
 # container — so private ranges are trusted, and X-Forwarded-For is walked from
 # the right past them: the first address that is not private is the client.
-# AGENTBOX_CLIENT_IP_HEADER, when set, is consulted after it.
+#
+# AGENTBOX_REAL_IP_HEADER (install.sh --real-ip-header), when set, names a
+# header that proxy writes the client's address into; it is read first, so it
+# is believed over X-Forwarded-For. That proxy must overwrite it on every
+# request: one it passes through from the client is the client's to forge.
 #
 # What this cannot tell apart: a client that itself has a private address (a
 # LAN, another container on the same network) can put whatever it likes
 # further left in X-Forwarded-For. See docs/security.md.
 trusted_proxies static private_ranges
-client_ip_headers X-Forwarded-For {$AGENTBOX_CLIENT_IP_HEADER}
+client_ip_headers {$AGENTBOX_REAL_IP_HEADER} X-Forwarded-For
 trusted_proxies_strict

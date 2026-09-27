@@ -207,9 +207,11 @@ services:
       - front
     environment:
       AGENTBOX_DOMAIN: ${AGENTBOX_DOMAIN:-localhost}
-      # An extra header to read the client address from, after the standard
-      # ones, when the peer is a trusted proxy (see proxy/trust/).
-      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER:-}
+      # A header the operator's own proxy writes the client address into,
+      # read first when the peer is a trusted proxy (see proxy/trust/). Not
+      # AGENTBOX_CLIENT_IP_HEADER, an older key that meant something else and
+      # may still be in .env.
+      AGENTBOX_REAL_IP_HEADER: ${AGENTBOX_REAL_IP_HEADER:-}
     volumes:
       - ./proxy/trust:/etc/caddy/trust:ro
       - caddy_data:/data

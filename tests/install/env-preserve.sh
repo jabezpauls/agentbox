@@ -40,6 +40,7 @@ TZ=Asia/Kolkata
 ANTHROPIC_API_KEY=sk-ant-keepme
 OPENAI_API_KEY=
 AGENTBOX_CLIENT_IP_HEADER=X-Real-IP
+MY_OWN_SETTING=keep me
 ENV
 }
 
@@ -62,7 +63,7 @@ expect AGENTBOX_CPUS 3 "sandbox caps kept"
 expect AGENTBOX_PROXY_MEMORY 128m "proxy caps kept"
 expect ANTHROPIC_API_KEY sk-ant-keepme "API key kept"
 expect TZ Asia/Kolkata "TZ kept"
-expect AGENTBOX_CLIENT_IP_HEADER X-Real-IP "a key the installer does not manage is kept"
+expect MY_OWN_SETTING "keep me" "a key the installer does not manage is kept"
 expect AGENTBOX_PASSWORD_HASH "$HASH" "password hash kept byte-for-byte (not re-escaped)"
 expect AGENTBOX_PUBLIC_URL https://work.example.com "public URL kept"
 expect AGENTBOX_PREVIEW_MODE path "a key new to this version gets its default"
@@ -136,7 +137,7 @@ echo "behind Cloudflare: an explicit choice, the old header's meaning, or the mo
 seed   # traefik, with AGENTBOX_CLIENT_IP_HEADER=X-Real-IP added by hand
 run
 expect AGENTBOX_CLOUDFLARE off "an older .env naming another header means not behind Cloudflare"
-expect AGENTBOX_CLIENT_IP_HEADER X-Real-IP "and that header is kept (Caddy still reads it)"
+expect AGENTBOX_REAL_IP_HEADER X-Real-IP "and that header moves to AGENTBOX_REAL_IP_HEADER, which Caddy reads"
 sed -i 's/^AGENTBOX_CLIENT_IP_HEADER=.*/AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP/; /^AGENTBOX_CLOUDFLARE=/d' "$DIR/.env"
 run
 expect AGENTBOX_CLOUDFLARE on "an older .env naming CF-Connecting-IP means behind Cloudflare"
@@ -155,6 +156,60 @@ run --cloudflare on
 expect AGENTBOX_CLOUDFLARE on "--cloudflare on is written"
 run
 expect AGENTBOX_CLOUDFLARE on "and kept on the next run"
+
+echo "the older AGENTBOX_CLIENT_IP_HEADER is removed, whatever it held"
+# Caddy never reads it; left in place, it would only mislead. CF-Connecting-IP
+# and X-Forwarded-For are headers Caddy reads anyway (named twice, they would
+# stop it starting), so only another header moves over.
+for case in "CF-Connecting-IP:" "cf-connecting-ip:" "X-Forwarded-For:" "x-forwarded-for:" ":" "X-Real-IP:X-Real-IP" "True-Client-IP:True-Client-IP"; do
+    old="${case%%:*}"; moved="${case#*:}"
+    for cloudflare in "" on; do
+        # With AGENTBOX_CLOUDFLARE already recorded too: an .env an earlier
+        # build of this installer wrote kept the old key alongside it.
+        seed
+        sed -i "s/^AGENTBOX_CLIENT_IP_HEADER=.*/AGENTBOX_CLIENT_IP_HEADER=$old/" "$DIR/.env"
+        [ -n "$cloudflare" ] && echo "AGENTBOX_CLOUDFLARE=$cloudflare" >> "$DIR/.env"
+        run
+        what="AGENTBOX_CLIENT_IP_HEADER=${old:-(empty)}${cloudflare:+ with AGENTBOX_CLOUDFLARE=$cloudflare}"
+        if grep -q '^AGENTBOX_CLIENT_IP_HEADER=' "$DIR/.env"; then fail "install: $what is still in .env"; else pass "install: $what is removed"; fi
+        expect AGENTBOX_REAL_IP_HEADER "$moved" "install: $what leaves AGENTBOX_REAL_IP_HEADER='$moved'"
+        [ -n "$cloudflare" ] && expect AGENTBOX_CLOUDFLARE "$cloudflare" "install: and the recorded Cloudflare choice stands"
+    done
+done
+seed
+echo "AGENTBOX_REAL_IP_HEADER=X-Client-IP" >> "$DIR/.env"
+run
+expect AGENTBOX_REAL_IP_HEADER X-Client-IP "a header already set is not replaced by the old key's"
+
+echo "a client-IP header Caddy already reads is refused"
+cat > "$DIR/.env" <<ENV
+AGENTBOX_MODE=behind-proxy
+AGENTBOX_PASSWORD_HASH=$HASH
+ENV
+before_hdr="$(cat "$DIR/.env")"
+for bad in CF-Connecting-IP cf-connecting-ip X-Forwarded-For X-FORWARDED-FOR X-Agentbox-Client-IP "X-Real-IP X-Forwarded-For" "X}" "a:b"; do
+    if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --real-ip-header "$bad" >/dev/null 2>"$DIR/err"; then
+        fail "install accepted --real-ip-header '$bad'"
+    else
+        pass "install refuses --real-ip-header '$bad'"
+    fi
+done
+AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --real-ip-header CF-Connecting-IP >/dev/null 2>"$DIR/err" || true
+if grep -q -- "--cloudflare on" "$DIR/err"; then pass "and CF-Connecting-IP is pointed at --cloudflare on"; else fail "no pointer to --cloudflare on: $(cat "$DIR/err")"; fi
+if [ "$(cat "$DIR/.env")" = "$before_hdr" ]; then pass ".env untouched by a refused header"; else fail ".env changed by a refused header"; fi
+echo "AGENTBOX_REAL_IP_HEADER=X-Forwarded-For" >> "$DIR/.env"
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes >/dev/null 2>&1; then
+    fail "install accepted AGENTBOX_REAL_IP_HEADER=X-Forwarded-For set by hand in .env"
+else
+    pass "install refuses AGENTBOX_REAL_IP_HEADER=X-Forwarded-For set by hand in .env"
+fi
+sed -i '/^AGENTBOX_REAL_IP_HEADER=/d' "$DIR/.env"
+run --real-ip-header X-Real-IP
+expect AGENTBOX_REAL_IP_HEADER X-Real-IP "--real-ip-header X-Real-IP is written"
+run
+expect AGENTBOX_REAL_IP_HEADER X-Real-IP "and kept on the next run"
+run --real-ip-header ''
+expect AGENTBOX_REAL_IP_HEADER "" "and cleared with --real-ip-header ''"
 
 echo "bad input"
 seed
@@ -190,7 +245,8 @@ seed
 mkdir -p "$DIR/scripts"
 cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$DIR/scripts/"
 before="$(cat "$DIR/.env")"
-for args in "--mode bogus" "--preview public" "--cloudflare maybe" "--agents claude;x" "--agents claude --mode bogus"; do
+for args in "--mode bogus" "--preview public" "--cloudflare maybe" "--agents claude;x" "--agents claude --mode bogus" \
+    "--real-ip-header CF-Connecting-IP" "--real-ip-header x-forwarded-for" "--real-ip-header X-Agentbox-Client-IP" "--real-ip-header X}"; do
     # shellcheck disable=SC2086  # word-split on purpose: each entry is a flag and value
     if (cd / && "$DIR/scripts/agentbox" update $args) >/dev/null 2>&1; then
         fail "update accepted $args"
@@ -217,6 +273,35 @@ seed
 sed -i '/^AGENTBOX_CLIENT_IP_HEADER=/d' "$DIR/.env"
 (cd / && "$DIR/scripts/agentbox" update) >/dev/null 2>&1 || true
 expect AGENTBOX_CLOUDFLARE on "a traefik .env that never said becomes on"
+
+echo "agentbox update removes the older AGENTBOX_CLIENT_IP_HEADER"
+for case in "CF-Connecting-IP:" "X-Forwarded-For:" ":" "X-Real-IP:X-Real-IP"; do
+    old="${case%%:*}"; moved="${case#*:}"
+    for cloudflare in "" on; do
+        seed
+        sed -i "s/^AGENTBOX_CLIENT_IP_HEADER=.*/AGENTBOX_CLIENT_IP_HEADER=$old/" "$DIR/.env"
+        [ -n "$cloudflare" ] && echo "AGENTBOX_CLOUDFLARE=$cloudflare" >> "$DIR/.env"
+        (cd / && "$DIR/scripts/agentbox" update) >/dev/null 2>&1 || true
+        what="AGENTBOX_CLIENT_IP_HEADER=${old:-(empty)}${cloudflare:+ with AGENTBOX_CLOUDFLARE=$cloudflare}"
+        if grep -q '^AGENTBOX_CLIENT_IP_HEADER=' "$DIR/.env"; then fail "update: $what is still in .env"; else pass "update: $what is removed"; fi
+        expect AGENTBOX_REAL_IP_HEADER "$moved" "update: $what leaves AGENTBOX_REAL_IP_HEADER='$moved'"
+    done
+done
+echo "agentbox update refuses a client-IP header Caddy already reads, before restarting anything"
+for bad in CF-Connecting-IP X-Forwarded-For; do
+    seed
+    echo "AGENTBOX_REAL_IP_HEADER=$bad" >> "$DIR/.env"
+    (cd / && "$DIR/scripts/agentbox" update) >/dev/null 2>"$DIR/err" || true
+    if grep -q "AGENTBOX_REAL_IP_HEADER=$bad" "$DIR/err" && ! grep -qi "git\|fatal" "$DIR/err"; then
+        pass "update refuses AGENTBOX_REAL_IP_HEADER=$bad set by hand, before git pull"
+    else
+        fail "update did not refuse AGENTBOX_REAL_IP_HEADER=$bad: $(cat "$DIR/err")"
+    fi
+done
+if grep -q -- "--cloudflare on" "$DIR/err"; then pass "and points at --cloudflare on"; else fail "no pointer to --cloudflare on: $(cat "$DIR/err")"; fi
+seed
+(cd / && "$DIR/scripts/agentbox" update --real-ip-header X-Real-IP) >/dev/null 2>&1 || true
+expect AGENTBOX_REAL_IP_HEADER X-Real-IP "update --real-ip-header X-Real-IP is written"
 
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

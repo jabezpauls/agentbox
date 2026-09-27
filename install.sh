@@ -21,6 +21,9 @@ MEMORY="4g"
 PREVIEW_MODE="path"
 # Behind Cloudflare? on/off; empty until decided (flag, .env, or the mode's default).
 CLOUDFLARE=""
+# A header the operator's own proxy sets to the client's address (behind-proxy
+# and traefik modes); empty for none.
+REAL_IP_HEADER=""
 EDGE_NETWORK="edge-prod"
 CERT_RESOLVER="letsencrypt"
 PROXY_CPUS="1"
@@ -58,6 +61,10 @@ Run with no options for an interactive walk-through.
   --cloudflare <on|off> The hostname is proxied through Cloudflare (default on in
                         traefik mode, off otherwise); decides whose address the
                         sign-in limits count
+  --real-ip-header <h>  behind-proxy/traefik: a header your own proxy sets to the
+                        client's address and overwrites on every request (e.g.
+                        X-Real-IP); read before X-Forwarded-For. Not for
+                        Cloudflare (use --cloudflare on); default none
   --agents <list>       Coding agents to build in, comma-separated (default claude,codex)
   --isolate-host        Firewall the sandbox off the host and private networks
   --cpus <n>            Sandbox CPU ceiling per service (default 2)
@@ -99,6 +106,7 @@ while [ $# -gt 0 ]; do
             shift 2 ;;
         --preview)       flag PREVIEW_MODE "${2:-}"; shift 2 ;;
         --cloudflare)    flag CLOUDFLARE "${2:-}"; shift 2 ;;
+        --real-ip-header) flag REAL_IP_HEADER "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
         --isolate-host)  ISOLATE_HOST="true"; shift ;;
         --cpus)          flag CPUS "${2:-}"; shift 2 ;;
@@ -123,6 +131,7 @@ ENV_FILE="$INSTALL_DIR/.env"
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
 AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
 if [ -f "$ENV_FILE" ]; then
@@ -159,6 +168,24 @@ if [ -z "$CLOUDFLARE" ]; then
         CF_FROM_MODE="true"
         if [ "$MODE" = "traefik" ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
     fi
+fi
+# That older key also named the header Traefik's rate limit keyed on. Caddy now
+# reads AGENTBOX_REAL_IP_HEADER instead: a name Caddy already reads itself
+# (CF-Connecting-IP, X-Forwarded-For) listed twice would stop it starting, so
+# the old key is dropped from .env below and only another header moves over.
+# (Caddy never reads the old key, so an .env still carrying it, say after an
+# update run by an older script, starts fine.)
+if [ -f "$ENV_FILE" ] && grep -q '^AGENTBOX_CLIENT_IP_HEADER=' "$ENV_FILE" \
+    && ! grep -q '^AGENTBOX_REAL_IP_HEADER=' "$ENV_FILE"; then
+    case "$EXPLICIT" in
+        *" REAL_IP_HEADER "*) ;;
+        *)
+            OLD_IP_HEADER="$(grep -m1 '^AGENTBOX_CLIENT_IP_HEADER=' "$ENV_FILE" | cut -d= -f2-)"
+            case "$(printf '%s' "$OLD_IP_HEADER" | tr '[:upper:]' '[:lower:]')" in
+                ""|cf-connecting-ip|x-forwarded-for) ;;
+                *) REAL_IP_HEADER="$OLD_IP_HEADER" ;;
+            esac ;;
+    esac
 fi
 
 # --- Interactive walk-through -----------------------------------------------
@@ -223,6 +250,20 @@ esac
 case "$CLOUDFLARE" in
     on|off) ;;
     *) die "--cloudflare must be on or off" ;;
+esac
+# Caddy reads the header as well as X-Forwarded-For (and, with --cloudflare on,
+# CF-Connecting-IP); naming one of those again would stop it starting, and it
+# is spliced into Caddy's config, so it must be a bare header name.
+case "$(printf '%s' "$REAL_IP_HEADER" | tr '[:upper:]' '[:lower:]')" in
+    "") ;;
+    cf-connecting-ip)
+        die "--real-ip-header CF-Connecting-IP: Cloudflare's header is read with --cloudflare on (and only from Cloudflare's addresses); use that, and leave --real-ip-header empty" ;;
+    x-forwarded-for)
+        die "--real-ip-header X-Forwarded-For: that header is always read; leave --real-ip-header empty (behind Cloudflare, use --cloudflare on)" ;;
+    x-agentbox-client-ip)
+        die "--real-ip-header X-Agentbox-Client-IP: that header is agentbox's own, written by its proxy for the gate" ;;
+    *[!a-z0-9-]*)
+        die "--real-ip-header must be a header name (letters, digits, dashes), e.g. X-Real-IP" ;;
 esac
 # A password chosen on the command line is checked here, before anything is
 # written or started: the gate would refuse it only after the stack is up.
@@ -317,7 +358,8 @@ NEW_ENV="$(mktemp .env.XXXXXX)"
 if [ -f .env ]; then
     # Keep every line this installer does not manage — API keys, TZ, comments,
     # settings added by hand — exactly as it was.
-    managed_re="^(AGENTBOX_PASSWORD_HASH"
+    # AGENTBOX_CLIENT_IP_HEADER is an older key, carried over above.
+    managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_CLIENT_IP_HEADER"
     for pair in $MANAGED; do managed_re="$managed_re|${pair%%:*}"; done
     managed_re="$managed_re)="
     grep -Ev "$managed_re" .env > "$NEW_ENV" || true
@@ -338,6 +380,7 @@ AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_PREVIEW_MODE=$PREVIEW_MODE
 AGENTBOX_CLOUDFLARE=$CLOUDFLARE
+AGENTBOX_REAL_IP_HEADER=$REAL_IP_HEADER
 AGENTBOX_AGENTS=$AGENTS
 AGENTBOX_PUBLIC_URL=$PUBLIC_URL
 AGENTBOX_CPUS=$CPUS
@@ -429,6 +472,7 @@ else
 fi
 printf '  Agents    %s\n' "$AGENTS"
 printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
+[ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
 printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
 printf '  Change the password with ./scripts/agentbox passwd; two-factor is optional (see docs/install.md).\n'
 printf '\n'

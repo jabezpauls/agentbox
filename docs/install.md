@@ -27,6 +27,7 @@ prints the resolved command before it runs anything.
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
 | `--preview <off\|path>` | `path` | Kept so older commands still run. Public `/s/<token>` shares are off; see [Signing in](#signing-in). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
+| `--real-ip-header <name>` | none | behind-proxy/traefik: a header your own proxy writes the visitor's address into and overwrites on every request (e.g. `X-Real-IP`), read before `X-Forwarded-For`. Rarely needed; see [behind-proxy](#if-something-already-serves-ports-80-and-443). |
 | `--agents <list>` | `claude,codex` | Which coding agents to build into the image, comma-separated (`claude`, `codex`). `herdr` is always installed. |
 | `--isolate-host` | off | Firewall the sandbox off the host and other private networks — see below. |
 | `--cpus` / `--memory` | `2` / `4g` | Sandbox ceilings per service. |
@@ -198,9 +199,14 @@ services that guess the port. Two things your proxy must do:
   $proxy_add_x_forwarded_for;`. cloudflared sets it by itself; behind a
   Cloudflare Tunnel or an orange-cloud record, also pass `--cloudflare on`, so
   Cloudflare's addresses are skipped too. Without this, sign-in limits count
-  every visitor as one, and one visitor's failures can lock everyone out. (A
-  proxy that sends only some other header can name it in
-  `AGENTBOX_CLIENT_IP_HEADER`, which Caddy reads after `X-Forwarded-For`.)
+  every visitor as one, and one visitor's failures can lock everyone out.
+  (A proxy that writes the visitor's address into a header of its own, such
+  as nginx's `X-Real-IP`, can have Caddy read that first instead:
+  `--real-ip-header X-Real-IP`. Your proxy must then **overwrite** that header
+  on every request — nginx: `proxy_set_header X-Real-IP $remote_addr;` —
+  because one it passes through from the visitor is the visitor's to forge.
+  It is never `CF-Connecting-IP`, which is `--cloudflare on`, or
+  `X-Forwarded-For`, which is always read; the installer refuses both.)
 
 The box must be reached over HTTPS (or on `localhost`): the session cookie is
 `Secure`, and a browser will not keep it over plain HTTP.
@@ -245,7 +251,7 @@ it against `.env.example` after updating and copy across anything missing.
 To adopt a setting on an existing box, pass the install flag to `update`, which
 writes the matching `.env` key and re-applies it: `agentbox update --agents
 claude` rebuilds with just Claude, `agentbox update --mode traefik` swaps the
-overlay, and `--cloudflare`, `--isolate-host`, `--cert-resolver`,
+overlay, and `--cloudflare`, `--real-ip-header`, `--isolate-host`, `--cert-resolver`,
 `--edge-network`, `--cpus`, `--memory`, `--proxy-cpus` and `--proxy-memory`
 all work the same way. `update`
 checks every flag before it writes any of them.
@@ -269,6 +275,12 @@ and the proxy stops authenticating. What changes for you:
   `CF-Connecting-IP` there becomes `--cloudflare on`, anything else `off`, and
   a traefik install that never set it `on`, as it always assumed. Check it
   with `grep CLOUDFLARE .env`; change it with `agentbox update --cloudflare on|off`.
+  The old key itself is then removed; a header other than `CF-Connecting-IP`
+  or `X-Forwarded-For` moves to `AGENTBOX_REAL_IP_HEADER` (see
+  [behind-proxy](#if-something-already-serves-ports-80-and-443)). Caddy never
+  reads the old key, so the first update, run by the script from before this
+  change, starts cleanly with it still in `.env`; the next `agentbox update`
+  tidies it away.
 - `./scripts/agentbox backup` now includes the gate's volume (the password
   hash, sessions, two-factor, device tokens). Keep the archive as private as
   `.env`.
