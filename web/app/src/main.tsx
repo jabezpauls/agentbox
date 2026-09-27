@@ -6,6 +6,10 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./theme/tokens.css";
 import "./app.css";
 import { App } from "./App.tsx";
+import { installSessionGuard } from "./api/session-guard.ts";
+
+// Before anything fetches: a session that ended sends the page to sign in.
+installSessionGuard();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
