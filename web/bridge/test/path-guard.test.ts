@@ -58,7 +58,6 @@ beforeAll(async () => {
   dir = await fsp.mkdtemp(path.join(os.tmpdir(), "path-guard-"));
   const config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-guard.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-guard-static",
     WORKBENCH_SHARES_DIR: dir,
@@ -86,9 +85,9 @@ describe("the public-branch header", () => {
 
   it("refuses every non-share path with a 404, uniform with an unknown token", async () => {
     for (const p of [
-      "/workbench/api/health",
-      `/workbench/preview/${appPort}/`,
-      "/workbench/api/preview/shares",
+      "/api/health",
+      `/preview/${appPort}/`,
+      "/api/preview/shares",
       "/",
       `/s/${token.slice(0, 31)}/`,
       `/s/${token.toUpperCase()}/`,
@@ -102,13 +101,13 @@ describe("the public-branch header", () => {
   // The reviewer's variants: shapes Caddy's cleaned `path` matcher reads as
   // `/s/…` while the router, on the raw string, reads as something else.
   const bypasses = [
-    `/workbench/preview/${appPort}/../../../s/${token}/`,
-    `/workbench/api/health/..%2f..%2f..%2fs/${token}/`,
-    `/workbench/preview/${appPort}/%2e%2e/%2e%2e/%2e%2e/s/${token}/`,
-    `/workbench/api/health%2f..%2f..%2fs%2f${token}/`,
-    `/workbench/api/health%5c..%5cs/${token}/`,
-    `//workbench/api/health/../../s/${token}/`,
-    `/./workbench/api/health/../../s/${token}/`,
+    `/preview/${appPort}/../../../s/${token}/`,
+    `/api/health/..%2f..%2f..%2fs/${token}/`,
+    `/preview/${appPort}/%2e%2e/%2e%2e/%2e%2e/s/${token}/`,
+    `/api/health%2f..%2f..%2fs%2f${token}/`,
+    `/api/health%5c..%5cs/${token}/`,
+    `//api/health/../../s/${token}/`,
+    `/./api/health/../../s/${token}/`,
   ];
 
   for (const p of bypasses) {
@@ -121,7 +120,7 @@ describe("the public-branch header", () => {
   }
 
   it("refuses a marked websocket upgrade to a private route", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/workbench/ws/events`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/ws/events`, {
       origin: `http://127.0.0.1:${bridgePort}`,
       headers: PUBLIC,
     });
@@ -141,15 +140,15 @@ describe("the public-branch header", () => {
 
 describe("the raw-path guard", () => {
   const ambiguous = [
-    "/workbench/api/../api/health",
-    "/workbench/./api/health",
-    "/workbench/api/%2e%2e/api/health",
-    "/workbench/api%2fhealth",
-    "/workbench/api%5chealth",
-    "/workbench/api\\health",
-    "/workbench/api;x/health",
-    "/workbench//api/health",
-    `/workbench/preview/..%2f${appPort}/`,
+    "/api/../api/health",
+    "/./api/health",
+    "/api/%2e%2e/api/health",
+    "/api%2fhealth",
+    "/api%5chealth",
+    "/api\\health",
+    "/api;x/health",
+    "//api/health",
+    `/preview/..%2f${appPort}/`,
     `/s/${token};x/`,
     `/s//${token}/`,
   ];
@@ -161,11 +160,11 @@ describe("the raw-path guard", () => {
   }
 
   it("leaves a normal API path alone", async () => {
-    expect((await raw("/workbench/api/health")).status).toBe(200);
+    expect((await raw("/api/health")).status).toBe(200);
   });
 
   it("forwards an app's own encoded path past the preview prefix untouched", async () => {
-    const res = await raw(`/workbench/preview/${appPort}/files/a%2Fb;v=1`);
+    const res = await raw(`/preview/${appPort}/files/a%2Fb;v=1`);
     expect(res.status).toBe(200);
     expect(res.body).toBe("SHARED-APP /files/a%2Fb;v=1");
   });
@@ -177,7 +176,7 @@ describe("the raw-path guard", () => {
   });
 
   it("ignores the query string", async () => {
-    const res = await raw("/workbench/api/fs/dirs?path=a%2F..%2Fb");
+    const res = await raw("/api/fs/dirs?path=a%2F..%2Fb");
     expect(res.status).not.toBe(400);
   });
 });

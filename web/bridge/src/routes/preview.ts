@@ -9,7 +9,7 @@ interface PreviewParams {
 }
 
 /**
- * Reverse-proxy any locally listening port under `{base}/preview/<port>`.
+ * Reverse-proxy any locally listening port under `/preview/<port>`.
  *
  * The proxying itself lives in {@link proxyHttpRequest}/{@link proxyWebSocket}
  * (shared with the public `/s/<token>` share route); this module only maps a
@@ -39,7 +39,7 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
     return port;
   };
 
-  const proxyPrefix = (port: string): string => `${config.basePath}/preview/${port}`;
+  const proxyPrefix = (port: string): string => `/preview/${port}`;
 
   // Rebuild the upstream path straight from the raw URL (not the decoded wildcard
   // param) so percent-encoding is preserved end to end.
@@ -65,7 +65,7 @@ export async function registerPreviewRoutes(app: FastifyInstance, config: Config
 
     // Bare port: redirect to the slash form so relative asset URLs resolve.
     preview.get<{ Params: { port: string } }>("/preview/:port", (req, reply) => {
-      reply.redirect(`${config.basePath}/preview/${req.params.port}/`, 302);
+      reply.redirect(`/preview/${req.params.port}/`, 302);
     });
 
     const httpHandler = (req: FastifyRequest, reply: FastifyReply): void => {

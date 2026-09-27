@@ -50,7 +50,6 @@ beforeAll(async () => {
 
   config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-ws-origin.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-ws-origin-static",
   });
@@ -97,8 +96,8 @@ function accepted(path: string, options: ClientOptions): Promise<void> {
   });
 }
 
-const EVENTS = "/workbench/ws/events";
-const TERMINAL = "/workbench/ws/terminal?pane=w1:p1";
+const EVENTS = "/ws/events";
+const TERMINAL = "/ws/terminal?pane=w1:p1";
 
 describe("websocket origin checks", () => {
   // The preview port is only known once the upstream is listening, so each
@@ -106,7 +105,7 @@ describe("websocket origin checks", () => {
   const ROUTES: { name: string; path(): string }[] = [
     { name: "events", path: () => EVENTS },
     { name: "terminal", path: () => TERMINAL },
-    { name: "preview", path: () => `/workbench/preview/${upstreamPort}/socket` },
+    { name: "preview", path: () => `/preview/${upstreamPort}/socket` },
   ];
 
   for (const route of ROUTES) {
@@ -156,7 +155,7 @@ describe("websocket origin checks", () => {
   it("leaves plain HTTP requests on the preview route alone", async () => {
     // No Origin and no upgrade: the hook must let the request through to the
     // handler, which is what answers 400 for an out-of-range port.
-    const res = await app.inject({ method: "GET", url: "/workbench/preview/70000/" });
+    const res = await app.inject({ method: "GET", url: "/preview/70000/" });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "invalid preview port" });
   });

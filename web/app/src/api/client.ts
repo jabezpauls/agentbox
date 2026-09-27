@@ -7,7 +7,7 @@ import type {
   ReviewSessionDetail,
   SessionSnapshot,
 } from "@workbench/shared";
-import { apiUrl, basePath } from "./base.ts";
+import { apiUrl } from "./base.ts";
 
 export class RpcError extends Error {
   status: number;
@@ -132,7 +132,7 @@ export type ProbeState = "ready" | "down";
  * itself, error statuses included, and is the app's to show, so it is "ready".
  */
 export async function probePreview(port: number, path: string): Promise<ProbeState> {
-  const url = `${basePath()}/preview/${port}/${path.replace(/^\/+/, "")}`;
+  const url = `/preview/${port}/${path.replace(/^\/+/, "")}`;
   try {
     const res = await fetch(url, { method: "HEAD", cache: "no-store" });
     return res.headers.get("x-preview-upstream") === "down" ? "down" : "ready";

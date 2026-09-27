@@ -16,13 +16,13 @@ function readyProbe(): Response {
   return { status: 200, headers: new Headers() } as Response;
 }
 
-// The app derives every URL from the current location, so the panel only
-// produces the real `/workbench` prefix under a matching pathname.
+// The panel is served on the Workbench route; the proxy it opens sits at the
+// root of the origin regardless.
 function setup(previewDomain: string | null, previewSharing = false): void {
   open.mockClear();
   vi.stubGlobal("open", open);
 
-  vi.stubGlobal("location", { pathname: "/workbench/", protocol: "http:", host: "box.example" } as Location);
+  vi.stubGlobal("location", { pathname: "/workbench", protocol: "http:", host: "box.example" } as Location);
   act(() => {
     useApp.setState({
       ports: [{ port: 3000, pid: 42, process: "node", system: false, address: "127.0.0.1" }],
@@ -64,7 +64,7 @@ describe("opening a preview full screen", () => {
     await user.click(screen.getByRole("button", { name: "Open full screen" }));
     await user.click(screen.getByRole("button", { name: "Open anyway" }));
 
-    expect(open).toHaveBeenCalledWith("/workbench/preview/3000/", "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenCalledWith("/preview/3000/", "_blank", "noopener,noreferrer");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -80,7 +80,7 @@ describe("opening a preview full screen", () => {
   });
 
   it("says it couldn't read ports, not that none are listening, when /proc was unreadable", () => {
-    vi.stubGlobal("location", { pathname: "/workbench/", protocol: "http:", host: "box.example" } as Location);
+    vi.stubGlobal("location", { pathname: "/workbench", protocol: "http:", host: "box.example" } as Location);
     act(() => {
       useApp.setState({
         ports: [],

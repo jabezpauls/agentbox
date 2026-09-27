@@ -19,13 +19,12 @@ function wantedWait(raw: unknown): number {
 }
 
 /**
- * Where a person should browse to see this session. A query parameter rather
- * than a path segment: the app's assets resolve relatively, so one extra path
- * level would send the browser looking for them a directory too deep.
+ * Where a person should browse to see this session: the Workbench surface,
+ * which opens the Review panel on the key it is handed.
  */
 function sessionUrl(config: Config, req: FastifyRequest, key: string): string {
   const origin = config.publicUrl ?? `${req.protocol}://${req.headers.host ?? "127.0.0.1"}`;
-  return `${origin}${config.basePath}/?review=${key}`;
+  return `${origin}/workbench?review=${key}`;
 }
 
 /**

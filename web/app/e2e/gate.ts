@@ -7,7 +7,7 @@ export const PASSWORD = process.env.E2E_PASSWORD ?? "e2e-password-1";
 export const GATE = `http://127.0.0.1:${process.env.GATE_PORT ?? 7900}`;
 
 /** Sign in through the real page, and land where `next` points. */
-export async function signIn(page: Page, next = "/workbench/"): Promise<void> {
+export async function signIn(page: Page, next = "/"): Promise<void> {
   await page.goto(`${GATE}/login?next=${encodeURIComponent(next)}`);
   await page.getByLabel("Username").fill(USER);
   await page.getByLabel("Password").fill(PASSWORD);

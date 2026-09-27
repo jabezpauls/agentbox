@@ -67,7 +67,6 @@ beforeAll(async () => {
   work = fs.mkdtempSync(path.join(base, "wb-cliwork-"));
   const config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-cli.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-cli-static",
     WORKBENCH_REVIEW_DIR: root,
@@ -77,7 +76,7 @@ beforeAll(async () => {
   await app.listen({ host: "127.0.0.1", port: 0 });
   const addr = app.server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
-  baseUrl = `http://127.0.0.1:${port}/workbench`;
+  baseUrl = `http://127.0.0.1:${port}`;
 });
 
 afterAll(async () => {
@@ -93,7 +92,7 @@ describe("agentbox-review", () => {
     expect(opened.code).toBe(0);
     const key = /key: ([0-9a-f]{8})/.exec(opened.stdout)?.[1];
     expect(key).toBeTruthy();
-    expect(opened.stdout).toContain(`/workbench/?review=${key}`);
+    expect(opened.stdout).toContain(`/workbench?review=${key}`);
 
     const listed = await cli("list");
     expect(listed.stdout).toContain("Rollout plan");

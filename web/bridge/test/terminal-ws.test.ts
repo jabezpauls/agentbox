@@ -27,7 +27,6 @@ beforeAll(async () => {
   const config: Config = loadConfig({
     HERDR_SOCKET_PATH: h.socketPath,
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     WORKBENCH_STATIC_DIR: "/does/not/exist-workbench-static",
   });
   hub = new SessionHub(config.socketPath);
@@ -47,7 +46,7 @@ afterAll(async () => {
 });
 
 function open(pane: string): WebSocket {
-  return new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=${pane}&cols=80&rows=24`, {
+  return new WebSocket(`ws://${baseUrl}/ws/terminal?pane=${pane}&cols=80&rows=24`, {
     origin: `http://${baseUrl}`,
   });
 }
@@ -95,7 +94,7 @@ describe("terminal ws route", () => {
   });
 
   it("rejects an invalid pane id with close code 1008", async () => {
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/terminal?pane=not-a-pane&cols=80&rows=24`, {
+    const ws = new WebSocket(`ws://${baseUrl}/ws/terminal?pane=not-a-pane&cols=80&rows=24`, {
       origin: `http://${baseUrl}`,
     });
     const code = await new Promise<number>((resolve, reject) => {

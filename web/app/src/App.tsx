@@ -33,7 +33,7 @@ export function App() {
       .catch(() => {});
   }, [setHealth]);
 
-  // `agentbox-review open` prints a link of the form <base>/?review=<key>.
+  // `agentbox-review open` prints a link of the form /workbench?review=<key>.
   // Opening the drawer on that session is what turns the link the agent handed
   // over into the thing it meant to show.
   useEffect(() => {

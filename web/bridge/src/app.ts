@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import Fastify, { type FastifyInstance } from "fastify";
+import path from "node:path";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import type { ListeningPort } from "@workbench/shared";
@@ -43,6 +44,17 @@ export interface AppDeps {
   streams?: TerminalStreams;
 }
 
+/**
+ * The app must not be framed by anyone else: a hostile page that could overlay
+ * it would be clicking on live terminals and agents. Previews are framed *by*
+ * the app, and they are served by the preview route rather than the static
+ * one, so they are unaffected.
+ */
+const FRAME_GUARD: Record<string, string> = {
+  "content-security-policy": "frame-ancestors 'self'",
+  "x-frame-options": "SAMEORIGIN",
+};
+
 export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(websocket);
@@ -50,7 +62,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // the decisive half of the public `/s/` boundary, and a refusal of ambiguous
   // paths. After the websocket plugin, whose own hook wires an upgrade's socket
   // to its reply — a refusal sent before that leaves the socket dangling.
-  app.addHook("onRequest", pathGuard(config.basePath));
+  app.addHook("onRequest", pathGuard());
 
   const streams =
     deps.streams ??
@@ -78,55 +90,83 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
-  // The public share route lives at the server root, outside the base-path
-  // scope: Caddy's unauthenticated public branch forwards `/s/…` to the bridge
-  // unchanged, so it must not sit under `/workbench`.
+  // The public share route is the one route Caddy's unauthenticated public
+  // branch reaches; `/s/…` is forwarded to the bridge unchanged.
   registerPublicShareRoutes(app, config, shareDeps);
 
-  await app.register(
-    async (scope) => {
-      registerApiRoutes(scope, config, deps.hub, { ports: deps.ports });
-      registerReviewRoutes(scope, config, review);
-      registerShareApiRoutes(scope, config, shareDeps);
-      registerEventsWs(scope, deps.hub, deps.ports);
-      registerTerminalWs(scope, streams);
-      await registerPreviewRoutes(scope, config);
+  registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
+  registerReviewRoutes(app, config, review);
+  registerShareApiRoutes(app, config, shareDeps);
+  registerEventsWs(app, deps.hub, deps.ports);
+  registerTerminalWs(app, streams);
+  await registerPreviewRoutes(app, config);
 
-      if (serveStatic) {
-        // The Workbench must not be framed by anyone else: a hostile page that
-        // could overlay it would be clicking on live terminals and agents.
-        // Previews are framed *by* the app, and they are served by the preview
-        // route rather than this one, so they are unaffected.
-        const FRAME_GUARD: Record<string, string> = {
-          "content-security-policy": "frame-ancestors 'self'",
-          "x-frame-options": "SAMEORIGIN",
-        };
-
-        await scope.register(fastifyStatic, {
-          root: config.staticDir as string,
-          prefix: "/",
-          setHeaders: (res) => {
-            for (const [name, value] of Object.entries(FRAME_GUARD)) res.setHeader(name, value);
-          },
-        });
-        // SPA fallback: any GET under the prefix that is not an API, websocket,
-        // or preview route serves index.html so client-side routing works.
-        scope.setNotFoundHandler((req, reply) => {
-          const rel = req.url.split("?")[0]?.slice(config.basePath.length) ?? "";
-          if (
-            req.method === "GET" &&
-            !rel.startsWith("/api") &&
-            !rel.startsWith("/ws") &&
-            !rel.startsWith("/preview")
-          ) {
-            return reply.headers(FRAME_GUARD).type("text/html").sendFile("index.html");
-          }
-          return reply.code(404).send({ error: "not found" });
-        });
-      }
+  // The app used to live under `/workbench/`, and links into it are out there:
+  // bookmarks, and every review link an agent printed before the move. The
+  // Workbench is now the app's `/workbench` route, so anything under the old
+  // prefix lands there with its query kept — `?review=<key>` still opens the
+  // review it named. `/workbench` itself is the app's and falls through to the
+  // SPA below.
+  app.route({
+    method: ["GET", "HEAD"],
+    url: "/workbench/*",
+    handler: (req, reply) => {
+      const q = req.url.indexOf("?");
+      return reply.redirect(`/workbench${q === -1 ? "" : req.url.slice(q)}`, 301);
     },
-    { prefix: config.basePath },
-  );
+  });
+
+  if (serveStatic) {
+    await app.register(fastifyStatic, {
+      root: config.staticDir as string,
+      prefix: "/",
+      // Set per file below: the plugin's one policy would fit neither kind.
+      cacheControl: false,
+      setHeaders: (res, file) => {
+        for (const [name, value] of Object.entries(FRAME_GUARD)) res.setHeader(name, value);
+        // Built assets carry a content hash in their names, so they never
+        // change; everything else — the page that names them above all — is
+        // revalidated, or a browser keeps asking for the previous build's.
+        const hashed = file.startsWith(path.join(config.staticDir as string, "assets") + path.sep);
+        res.setHeader("cache-control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    });
+  }
+
+  // History-API routing: a navigation to any path the app owns (`/files/…`,
+  // `/apps/…`, `/settings/…`) is answered with index.html and routed on the
+  // client, so a deep link survives a reload.
+  app.setNotFoundHandler((req, reply) => {
+    if (serveStatic && isAppNavigation(req)) {
+      return reply
+        .headers({ ...FRAME_GUARD, "cache-control": "no-cache" })
+        .type("text/html")
+        .sendFile("index.html");
+    }
+    return reply.code(404).send({ error: "not found" });
+  });
 
   return app;
+}
+
+/**
+ * Paths the app never answers for: the API, the sockets, the proxies and the
+ * built assets. A miss under one of them is a real 404 — a stale asset URL
+ * should fail loudly, not parse a page as JavaScript.
+ */
+const NOT_THE_APP = /^\/(api|ws|preview|s|assets)(\/|$)/;
+
+/** Fetch destinations that are page loads rather than subresources. */
+const PAGE_DESTINATIONS = new Set(["document", "iframe", "frame"]);
+
+/** True for a GET or HEAD that should be answered with the app's index.html. */
+function isAppNavigation(req: FastifyRequest): boolean {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  const path = req.url.split("?")[0] ?? "";
+  if (NOT_THE_APP.test(path)) return false;
+  // A browser says what a request is for, so a script or image load of a path
+  // that does not exist is never handed a page. Clients that do not say (curl,
+  // older browsers) are treated as navigating.
+  const dest = req.headers["sec-fetch-dest"];
+  return typeof dest !== "string" || PAGE_DESTINATIONS.has(dest);
 }

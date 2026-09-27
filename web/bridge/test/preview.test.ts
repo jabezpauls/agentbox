@@ -89,14 +89,14 @@ beforeAll(async () => {
     }
     if (url.startsWith("/cookiepreprefixed")) {
       const p = (req.headers.host ?? "").split(":")[1] ?? "";
-      res.writeHead(200, { "set-cookie": `c=3; Path=/workbench/preview/${p}/scoped` });
+      res.writeHead(200, { "set-cookie": `c=3; Path=/preview/${p}/scoped` });
       res.end("ok");
       return;
     }
     if (url.startsWith("/preprefixed")) {
       // An upstream that already honours a preview prefix must not be doubled.
       const p = (req.headers.host ?? "").split(":")[1] ?? "";
-      res.writeHead(302, { location: `/workbench/preview/${p}/deep` });
+      res.writeHead(302, { location: `/preview/${p}/deep` });
       res.end();
       return;
     }
@@ -121,7 +121,6 @@ beforeAll(async () => {
 
   config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-preview.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-preview-static",
   });
@@ -138,14 +137,14 @@ afterAll(async () => {
 
 describe("preview proxy", () => {
   it("redirects the bare port to the slash form", async () => {
-    const res = await app.inject({ method: "GET", url: `/workbench/preview/${upstreamPort}` });
+    const res = await app.inject({ method: "GET", url: `/preview/${upstreamPort}` });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe(`/workbench/preview/${upstreamPort}/`);
+    expect(res.headers.location).toBe(`/preview/${upstreamPort}/`);
   });
 
   it("forwards the path and query with the port prefix stripped", async () => {
     const res = await fetch(
-      `http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/a/b?x=1`,
+      `http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/a/b?x=1`,
     );
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("/a/b?x=1");
@@ -153,18 +152,18 @@ describe("preview proxy", () => {
 
   it("preserves percent-encoding in the proxied path", async () => {
     const res = await fetch(
-      `http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/a%20b?x=1`,
+      `http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/a%20b?x=1`,
     );
     expect(await res.text()).toBe("/a%20b?x=1");
   });
 
   it("proxies the root path", async () => {
-    const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/`);
+    const res = await fetch(`http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/`);
     expect(await res.text()).toBe("/");
   });
 
   it("echoes a websocket message through the proxy", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/socket`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/preview/${upstreamPort}/socket`, {
       origin: `http://127.0.0.1:${bridgePort}`,
     });
     await new Promise<void>((resolve, reject) => {
@@ -182,12 +181,12 @@ describe("preview proxy", () => {
   });
 
   it("rejects an out-of-range port with 400", async () => {
-    const res = await app.inject({ method: "GET", url: "/workbench/preview/70000/" });
+    const res = await app.inject({ method: "GET", url: "/preview/70000/" });
     expect(res.statusCode).toBe(400);
   });
 
   it("rejects the bridge's own port with 400", async () => {
-    const res = await app.inject({ method: "GET", url: `/workbench/preview/${bridgePort}/` });
+    const res = await app.inject({ method: "GET", url: `/preview/${bridgePort}/` });
     expect(res.statusCode).toBe(400);
   });
 
@@ -197,7 +196,7 @@ describe("preview proxy", () => {
     });
     await new Promise<void>((resolve, reject) => {
       const client = http.get(
-        `http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/slow`,
+        `http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/slow`,
         (res) => {
           res.once("data", () => {
             client.destroy();
@@ -215,48 +214,48 @@ describe("preview proxy", () => {
     ]);
     slowClose.resolve = null;
     // ...and the bridge must keep serving.
-    const health = await app.inject({ method: "GET", url: "/workbench/api/health" });
+    const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
   });
 
   describe("header rewriting", () => {
     it("rewrites a root-relative Location into the preview prefix", async () => {
-      const { status, headers } = await rawGet(`/workbench/preview/${upstreamPort}/redirect`);
+      const { status, headers } = await rawGet(`/preview/${upstreamPort}/redirect`);
       expect(status).toBe(302);
-      expect(headers.location).toBe(`/workbench/preview/${upstreamPort}/login`);
+      expect(headers.location).toBe(`/preview/${upstreamPort}/login`);
     });
 
     it("leaves an absolute Location untouched", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/absredirect`);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/absredirect`);
       expect(headers.location).toBe("https://example.com/x");
     });
 
     it("prefixes a Set-Cookie Path with the preview prefix", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/setcookie`);
-      expect(headers["set-cookie"]).toEqual([`a=1; Path=/workbench/preview/${upstreamPort}/`]);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/setcookie`);
+      expect(headers["set-cookie"]).toEqual([`a=1; Path=/preview/${upstreamPort}/`]);
     });
 
     it("does not double-prefix a Location already inside the preview prefix", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/preprefixed`);
-      expect(headers.location).toBe(`/workbench/preview/${upstreamPort}/deep`);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/preprefixed`);
+      expect(headers.location).toBe(`/preview/${upstreamPort}/deep`);
     });
 
     it("strips a Set-Cookie Domain so it cannot widen onto the appliance host", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookiedomain`);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/cookiedomain`);
       const cookie = (headers["set-cookie"] as string[])[0]!;
       expect(cookie).not.toMatch(/domain=/i);
-      expect(cookie).toContain(`Path=/workbench/preview/${upstreamPort}/`);
+      expect(cookie).toContain(`Path=/preview/${upstreamPort}/`);
       expect(cookie).toContain("HttpOnly");
     });
 
     it("rewrites a case-insensitive Set-Cookie PATH attribute", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookieucase`);
-      expect(headers["set-cookie"]).toEqual([`b=2; Path=/workbench/preview/${upstreamPort}/app`]);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/cookieucase`);
+      expect(headers["set-cookie"]).toEqual([`b=2; Path=/preview/${upstreamPort}/app`]);
     });
 
     it("does not double-prefix a Set-Cookie Path already inside the preview prefix", async () => {
-      const { headers } = await rawGet(`/workbench/preview/${upstreamPort}/cookiepreprefixed`);
-      expect(headers["set-cookie"]).toEqual([`c=3; Path=/workbench/preview/${upstreamPort}/scoped`]);
+      const { headers } = await rawGet(`/preview/${upstreamPort}/cookiepreprefixed`);
+      expect(headers["set-cookie"]).toEqual([`c=3; Path=/preview/${upstreamPort}/scoped`]);
     });
   });
 
@@ -265,7 +264,7 @@ describe("preview proxy", () => {
     // would hand the appliance's plaintext login to whatever an agent started
     // on that port.
     it("does not forward Authorization or Cookie to the upstream", async () => {
-      const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/headers`, {
+      const res = await fetch(`http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/headers`, {
         headers: {
           authorization: "Basic dXNlcjpwYXNzd29yZA==",
           cookie: "session=secret",
@@ -279,7 +278,7 @@ describe("preview proxy", () => {
     });
 
     it("does not forward Authorization or Cookie on a websocket upgrade", async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/headers`, {
+      const ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/preview/${upstreamPort}/headers`, {
         origin: `http://127.0.0.1:${bridgePort}`,
         headers: {
           authorization: "Basic dXNlcjpwYXNzd29yZA==",
@@ -302,7 +301,7 @@ describe("preview proxy", () => {
   describe("websocket subprotocols", () => {
     it("negotiates the client subprotocol end to end", async () => {
       const ws = new WebSocket(
-        `ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/socket`,
+        `ws://127.0.0.1:${bridgePort}/preview/${upstreamPort}/socket`,
         ["vite-hmr"],
         { origin: `http://127.0.0.1:${bridgePort}` },
       );
@@ -323,7 +322,7 @@ describe("preview proxy", () => {
 
     it("propagates the upstream close code to the client", async () => {
       const ws = new WebSocket(
-        `ws://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/close4001`,
+        `ws://127.0.0.1:${bridgePort}/preview/${upstreamPort}/close4001`,
         { origin: `http://127.0.0.1:${bridgePort}` },
       );
       const code = await new Promise<number>((resolve, reject) => {

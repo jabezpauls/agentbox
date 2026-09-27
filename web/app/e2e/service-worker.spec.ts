@@ -150,7 +150,7 @@ test("a page from the sandbox cannot register a service worker", async ({ page }
   page.on("response", (r) => {
     if (r.url().endsWith("/sw.js")) scriptStatus.push(r.status());
   });
-  await page.goto(`${GATE}/workbench/preview/${port}/index.html`);
+  await page.goto(`${GATE}/preview/${port}/index.html`);
   await expect(page).toHaveTitle(/^sw-refused/, { timeout: 15_000 });
   // Refused by the gate, for being a worker's script: the same file loads fine
   // as an ordinary script.

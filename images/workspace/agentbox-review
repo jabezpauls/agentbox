@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const BASE = (process.env.AGENTBOX_REVIEW_URL || "http://127.0.0.1:7800/workbench").replace(/\/+$/, "");
+const BASE = (process.env.AGENTBOX_REVIEW_URL || "http://127.0.0.1:7800").replace(/\/+$/, "");
 // One HTTP request never parks for longer than this, so a proxy or a container
 // restart in the middle cannot strand a long wait; `poll` loops until its own
 // deadline instead.

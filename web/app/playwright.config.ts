@@ -21,7 +21,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["html", { open: "never" }], ["list"]] : "list",
   use: {
-    baseURL: `http://127.0.0.1:${GATE_PORT}/workbench/`,
+    baseURL: `http://127.0.0.1:${GATE_PORT}/`,
     trace: "retain-on-failure",
     video: "off",
   },

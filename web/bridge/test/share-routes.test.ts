@@ -31,13 +31,13 @@ let dir: string;
 const streamClosed: { resolve: (() => void) | null } = { resolve: null };
 
 async function mint(port: number): Promise<{ id: string; token: string; url: string }> {
-  const res = await app.inject({ method: "POST", url: "/workbench/api/preview/shares", payload: { port } });
+  const res = await app.inject({ method: "POST", url: "/api/preview/shares", payload: { port } });
   expect(res.statusCode).toBe(200);
   return res.json() as { id: string; token: string; url: string };
 }
 
 async function revoke(id: string): Promise<void> {
-  const res = await app.inject({ method: "DELETE", url: `/workbench/api/preview/shares/${id}` });
+  const res = await app.inject({ method: "DELETE", url: `/api/preview/shares/${id}` });
   expect(res.statusCode).toBe(204);
 }
 
@@ -92,7 +92,6 @@ beforeAll(async () => {
   dir = await fsp.mkdtemp(path.join(os.tmpdir(), "share-routes-"));
   config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-share.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-share-static",
     WORKBENCH_SHARES_DIR: dir,
@@ -119,7 +118,7 @@ describe("public share route", () => {
     expect(await res.text()).toBe("/a/b?x=1");
   });
 
-  it("builds the public URL at the root, not under the base path", async () => {
+  it("builds the public URL at the root, not under the app", async () => {
     const share = await mint(upstreamPort);
     expect(share.url).toMatch(new RegExp(`^http://.+/s/${share.token}/$`));
     expect(share.url).not.toContain("/workbench/");
@@ -129,7 +128,7 @@ describe("public share route", () => {
     const share = await mint(upstreamPort);
     const res = await app.inject({
       method: "GET",
-      url: "/workbench/api/preview/shares",
+      url: "/api/preview/shares",
       headers: { host: `127.0.0.1:${bridgePort}` },
     });
     const listed = (res.json() as { token: string; url: string }[]).find((s) => s.token === share.token);
@@ -198,7 +197,7 @@ describe("public share route", () => {
   it("rejects an out-of-range port at mint", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/workbench/api/preview/shares",
+      url: "/api/preview/shares",
       payload: { port: 70000 },
     });
     expect(res.statusCode).toBe(400);
@@ -210,7 +209,7 @@ describe("infrastructure ports", () => {
     for (const port of [8080, 7681, 7682, 7683, bridgePort]) {
       const res = await app.inject({
         method: "POST",
-        url: "/workbench/api/preview/shares",
+        url: "/api/preview/shares",
         payload: { port },
       });
       expect(res.statusCode, `port ${port}`).toBe(400);
@@ -236,7 +235,7 @@ describe("the shared page's origin", () => {
   });
 
   it("does not sandbox the owner's private preview", async () => {
-    const res = await fetch(`http://127.0.0.1:${bridgePort}/workbench/preview/${upstreamPort}/csp`);
+    const res = await fetch(`http://127.0.0.1:${bridgePort}/preview/${upstreamPort}/csp`);
     expect(res.headers.get("content-security-policy")).toBe("default-src 'self'");
   });
 });
@@ -295,7 +294,6 @@ describe("sharing disabled", () => {
     offDir = await fsp.mkdtemp(path.join(os.tmpdir(), "share-off-"));
     const offConfig = loadConfig({
       WORKBENCH_PORT: "0",
-      WORKBENCH_BASE_PATH: "/workbench",
       HERDR_SOCKET_PATH: "/does/not/exist-shareoff.sock",
       WORKBENCH_STATIC_DIR: "/does/not/exist-shareoff-static",
       WORKBENCH_SHARES_DIR: offDir,
@@ -312,7 +310,7 @@ describe("sharing disabled", () => {
   it("refuses to mint and 404s every token when sharing is off", async () => {
     const mintRes = await offApp.inject({
       method: "POST",
-      url: "/workbench/api/preview/shares",
+      url: "/api/preview/shares",
       payload: { port: 3000 },
     });
     expect(mintRes.statusCode).toBe(403);

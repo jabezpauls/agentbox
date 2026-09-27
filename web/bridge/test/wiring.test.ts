@@ -59,7 +59,6 @@ beforeAll(async () => {
   watcher = new FakeWatcher();
   config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-wire.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-wire-static",
     WORKBENCH_WORKSPACE_ROOT: root,
@@ -81,7 +80,7 @@ describe("wired read endpoints", () => {
     watcher.emit([
       { port: 3000, pid: 10, process: "node", system: false, address: "0.0.0.0" },
     ]);
-    const res = await app.inject({ method: "GET", url: "/workbench/api/ports" });
+    const res = await app.inject({ method: "GET", url: "/api/ports" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
       { port: 3000, pid: 10, process: "node", system: false, address: "0.0.0.0" },
@@ -89,10 +88,10 @@ describe("wired read endpoints", () => {
   });
 
   it("lists workspace directories and rejects escapes with 400", async () => {
-    const ok = await app.inject({ method: "GET", url: "/workbench/api/fs/dirs?path=" });
+    const ok = await app.inject({ method: "GET", url: "/api/fs/dirs?path=" });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual([{ name: "projectA", path: "projectA" }]);
-    const bad = await app.inject({ method: "GET", url: "/workbench/api/fs/dirs?path=.." });
+    const bad = await app.inject({ method: "GET", url: "/api/fs/dirs?path=.." });
     expect(bad.statusCode).toBe(400);
   });
 });
@@ -100,7 +99,7 @@ describe("wired read endpoints", () => {
 describe("events websocket ports push", () => {
   it("sends a ports message on connect and on change, and ref-counts the watcher", async () => {
     const startsBefore = watcher.starts;
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`, { origin: `http://${baseUrl}` });
+    const ws = new WebSocket(`ws://${baseUrl}/ws/events`, { origin: `http://${baseUrl}` });
     const kinds: string[] = [];
     const gotPorts = new Promise<EventsMessage>((resolve, reject) => {
       ws.once("error", reject);

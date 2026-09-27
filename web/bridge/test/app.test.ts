@@ -18,7 +18,6 @@ beforeAll(async () => {
   config = loadConfig({
     HERDR_SOCKET_PATH: h.socketPath,
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     WORKBENCH_STATIC_DIR: "/does/not/exist-workbench-static",
   });
   hub = new SessionHub(config.socketPath);
@@ -38,7 +37,7 @@ afterAll(async () => {
 
 describe("bridge app", () => {
   it("tolerates a missing static dir and serves health", async () => {
-    const res = await app.inject({ method: "GET", url: "/workbench/api/health" });
+    const res = await app.inject({ method: "GET", url: "/api/health" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.ok).toBe(true);
@@ -53,7 +52,7 @@ describe("bridge app", () => {
   it("refuses non-allowlisted RPC methods with 403", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/workbench/api/rpc",
+      url: "/api/rpc",
       payload: { method: "server.stop" },
     });
     expect(res.statusCode).toBe(403);
@@ -61,12 +60,12 @@ describe("bridge app", () => {
   });
 
   it("rejects an RPC body without a string method with 400", async () => {
-    const res = await app.inject({ method: "POST", url: "/workbench/api/rpc", payload: {} });
+    const res = await app.inject({ method: "POST", url: "/api/rpc", payload: {} });
     expect(res.statusCode).toBe(400);
   });
 
   it("streams a snapshot then live events on /ws/events", async () => {
-    const ws = new WebSocket(`ws://${baseUrl}/workbench/ws/events`, { origin: `http://${baseUrl}` });
+    const ws = new WebSocket(`ws://${baseUrl}/ws/events`, { origin: `http://${baseUrl}` });
     const messages: EventsMessage[] = [];
     const first = new Promise<void>((resolve, reject) => {
       ws.once("error", reject);
@@ -84,7 +83,7 @@ describe("bridge app", () => {
 
     const res = await app.inject({
       method: "POST",
-      url: "/workbench/api/rpc",
+      url: "/api/rpc",
       payload: { method: "workspace.create", params: { cwd: h.dir, label: "x" } },
     });
     expect(res.statusCode).toBe(200);

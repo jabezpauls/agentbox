@@ -1,6 +1,6 @@
 import os from "node:os"; import path from "node:path";
 export interface Config {
-  port: number; basePath: string; staticDir: string | null; socketPath: string;
+  port: number; staticDir: string | null; socketPath: string;
   workspaceRoot: string; previewDomain: string | null; reviewDir: string; publicUrl: string | null;
   /** Where minted public share records live; on the home volume, like reviews. */
   sharesDir: string;
@@ -19,10 +19,9 @@ export function defaultSocketPath(env = process.env): string {
   return path.join(cfg, "herdr", "herdr.sock");
 }
 export function loadConfig(env = process.env): Config {
-  const base = (env.WORKBENCH_BASE_PATH ?? "/workbench").replace(/\/+$/, "") || "";
   const port = Number(env.WORKBENCH_PORT ?? 7800);
   return {
-    port, basePath: base,
+    port,
     infraPorts: [port, 8080, 7681, 7682, 7683].filter((p) => p > 0),
     staticDir: env.WORKBENCH_STATIC_DIR ?? null, socketPath: defaultSocketPath(env),
     workspaceRoot: env.WORKBENCH_WORKSPACE_ROOT ?? "/workspace",

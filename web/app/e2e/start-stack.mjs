@@ -98,7 +98,6 @@ const bridge = spawn(process.execPath, [bridgeEntry], {
   env: {
     ...env,
     WORKBENCH_PORT: String(port),
-    WORKBENCH_BASE_PATH: "/workbench",
     WORKBENCH_STATIC_DIR: staticDir,
     WORKBENCH_WORKSPACE_ROOT: workspaces,
     WORKBENCH_REVIEW_DIR: reviewDir,

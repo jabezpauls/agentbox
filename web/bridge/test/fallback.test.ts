@@ -43,13 +43,12 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-const url = (port: number, path = "/"): string => `http://127.0.0.1:${bridgePort}/workbench/preview/${port}${path}`;
+const url = (port: number, path = "/"): string => `http://127.0.0.1:${bridgePort}/preview/${port}${path}`;
 
 beforeAll(async () => {
   closedPort = await freePort();
   const config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-fallback.sock",
     WORKBENCH_STATIC_DIR: "/does/not/exist-fallback-static",
   });

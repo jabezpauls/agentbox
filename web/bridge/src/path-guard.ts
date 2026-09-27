@@ -25,14 +25,13 @@ function rawPath(req: FastifyRequest): string {
 
 /**
  * The part of a raw path that decides routing. Behind a proxy prefix — the
- * private preview `<base>/preview/<port>` or a share `/s/<token>` — the rest of
- * the path belongs to the previewed app and is forwarded verbatim (an app may
+ * private preview `/preview/<port>` or a share `/s/<token>` — the rest of the
+ * path belongs to the previewed app and is forwarded verbatim (an app may
  * legitimately use `%2F` in its own URLs), so only the prefix is held to the
  * strict form. Every other path the bridge serves is checked whole.
  */
-function routingPart(path: string, basePath: string): string {
-  const preview = `${basePath}/preview/`;
-  for (const prefix of [preview, "/s/"]) {
+function routingPart(path: string): string {
+  for (const prefix of ["/preview/", "/s/"]) {
     if (path.startsWith(prefix)) {
       const end = path.indexOf("/", prefix.length);
       return end === -1 ? path : path.slice(0, end + 1);
@@ -48,7 +47,7 @@ function routingPart(path: string, basePath: string): string {
  * difference between Caddy and the bridge can turn a public request into a
  * private route.
  */
-export function pathGuard(basePath: string) {
+export function pathGuard() {
   return (req: FastifyRequest, reply: FastifyReply, done: () => void): void => {
     const path = rawPath(req);
     if (req.headers[PUBLIC_HEADER] !== undefined && !PUBLIC_PATH.test(path)) {
@@ -56,7 +55,7 @@ export function pathGuard(basePath: string) {
       void reply.code(404).send({ error: "not found" });
       return;
     }
-    if (AMBIGUOUS.test(routingPart(path, basePath))) {
+    if (AMBIGUOUS.test(routingPart(path))) {
       void reply.code(400).send({ error: "bad path" });
       return;
     }

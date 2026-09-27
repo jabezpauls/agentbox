@@ -11,7 +11,7 @@ import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./
 // The bridge's own port: the in-sandbox CLI calls it directly, never through
 // the gate. The browser only ever sees the gate.
 const PORT = Number(process.env.WORKBENCH_PORT ?? 7800);
-const REVIEW_URL = `http://127.0.0.1:${PORT}/workbench`;
+const REVIEW_URL = `http://127.0.0.1:${PORT}`;
 // The CLI the image installs, run exactly as an agent in the sandbox runs it.
 const REVIEW_CLI = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -58,7 +58,7 @@ test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => signIn(page));
 
 test("the Workbench drives herdr end to end", async ({ page }) => {
-  await page.goto("./");
+  await page.goto("/");
 
   await test.step("it starts empty and connected", async () => {
     await expect(page.getByText("Nothing open.")).toBeVisible();
@@ -145,7 +145,7 @@ test("an agent's artifact comes back with the human's comments on it", async ({ 
     expect(opened.code).toBe(0);
     expect(opened.stdout).toMatch(/key: [0-9a-f]{8}/);
     link = opened.stdout.split("\n")[0] as string;
-    expect(link).toContain("?review=");
+    expect(link).toContain("/workbench?review=");
   });
 
   await test.step("the link it printed opens the drawer on that session", async () => {
@@ -180,4 +180,17 @@ test("an agent's artifact comes back with the human's comments on it", async ({ 
   });
 
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the app answers at the root, on its own routes and at the old prefix", async ({ page }) => {
+  await test.step("a deep link loads the app, not a 404", async () => {
+    await page.goto("/files/demo/some/deep/path");
+    await expect(page.locator(".conn-pill.is-open")).toBeVisible();
+  });
+
+  await test.step("an old /workbench/ bookmark lands on the Workbench route", async () => {
+    await page.goto("/workbench/");
+    await expect(page).toHaveURL(/\/workbench$/);
+    await expect(page.locator(".conn-pill.is-open")).toBeVisible();
+  });
 });

@@ -38,7 +38,7 @@ async function main(argv: string[]): Promise<void> {
 
   const app = await buildApp(config, { hub, ports });
   await app.listen({ host: "0.0.0.0", port: config.port });
-  console.log(`[workbench] listening on 0.0.0.0:${config.port}${config.basePath}`);
+  console.log(`[workbench] listening on 0.0.0.0:${config.port}`);
 
   let shuttingDown = false;
   const shutdown = (): void => {

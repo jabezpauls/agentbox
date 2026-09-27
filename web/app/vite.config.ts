@@ -2,12 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
-// One build serves any base path: assets resolve relatively (`base: "./"`) and
-// the runtime derives its API/WS base from location.pathname (see
-// src/api/base.ts). In dev we serve under the default base path so the proxy
-// and the runtime base agree; the built output keeps the relative base.
-export default defineConfig(({ command }) => ({
-  base: command === "serve" ? "/workbench/" : "./",
+// The app is served at the root of the box's origin. Asset URLs are absolute
+// so a deep link (`/files/src/a.ts`) loads the same bundle as `/`; the bridge
+// answers every such route with index.html.
+export default defineConfig({
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: {
@@ -15,14 +14,14 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: {
-    // Vite serves the app under /workbench/; only the API and WS routes are
-    // proxied to the bridge so the dev base and the runtime base agree.
+    // In dev Vite serves the app; the API, the sockets and the preview proxy
+    // are the bridge's.
     proxy: {
-      "^/workbench/(api|ws|preview)": {
+      "^/(api|ws|preview)(/|$)": {
         target: "http://localhost:7800",
         changeOrigin: true,
         ws: true,
       },
     },
   },
-}));
+});

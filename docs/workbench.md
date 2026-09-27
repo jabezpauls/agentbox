@@ -1,8 +1,10 @@
 # The Workbench
 
 The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
-the agent multiplexer that runs inside the sandbox. It is served at
-`/workbench`, behind the same sign-in as everything else.
+the agent multiplexer that runs inside the sandbox. The app it belongs to is
+served at the root of your box, behind the same sign-in as everything else, and
+the Workbench is its `/workbench` route. Links from before the app moved to the
+root — `/workbench/…`, including old review links — redirect there.
 
 The editor at `/vscode/` is where you read and write code. The TUI at `/terminal` is
 where you drive agents from a keyboard on a small screen. The Workbench is the
@@ -105,11 +107,11 @@ through untouched, so a framework's error overlay or a deliberate `503` still
 shows. Once a response has started there is no timeout, so server-sent events
 and long downloads are left alone.
 
-The bridge proxies `/workbench/preview/<port>/…` to `127.0.0.1:<port>` inside
-the sandbox. Because that is the Workbench's own origin, the iframe is
-sandboxed *without* `allow-same-origin`: an agent-written dev server must not
-be able to script the Workbench, read its storage or call its API as you.
-Four things follow.
+The bridge proxies `/preview/<port>/…` to `127.0.0.1:<port>` inside the
+sandbox. Because that is the Workbench's own origin, the iframe is sandboxed
+*without* `allow-same-origin`: an agent-written dev server must not be able to
+script the Workbench, read its storage or call its API as you. Four things
+follow.
 
 The previewed page has no `localStorage` and no same-origin requests of its
 own — that much is the sandbox, and it applies inside the panel only.
@@ -165,8 +167,10 @@ agentbox-review open plan.html --label "Rollout plan"
 agentbox-review poll plan.html          # blocks until you press Send
 ```
 
-`open` prints a link, and the session appears in the **Review** panel of the
-inspector. Choose it and the page renders there, beside the terminals — no
+`open` prints a link — `<your box>/workbench?review=<key>` — and the session
+appears in the **Review** panel of the inspector. The CLI talks to the bridge
+at `http://127.0.0.1:7800` inside the sandbox (`AGENTBOX_REVIEW_URL` overrides
+it). Choose it and the page renders there, beside the terminals — no
 second hostname and no second login, which is what the old lavish-axi service
 could never offer.
 

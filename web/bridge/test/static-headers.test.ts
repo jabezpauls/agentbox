@@ -29,7 +29,6 @@ beforeAll(async () => {
 
   const config = loadConfig({
     WORKBENCH_PORT: "0",
-    WORKBENCH_BASE_PATH: "/workbench",
     HERDR_SOCKET_PATH: "/does/not/exist-static.sock",
     WORKBENCH_STATIC_DIR: dir,
   });
@@ -45,14 +44,14 @@ afterAll(async () => {
 describe("static route framing headers", () => {
   // Framing the Workbench would let a hostile page overlay a live terminal.
   it("refuses foreign framing of a served asset", async () => {
-    const res = await app.inject({ method: "GET", url: "/workbench/index.html" });
+    const res = await app.inject({ method: "GET", url: "/index.html" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
     expect(res.headers["x-frame-options"]).toBe("SAMEORIGIN");
   });
 
   it("refuses foreign framing of the SPA fallback", async () => {
-    const res = await app.inject({ method: "GET", url: "/workbench/some/client/route" });
+    const res = await app.inject({ method: "GET", url: "/files/some/client/route" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
     expect(res.headers["x-frame-options"]).toBe("SAMEORIGIN");

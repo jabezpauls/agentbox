@@ -3,7 +3,6 @@ import { Check, Copy, ExternalLink, Globe, Loader2, Radio, RotateCw, Share2, X }
 import type { PreviewShare } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
 import type { PreviewDevice } from "../store/app.ts";
-import { basePath } from "../api/base.ts";
 import {
   createShare,
   extendShare,
@@ -110,7 +109,6 @@ export function PreviewPanel() {
 
   const visible = ports.filter((p) => showSystem || !p.system);
   const sharedPorts = new Set(shares.map((s) => s.port));
-  const base = basePath();
 
   const commitPath = () => setInspector({ path: pathDraft.startsWith("/") ? pathDraft : `/${pathDraft}` });
 
@@ -158,7 +156,7 @@ export function PreviewPanel() {
   const activeShare = shares.find((s) => s.port === port) ?? null;
   // agentbox's own services are never shareable; the bridge refuses them too.
   const selectedIsSystem = ports.some((p) => p.port === port && p.system);
-  const src = previewTarget(port, path, previewDomain, base);
+  const src = previewTarget(port, path, previewDomain);
   // A shared preview opens full screen at its public `/s/` link, so what the
   // owner opens and what a viewer opens are the same page.
   const fullScreenSrc = activeShare ? activeShare.url : src;

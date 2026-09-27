@@ -20,15 +20,15 @@ async function submit(page: Page, password: string): Promise<void> {
 const message = (page: Page) => page.locator("#login-message");
 
 test("a page load without a session lands on the sign-in page", async ({ page }) => {
-  await page.goto("/workbench/");
-  await expect(page).toHaveURL(`${GATE}/login?next=${encodeURIComponent("/workbench/")}`);
+  await page.goto("/workbench");
+  await expect(page).toHaveURL(`${GATE}/login?next=${encodeURIComponent("/workbench")}`);
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.getByLabel("Remember this device for 30 days")).toBeVisible();
 });
 
 test("a wrong password is refused calmly, without saying which half was wrong", async ({ page }) => {
   await asClient(page, "203.0.113.11");
-  await page.goto("/workbench/");
+  await page.goto("/workbench");
   await submit(page, "not-the-password");
   await expect(message(page)).toHaveText("That username and password don’t match. Check both and try again.");
   await expect(page).toHaveURL(/\/login\?/);
@@ -66,7 +66,7 @@ test("with two-factor on, sign-in asks for the code and accepts it", async ({ pa
     // checks a minute (setup and confirm each take the password); the sign-in
     // below takes three more, so it comes from an address of its own.
     await asClient(page, "203.0.113.15");
-    await page.goto("/workbench/");
+    await page.goto("/workbench");
     await expect(page).toHaveURL(/\/login\?next=/);
 
     await submit(page, PASSWORD);
@@ -80,7 +80,7 @@ test("with two-factor on, sign-in asks for the code and accepts it", async ({ pa
     // The next period's code: the confirmation just used this one's.
     await page.getByLabel("Two-factor code").fill(totp(secret, 1));
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(`${GATE}/workbench/`);
+    await expect(page).toHaveURL(`${GATE}/workbench`);
     await expect(page.locator(".conn-pill.is-open")).toBeVisible();
   } finally {
     // Leave the box as the other tests expect it: two-factor off, which takes
@@ -111,10 +111,10 @@ test("signing out ends the session, and the open app goes back to sign in", asyn
   await page.evaluate(() => {
     void fetch("api/health");
   });
-  await expect(page).toHaveURL(`${GATE}/login?next=${encodeURIComponent("/workbench/")}`);
+  await expect(page).toHaveURL(`${GATE}/login?next=${encodeURIComponent("/")}`);
 
   // Coming back needs the password again.
-  await page.goto("/workbench/");
+  await page.goto("/workbench");
   await expect(page).toHaveURL(/\/login\?next=/);
 });
 
@@ -122,7 +122,7 @@ test("with JavaScript off, signing in is a plain form post that lands where it w
   const context = await browser.newContext({ javaScriptEnabled: false, extraHTTPHeaders: { "x-agentbox-client-ip": "203.0.113.13" } });
   const page = await context.newPage();
   try {
-    await page.goto("/workbench/");
+    await page.goto("/workbench");
     await expect(page).toHaveURL(/\/login\?next=/);
     await page.getByLabel("Username").fill(USER);
     await page.getByLabel("Password").fill("not-the-password");
@@ -131,7 +131,7 @@ test("with JavaScript off, signing in is a plain form post that lands where it w
     await expect(page.locator("#login-message")).toHaveText("That username and password don’t match. Check both and try again.");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(`${GATE}/workbench/`);
+    await expect(page).toHaveURL(`${GATE}/workbench`);
     const cookies = await context.cookies();
     expect(cookies.some((c) => c.name === "__Host-agentbox" && c.httpOnly && c.secure)).toBe(true);
   } finally {
