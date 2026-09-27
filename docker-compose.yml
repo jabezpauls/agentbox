@@ -135,7 +135,7 @@ services:
       # the bridge falls back to whatever Host the request arrived with.
       WORKBENCH_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:7800/workbench/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:7800/api/health"]
       interval: 30s
       timeout: 5s
       retries: 5
