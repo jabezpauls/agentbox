@@ -132,7 +132,46 @@ fi
 if grep -q "no longer does anything" "$DIR/err"; then pass "and says it is ignored"; else fail "no warning for --preview-domain"; fi
 expect AGENTBOX_PREVIEW_DOMAIN "" "an existing key is left as it was, never set"
 
+echo "behind Cloudflare: an explicit choice, the old header's meaning, or the mode's default"
+seed   # traefik, with AGENTBOX_CLIENT_IP_HEADER=X-Real-IP added by hand
+run
+expect AGENTBOX_CLOUDFLARE off "an older .env naming another header means not behind Cloudflare"
+expect AGENTBOX_CLIENT_IP_HEADER X-Real-IP "and that header is kept (Caddy still reads it)"
+sed -i 's/^AGENTBOX_CLIENT_IP_HEADER=.*/AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP/; /^AGENTBOX_CLOUDFLARE=/d' "$DIR/.env"
+run
+expect AGENTBOX_CLOUDFLARE on "an older .env naming CF-Connecting-IP means behind Cloudflare"
+seed
+sed -i '/^AGENTBOX_CLIENT_IP_HEADER=/d' "$DIR/.env"
+run
+expect AGENTBOX_CLOUDFLARE on "a traefik install that never said defaults to Cloudflare, as it always assumed"
+run --mode behind-proxy
+expect AGENTBOX_CLOUDFLARE on "a recorded choice is kept when the mode changes"
+cat > "$DIR/.env" <<ENV
+AGENTBOX_PASSWORD_HASH=$HASH
+ENV
+run --mode behind-proxy
+expect AGENTBOX_CLOUDFLARE off "a fresh behind-proxy install defaults to not behind Cloudflare"
+run --cloudflare on
+expect AGENTBOX_CLOUDFLARE on "--cloudflare on is written"
+run
+expect AGENTBOX_CLOUDFLARE on "and kept on the next run"
+
 echo "bad input"
+seed
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --cloudflare maybe >/dev/null 2>&1; then
+    fail "--cloudflare maybe was accepted"
+else
+    pass "--cloudflare takes on or off only"
+fi
+before_pw="$(cat "$DIR/.env")"
+for bad in short "$(printf 'x%.0s' $(seq 1 73))"; do
+    if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --password "$bad" >/dev/null 2>&1; then
+        fail "--password of ${#bad} characters was accepted"
+    else
+        pass "--password of ${#bad} characters is refused before anything happens"
+    fi
+done
+if [ "$(cat "$DIR/.env")" = "$before_pw" ]; then pass ".env untouched by a refused password"; else fail ".env changed by a refused password"; fi
 seed
 if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --user $'jabe\nAGENTBOX_MODE=standalone' >/dev/null 2>&1; then
     fail "a newline in a value was accepted"
@@ -151,7 +190,7 @@ seed
 mkdir -p "$DIR/scripts"
 cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$DIR/scripts/"
 before="$(cat "$DIR/.env")"
-for args in "--mode bogus" "--preview public" "--agents claude;x" "--agents claude --mode bogus"; do
+for args in "--mode bogus" "--preview public" "--cloudflare maybe" "--agents claude;x" "--agents claude --mode bogus"; do
     # shellcheck disable=SC2086  # word-split on purpose: each entry is a flag and value
     if (cd / && "$DIR/scripts/agentbox" update $args) >/dev/null 2>&1; then
         fail "update accepted $args"

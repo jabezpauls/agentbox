@@ -19,6 +19,8 @@ PASSWORD=""
 CPUS="2"
 MEMORY="4g"
 PREVIEW_MODE="path"
+# Behind Cloudflare? on/off; empty until decided (flag, .env, or the mode's default).
+CLOUDFLARE=""
 EDGE_NETWORK="edge-prod"
 CERT_RESOLVER="letsencrypt"
 PROXY_CPUS="1"
@@ -53,6 +55,9 @@ Run with no options for an interactive walk-through.
   --password <pass>     Login password (default: generated and printed once);
                         on an existing install, replaces the current one
   --preview <off|path>  Kept for compatibility; public /s/ shares are off
+  --cloudflare <on|off> The hostname is proxied through Cloudflare (default on in
+                        traefik mode, off otherwise); decides whose address the
+                        sign-in limits count
   --agents <list>       Coding agents to build in, comma-separated (default claude,codex)
   --isolate-host        Firewall the sandbox off the host and private networks
   --cpus <n>            Sandbox CPU ceiling per service (default 2)
@@ -93,6 +98,7 @@ while [ $# -gt 0 ]; do
             warn "--preview-domain no longer does anything; ignoring it"
             shift 2 ;;
         --preview)       flag PREVIEW_MODE "${2:-}"; shift 2 ;;
+        --cloudflare)    flag CLOUDFLARE "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
         --isolate-host)  ISOLATE_HOST="true"; shift ;;
         --cpus)          flag CPUS "${2:-}"; shift 2 ;;
@@ -116,7 +122,7 @@ ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
-AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
 if [ -f "$ENV_FILE" ]; then
@@ -138,6 +144,22 @@ case "$PUBLIC_URL" in
     http://127.0.0.1|http://127.0.0.1[:/]*|https://127.0.0.1|https://127.0.0.1[:/]*)
         PUBLIC_URL="" ;;
 esac
+# Behind Cloudflare, when neither this run nor .env says: an older .env said it
+# with AGENTBOX_CLIENT_IP_HEADER (CF-Connecting-IP meant yes; anything else,
+# empty included, no); failing that, the mode's default — traefik installs have
+# always assumed Cloudflare.
+CF_FROM_MODE="false"
+if [ -z "$CLOUDFLARE" ]; then
+    if [ -f "$ENV_FILE" ] && grep -q '^AGENTBOX_CLIENT_IP_HEADER=' "$ENV_FILE"; then
+        case "$(grep -m1 '^AGENTBOX_CLIENT_IP_HEADER=' "$ENV_FILE" | cut -d= -f2- | tr '[:upper:]' '[:lower:]')" in
+            cf-connecting-ip) CLOUDFLARE="on" ;;
+            *) CLOUDFLARE="off" ;;
+        esac
+    else
+        CF_FROM_MODE="true"
+        if [ "$MODE" = "traefik" ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
+    fi
+fi
 
 # --- Interactive walk-through -----------------------------------------------
 # Ask the same questions the flags answer, each with its safe default already
@@ -171,6 +193,11 @@ if [ "$INTERACTIVE" = "true" ]; then
     fi
     ask "Login username" "$USERNAME" USERNAME
     ask "Coding agents to build in (comma-separated: claude,codex)" "$AGENTS" AGENTS
+    # The mode may have just changed; so may its default.
+    if [ "$CF_FROM_MODE" = "true" ]; then
+        if [ "$MODE" = "traefik" ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
+    fi
+    ask "Is the hostname proxied through Cloudflare? (on / off)" "$CLOUDFLARE" CLOUDFLARE
     ask_yn "Firewall the sandbox off the host (shared host only)?" n ISOLATE_HOST
 
     # Echo the equivalent one-liner so the choices are reproducible and auditable.
@@ -178,7 +205,7 @@ if [ "$INTERACTIVE" = "true" ]; then
     [ -n "$DOMAIN" ] && RESOLVED="$RESOLVED --domain $DOMAIN"
     [ "$MODE" = "behind-proxy" ] && RESOLVED="$RESOLVED --bind $BIND"
     [ "$MODE" = "traefik" ] && RESOLVED="$RESOLVED --edge-network $EDGE_NETWORK --cert-resolver $CERT_RESOLVER"
-    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS"
+    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS --cloudflare $CLOUDFLARE"
     [ "$ISOLATE_HOST" = "true" ] && RESOLVED="$RESOLVED --isolate-host"
     printf '\n'
     log "Resolved command:"
@@ -193,6 +220,16 @@ case "$MODE" in
     standalone|behind-proxy|traefik) ;;
     *) die "--mode must be standalone, behind-proxy or traefik" ;;
 esac
+case "$CLOUDFLARE" in
+    on|off) ;;
+    *) die "--cloudflare must be on or off" ;;
+esac
+# A password chosen on the command line is checked here, before anything is
+# written or started: the gate would refuse it only after the stack is up.
+if [ -n "$PASSWORD" ]; then
+    [ "${#PASSWORD}" -ge 8 ] || die "--password must be at least 8 characters"
+    [ "$(printf '%s' "$PASSWORD" | wc -c)" -le 72 ] || die "--password must be at most 72 bytes (bcrypt ignores the rest)"
+fi
 case "$PREVIEW_MODE" in
     off|path) ;;
     *) die "--preview must be off or path" ;;
@@ -300,6 +337,7 @@ AGENTBOX_CERT_RESOLVER=$CERT_RESOLVER
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_PREVIEW_MODE=$PREVIEW_MODE
+AGENTBOX_CLOUDFLARE=$CLOUDFLARE
 AGENTBOX_AGENTS=$AGENTS
 AGENTBOX_PUBLIC_URL=$PUBLIC_URL
 AGENTBOX_CPUS=$CPUS
@@ -390,6 +428,7 @@ else
     printf '  Password  (the one you passed with --password)\n'
 fi
 printf '  Agents    %s\n' "$AGENTS"
+printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
 printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
 printf '  Change the password with ./scripts/agentbox passwd; two-factor is optional (see docs/install.md).\n'
 printf '\n'

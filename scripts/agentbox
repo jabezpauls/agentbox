@@ -11,13 +11,20 @@ DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
 
 # Run the gate's admin command. The running gate owns its store, so the command
 # goes to it (it waits for a gate that is still starting); with the gate
-# stopped, a throwaway container edits the store directly instead.
+# stopped, a throwaway container edits the store directly instead. A gate that
+# is restarting is neither, and a second writer then could lose the change, so
+# that is refused. (The throwaway container also checks the gate's lease on the
+# volume, for whoever runs it by hand.)
 gate_cmd() {
-    if [ -n "$("${DC[@]}" ps --status running -q gate 2>/dev/null)" ]; then
-        "${DC[@]}" exec -T gate agentbox-gate "$@"
-    else
-        "${DC[@]}" run --rm --no-deps -T gate agentbox-gate --offline "$@"
-    fi
+    local state
+    state="$("${DC[@]}" ps -a --format '{{.State}}' gate 2>/dev/null | head -n1)"
+    case "$state" in
+        running) "${DC[@]}" exec -T gate agentbox-gate "$@" ;;
+        restarting|starting|created)
+            echo "the gate is $state; wait for it to come up (./scripts/agentbox logs gate) and try again" >&2
+            return 1 ;;
+        *) "${DC[@]}" run --rm --no-deps -T gate agentbox-gate --offline "$@" ;;
+    esac
 }
 
 # Replace (or add) a single KEY=value line in .env, atomically and 0600. A
@@ -68,6 +75,12 @@ case "${1:-help}" in
                         *) echo "--preview must be off or path" >&2; exit 1 ;;
                     esac
                     PENDING+=("AGENTBOX_PREVIEW_MODE=$val"); shift 2 ;;
+                --cloudflare)
+                    case "$val" in
+                        on|off) ;;
+                        *) echo "--cloudflare must be on or off" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_CLOUDFLARE=$val"); shift 2 ;;
                 --mode)
                     case "$val" in
                         standalone|behind-proxy|traefik) ;;
@@ -128,7 +141,15 @@ case "${1:-help}" in
             *$'\n'*|*$'\r'*) echo "a password may not contain a newline" >&2; exit 1 ;;
         esac
         # On stdin, never in argv, where any process listing would show it.
-        printf '%s\n' "$NEW" | gate_cmd set-password >/dev/null
+        OUT="$(printf '%s\n' "$NEW" | gate_cmd set-password)"
+        # Keep .env's seed in step with the store, so restoring the stack's
+        # files (or losing the gate's volume) cannot bring the old password back.
+        HASH="$(printf '%s' "$OUT" | sed -n 's/.*"hash": *"\([^"]*\)".*/\1/p')"
+        if [ -n "$HASH" ]; then
+            set_env AGENTBOX_PASSWORD_HASH "$(printf '%s' "$HASH" | sed 's/[$]/$$/g')"
+        else
+            echo "warning: the gate did not return the new hash; .env still holds the old seed" >&2
+        fi
         echo "password changed; every session was signed out"
         [ -n "$GENERATED" ] && echo "new password: $NEW"
         ;;
@@ -148,18 +169,26 @@ case "${1:-help}" in
         gate_cmd "$@"
         ;;
     backup)
+        # The workspace, home, and the gate's store (password hash, sessions,
+        # two-factor, device tokens) — so a restore brings back the same
+        # sign-in, not whatever .env's seed happens to say. Keep the archive as
+        # private as .env.
         out="${2:-agentbox-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
-        docker run --rm -v agentbox_workspace:/w:ro -v agentbox_home:/h:ro \
+        docker run --rm -v agentbox_workspace:/w:ro -v agentbox_home:/h:ro -v agentbox_gate:/g:ro \
             -v "$PWD:/out" alpine \
-            tar czf "/out/$(basename "$out")" -C / w h
+            sh -c "umask 077 && tar czf '/out/$(basename "$out")' --numeric-owner -C / w h g"
         echo "wrote $out"
         ;;
     restore)
         [ $# -ge 2 ] || { echo "usage: agentbox restore <file.tar.gz>" >&2; exit 1; }
         "${DC[@]}" down
-        docker run --rm -v agentbox_workspace:/w -v agentbox_home:/h \
+        # An archive from before the gate existed has no g/: the gate's store is
+        # then left alone rather than emptied.
+        docker run --rm -v agentbox_workspace:/w -v agentbox_home:/h -v agentbox_gate:/g \
             -v "$PWD:/in" alpine \
-            sh -c "rm -rf /w/* /h/* && tar xzf '/in/$(basename "$2")' -C /"
+            sh -ec "a='/in/$(basename "$2")'; tar tzf \"\$a\" >/dev/null; rm -rf /w/* /h/*; \
+                    if tar tzf \"\$a\" | grep -q '^g/'; then rm -rf /g/* /g/.[!.]*; fi; \
+                    tar xzf \"\$a\" --numeric-owner -C /"
         "${DC[@]}" up -d
         echo "restored from $2"
         ;;
@@ -176,7 +205,7 @@ agentbox <command>
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
   update [flags]        pull, rebuild, restart; accepts the install flags
-                        (--agents, --preview, --mode, --cert-resolver,
+                        (--agents, --preview, --cloudflare, --mode, --cert-resolver,
                         --edge-network, --cpus, --memory, --proxy-cpus,
                         --proxy-memory, --isolate-host)
   passwd [new]          set the sign-in password (prompted, or generated);
@@ -185,7 +214,7 @@ agentbox <command>
   gate status|unlock|revoke-all
                         what the gate has; clear sign-in lockouts; end every
                         session and revoke every device token
-  backup [file]         archive the workspace and home volumes
+  backup [file]         archive the workspace, home and gate volumes
   restore <file>        replace volumes from an archive
   destroy               remove everything, including your files
 HELP
