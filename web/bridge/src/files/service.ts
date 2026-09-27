@@ -1,3 +1,4 @@
+import { ListingCache } from "./entries.js";
 import { GitStatusCache } from "./git.js";
 import { FileOps } from "./ops.js";
 import { Roots } from "./roots.js";
@@ -27,6 +28,8 @@ export class FilesService {
   readonly uploads: Uploads;
   readonly ops: FileOps;
   readonly fd: string | null | undefined;
+  /** Sorted directory names, shared by the listing and WebDAV. */
+  readonly listings = new ListingCache();
 
   constructor(opts: FilesOptions) {
     this.roots = new Roots(opts.workspaceRoot, opts.homeRoot);

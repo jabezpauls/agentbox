@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { encodePathParam, type FileEntry, type FileListing } from "@workbench/shared";
 import { filesFixture, pct, rawPath, type FilesFixture } from "./helpers/files.js";
@@ -111,6 +112,23 @@ describe("listing", () => {
     expect(second.entries).toHaveLength(200);
     expect(second.truncated).toBe(false);
     expect(second.entries[0]?.name).toBe("f05000");
+  });
+
+  it("reads a big folder once for all its pages, and sees a change at once", async () => {
+    const big = path.join(ws, "paged");
+    fs.mkdirSync(big);
+    for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(big, `p${i}`), "");
+    const readdir = vi.spyOn(fsp, "readdir");
+    const reads = () => readdir.mock.calls.filter((c) => String(c[0]) === fs.realpathSync(big)).length;
+    await list(big, "&limit=100");
+    await list(big, "&limit=100&offset=100");
+    await list(big, "&limit=100&offset=200");
+    expect(reads()).toBe(1);
+    fs.writeFileSync(path.join(big, "p-new"), "");
+    const after = await list(big, "&limit=100&offset=200");
+    expect(reads()).toBe(2);
+    expect(after.total).toBe(301);
+    readdir.mockRestore();
   });
 
   it("marks git status, rolling changes up to directories", async () => {

@@ -82,6 +82,7 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
         offset: int(q, "offset", 0, 0, Number.MAX_SAFE_INTEGER),
         limit: int(q, "limit", MAX_PAGE, 1, MAX_PAGE),
         ...(lookup ? { git: lookup } : {}),
+        cache: files.listings,
       });
     }),
   );

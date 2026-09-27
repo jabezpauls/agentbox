@@ -23,7 +23,6 @@ const ALLOW = "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY
 /** A WebDAV request body is a few kilobytes; nothing a client sends comes near this. */
 const MAX_XML = 256 * 1024;
 const MS = "urn:schemas-microsoft-com:";
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /**
  * Files an operating system writes beside everything it touches (Finder's
@@ -299,18 +298,10 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
    * first, as a person reads them) before the response starts, so a failure
    * here is a clean error rather than a half-sent 207.
    */
-  const memberNames = async (abs: string, real: string): Promise<string[]> => {
-    try {
-      const dirents = await fsp.readdir(fsPath(real), { withFileTypes: true, encoding: "buffer" });
-      return dirents
-        .map((d) => ({ name: decodeName(d.name), dir: d.isDirectory() }))
-        .filter((d) => !(abs === ws.path && d.name === STATE_DIR))
-        .sort((a, b) => (a.dir === b.dir ? collator.compare(a.name, b.name) : a.dir ? -1 : 1))
-        .map((d) => d.name);
-    } catch (err) {
-      throw fsError(err, abs);
-    }
-  };
+  const memberNames = async (abs: string, real: string): Promise<string[]> =>
+    (await files.listings.names(real, abs))
+      .filter((d) => !(abs === ws.path && d.name === STATE_DIR))
+      .map((d) => d.name);
 
   /**
    * The folder's own resource, then its members. A link that leads out of the
