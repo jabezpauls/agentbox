@@ -525,7 +525,10 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
       { path: parentOf(abs), subtree: false },
     ];
     if (await refused(req, reply, abs, guarded)) return reply;
-    if (OS_JUNK.test(path.basename(abs))) await removeTree(ref.fs);
+    // Only a regular file by one of those exact names is litter; a folder
+    // that happens to be called `._x` is the user's and goes to the trash.
+    const litter = OS_JUNK.test(path.basename(abs)) && (await fsp.lstat(fsPath(ref.fs))).isFile();
+    if (litter) await fsp.unlink(fsPath(ref.fs));
     else await files.trash.put(ref.root, ref.abs, ref.fs);
     locks.dropBeneath(abs);
     return reply.code(204).send();
@@ -553,13 +556,18 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
   const copyOrMove = async (req: FastifyRequest, reply: FastifyReply, abs: string, move: boolean) => {
     const header = req.headers.destination;
     if (typeof header !== "string" || header === "") throw new FilesError(400, "Destination header required");
-    let destPath: string;
+    let dest_: URL;
     try {
-      destPath = new URL(header, "http://dav.invalid").pathname;
+      dest_ = new URL(header, "http://dav.invalid");
     } catch {
       throw new FilesError(400, "bad Destination header");
     }
-    if (destPath !== DAV_PREFIX && !destPath.startsWith(`${DAV_PREFIX}/`)) {
+    // An absolute Destination naming another host is a copy to another
+    // server, which this one cannot do (RFC 4918 §9.8.4: 502).
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(header);
+    const host = String(req.headers.host ?? "").toLowerCase();
+    const destPath = dest_.pathname;
+    if ((absolute && dest_.host.toLowerCase() !== host) || (destPath !== DAV_PREFIX && !destPath.startsWith(`${DAV_PREFIX}/`))) {
       throw new FilesError(502, "the destination is not on this server");
     }
     const destAbs = toAbs(destPath);
@@ -655,6 +663,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
     if ("conflicts" in got) {
       return davError(reply, 423, `<D:no-conflicting-lock>${got.conflicts.map((l) => `<D:href>${href(l.path, false)}</D:href>`).join("")}</D:no-conflicting-lock>`);
     }
+    if ("full" in got) throw new FilesError(503, "too many locks are held; try again later", "too-many-locks");
     if (!existing) {
       const dest = await roots.creatable(abs);
       try {

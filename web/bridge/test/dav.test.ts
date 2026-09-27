@@ -226,9 +226,27 @@ describe("the WebDAV protocol, as Finder and gio use it", () => {
     expect((await dav("PUT", "/ranged", { body: "x", headers: { "content-range": "bytes 0-0/1" } })).status).toBe(400);
   });
 
+  it("hard-deletes only files by exactly the litter names, never folders", async () => {
+    fs.writeFileSync(path.join(ws(), "._note.txt"), "apple double");
+    fs.mkdirSync(path.join(ws(), "._folder"));
+    fs.mkdirSync(path.join(ws(), ".DS_Store"));
+    fs.writeFileSync(path.join(ws(), "not.DS_Store"), "user file");
+    for (const p of ["/._note.txt", "/._folder/", "/.DS_Store/", "/not.DS_Store"]) {
+      expect((await dav("DELETE", p)).status, p).toBe(204);
+    }
+    const trashed = ((await f.app.inject({ method: "GET", url: "/api/files/trash" })).json() as { name: string }[]).map((t) => t.name);
+    expect(trashed).toEqual(expect.arrayContaining(["._folder", ".DS_Store", "not.DS_Store"]));
+    expect(trashed).not.toContain("._note.txt");
+  });
+
   it("does not let a destination header leave the tree", async () => {
     fs.writeFileSync(path.join(ws(), "src.txt"), "s");
     expect((await dav("COPY", "/src.txt", { headers: { destination: "http://elsewhere/etc/x" } })).status).toBe(502);
+    // Another host, even with a DAV path, is another server.
+    expect((await dav("COPY", "/src.txt", { headers: { destination: "http://elsewhere.example/api/dav/x.txt" } })).status).toBe(502);
+    // This host, spelled absolute or as a path, is fine.
+    expect((await dav("COPY", "/src.txt", { headers: { destination: `${base}/abs-copy.txt` } })).status).toBe(201);
+    expect((await dav("COPY", "/src.txt", { headers: { destination: "/api/dav/path-copy.txt" } })).status).toBe(201);
     expect((await dav("COPY", "/src.txt", { headers: { destination: `${base}/..%2f..%2fx` } })).status).toBe(400);
     expect((await dav("COPY", "/src.txt", { headers: { destination: `${base}/src.txt` } })).status).toBe(403);
     expect((await dav("COPY", "/src.txt")).status).toBe(400);

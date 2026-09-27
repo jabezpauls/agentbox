@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { within } from "../roots.js";
 
 export interface Lock {
@@ -28,58 +29,101 @@ export function parseTimeout(header: string | undefined): number {
   return MAX_LOCK_S;
 }
 
+/** The most locks held at once. Finder holds a few; this is a ceiling, not a budget. */
+export const MAX_LOCKS = 1000;
+
 /**
  * WebDAV write locks, in memory. Locks are advisory coordination between
  * clients — Finder takes one before it writes — so losing them on a restart
  * costs a client a re-lock, nothing more.
+ *
+ * Locks are indexed by path, so the question PROPFIND asks for every member
+ * it lists — which locks cover this? — costs a walk up that path, not a scan
+ * of every lock; and the table is bounded, so the scans that remain (for a
+ * write that affects a whole subtree) stay small.
  */
 export class LockManager {
-  private readonly locks = new Map<string, Lock>();
+  private readonly byToken = new Map<string, Lock>();
+  private readonly byPath = new Map<string, Set<Lock>>();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly max = MAX_LOCKS,
+  ) {}
+
+  get size(): number {
+    return this.byToken.size;
+  }
+
+  private remove(l: Lock): void {
+    this.byToken.delete(l.token);
+    const set = this.byPath.get(l.path);
+    set?.delete(l);
+    if (set && set.size === 0) this.byPath.delete(l.path);
+  }
+
+  private live(l: Lock): boolean {
+    if (l.expires > this.now()) return true;
+    this.remove(l);
+    return false;
+  }
 
   private prune(): void {
-    const t = this.now();
-    for (const [k, l] of this.locks) if (l.expires <= t) this.locks.delete(k);
+    for (const l of [...this.byToken.values()]) this.live(l);
   }
 
   /** Locks whose scope includes `p`: on `p` itself, or depth-infinity above it. */
   covering(p: string): Lock[] {
-    this.prune();
-    return [...this.locks.values()].filter((l) => l.path === p || (l.depth === "infinity" && within(p, l.path)));
+    const out: Lock[] = [];
+    for (let dir = p, first = true; ; first = false) {
+      for (const l of [...(this.byPath.get(dir) ?? [])]) {
+        if ((first || l.depth === "infinity") && this.live(l)) out.push(l);
+      }
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+    return out;
   }
 
   /** Locks on `p` or anything beneath it. */
   beneath(p: string): Lock[] {
-    this.prune();
-    return [...this.locks.values()].filter((l) => within(l.path, p));
+    return [...this.byToken.values()].filter((l) => within(l.path, p) && this.live(l));
   }
 
   get(token: string): Lock | undefined {
-    this.prune();
-    return this.locks.get(token);
+    const l = this.byToken.get(token);
+    return l && this.live(l) ? l : undefined;
   }
 
   /**
    * Take a lock, or return the locks it conflicts with. An exclusive lock
    * conflicts with any lock in its way; a shared one only with exclusives.
+   * `full` when the table is at its ceiling.
    */
   acquire(
     p: string,
     opts: { depth: "0" | "infinity"; scope: "exclusive" | "shared"; owner: string; timeoutS: number },
-  ): { lock: Lock } | { conflicts: Lock[] } {
+  ): { lock: Lock } | { conflicts: Lock[] } | { full: true } {
     // A depth-infinity lock also collides with anything already locked below.
     const inWay = [...this.covering(p), ...(opts.depth === "infinity" ? this.beneath(p) : [])];
     const unique = [...new Map(inWay.map((l) => [l.token, l])).values()];
     const conflicts = unique.filter((l) => opts.scope === "exclusive" || l.scope === "exclusive");
     if (conflicts.length > 0) return { conflicts };
+    if (this.byToken.size >= this.max) {
+      this.prune();
+      if (this.byToken.size >= this.max) return { full: true };
+    }
     const lock: Lock = {
       token: `opaquelocktoken:${randomUUID()}`,
       path: p,
       ...opts,
       expires: this.now() + opts.timeoutS * 1000,
     };
-    this.locks.set(lock.token, lock);
+    this.byToken.set(lock.token, lock);
+    const set = this.byPath.get(p) ?? new Set<Lock>();
+    set.add(lock);
+    this.byPath.set(p, set);
     return { lock };
   }
 
@@ -92,12 +136,15 @@ export class LockManager {
   }
 
   release(token: string): boolean {
-    return this.locks.delete(token);
+    const l = this.byToken.get(token);
+    if (!l) return false;
+    this.remove(l);
+    return true;
   }
 
   /** Drop every lock on `p` or beneath it (it was deleted or moved away). */
   dropBeneath(p: string): void {
-    for (const l of this.beneath(p)) this.locks.delete(l.token);
+    for (const l of this.beneath(p)) this.remove(l);
   }
 
   /**
