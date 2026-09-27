@@ -45,11 +45,32 @@ export function bearerToken(header: string | undefined): string | null {
   return m ? (m[1] as string) : null;
 }
 
+/** A credential that has just stopped being valid. */
+export interface Ended {
+  kind: "session" | "token";
+  id: string;
+}
+
 export class Auth {
+  private readonly endListeners: Array<(ended: Ended[]) => void> = [];
+
   constructor(
     private readonly store: Store,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /**
+   * Hear about sessions ended and tokens revoked, so what they opened — a live
+   * terminal, say — can be cut off rather than outlive them.
+   */
+  onEnded(listener: (ended: Ended[]) => void): void {
+    this.endListeners.push(listener);
+  }
+
+  private announce(ended: Ended[]): void {
+    if (ended.length === 0) return;
+    for (const listener of this.endListeners) listener(ended);
+  }
 
   /**
    * The session or token a request carries, or `null`. A bearer token is only
@@ -137,16 +158,18 @@ export class Auth {
     const before = this.store.data.sessions.length;
     this.store.data.sessions = this.store.data.sessions.filter((s) => s.id !== id);
     if (this.store.data.sessions.length === before) return false;
+    this.announce([{ kind: "session", id }]);
     await this.store.save();
     return true;
   }
 
   /** End every session but `keep` (every session when omitted). Returns how many ended. */
   async endSessions(keep?: string): Promise<number> {
-    const before = this.store.data.sessions.length;
+    const ended = this.store.data.sessions.filter((s) => s.id !== keep);
     this.store.data.sessions = this.store.data.sessions.filter((s) => s.id === keep);
+    this.announce(ended.map((s) => ({ kind: "session", id: s.id })));
     await this.store.save();
-    return before - this.store.data.sessions.length;
+    return ended.length;
   }
 
   async createToken(name: string): Promise<{ token: string; record: TokenRecord }> {
@@ -175,21 +198,31 @@ export class Auth {
     const before = this.store.data.tokens.length;
     this.store.data.tokens = this.store.data.tokens.filter((t) => t.id !== id);
     if (this.store.data.tokens.length === before) return false;
+    this.announce([{ kind: "token", id }]);
     await this.store.save();
     return true;
   }
 
   async revokeAllTokens(): Promise<number> {
-    const n = this.store.data.tokens.length;
+    const revoked = this.store.data.tokens;
     this.store.data.tokens = [];
+    this.announce(revoked.map((t) => ({ kind: "token", id: t.id })));
     await this.store.save();
-    return n;
+    return revoked.length;
   }
 
-  /** Drop sessions that can no longer be used; called on a timer. */
+  /**
+   * Drop sessions that can no longer be used; called on a timer. A session
+   * past its absolute end is announced as ended, which cuts what it has open.
+   * One that merely went idle is not: a terminal it still has open is the
+   * opposite of idle, and it can open nothing new.
+   */
   async prune(): Promise<void> {
+    const t = this.now();
+    const expired = this.store.data.sessions.filter((s) => t >= s.expiresAt);
     const before = this.store.data.sessions.length;
     this.store.data.sessions = this.store.data.sessions.filter((s) => this.isLive(s));
+    this.announce(expired.map((s) => ({ kind: "session", id: s.id })));
     if (this.store.data.sessions.length !== before) await this.store.save();
   }
 }

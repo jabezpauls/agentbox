@@ -72,8 +72,11 @@ authenticates nothing and routes nothing.
   Path=/`, 256 random bits, stored only as a SHA-256 digest. A session ends
   after 12 hours without use; "Remember this device" instead keeps it for 30
   days, and no session outlives 30 days. Changing the password or two-factor
-  ends every other session. Because the cookie is `Secure`, the box must be
-  reached over HTTPS (or on `localhost`).
+  ends every other session. Ending a session — signing out, ending it from
+  another one, a password or two-factor change, the host's commands, or its
+  30 days running out — also cuts every WebSocket it opened, a live terminal
+  included; revoking a device token does the same. Because the cookie is
+  `Secure`, the box must be reached over HTTPS (or on `localhost`).
 - **Same-origin checks.** A state-changing request (anything but GET or HEAD)
   riding the session cookie must carry an `Origin` naming the box's own host,
   or `Sec-Fetch-Site: same-origin`, or it is refused `403` before it reaches

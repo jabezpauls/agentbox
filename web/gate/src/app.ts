@@ -110,6 +110,27 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     return { clientIp: info.ip, proto: info.proto, host: info.host };
   }
 
+  // Every upgraded connection, by the credential that opened it. A WebSocket
+  // outlives the request that authenticated it, so ending a session or
+  // revoking a token must cut what it has open — a live terminal above all.
+  const liveSockets = new Map<string, Set<Duplex>>();
+  const keyOf = (s: { kind: string; id: string }): string => `${s.kind}:${s.id}`;
+  function trackSocket(subject: Subject, socket: Duplex): void {
+    const key = keyOf(subject);
+    let set = liveSockets.get(key);
+    if (!set) liveSockets.set(key, (set = new Set()));
+    set.add(socket);
+    socket.once("close", () => {
+      set.delete(socket);
+      if (set.size === 0 && liveSockets.get(key) === set) liveSockets.delete(key);
+    });
+  }
+  auth.onEnded((ended) => {
+    for (const e of ended) {
+      for (const socket of liveSockets.get(keyOf(e)) ?? []) socket.destroy();
+    }
+  });
+
   let fastifyHandler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -162,6 +183,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     // this, any page in another tab could open a terminal on the session
     // cookie. A device token is not ambient, so it needs no such check.
     if (subject.kind === "session" && !originMatchesHost(req.headers)) return refuseUpgrade(socket, 403, "Forbidden");
+    trackSocket(subject, socket);
     proxyUpgrade(config.upstreams[r.upstream], req, socket, head, { target: r.target, forwarded: forwarded(info) });
   }
 

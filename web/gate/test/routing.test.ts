@@ -215,6 +215,42 @@ describe("with a session", () => {
     opened.ws.close();
   });
 
+  it("cuts a session's open WebSockets when the session ends", async () => {
+    const mine = await login(h);
+    const other = await login(h);
+    const open = async (c: string) => {
+      const o = await openWs(`ws://127.0.0.1:${h.port}/terminal/ws`, { origin: h.base, cookie: c });
+      if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
+      return o.ws;
+    };
+    const closed = (ws: import("ws").WebSocket) => new Promise<void>((r) => ws.once("close", () => r()));
+    const a = await open(mine);
+    const b = await open(other);
+
+    // Signing out cuts this session's terminal, and only this session's.
+    const aClosed = closed(a);
+    await request(h.base, "POST", "/_gate/logout", { headers: sameOrigin(h, { cookie: mine }) });
+    await aClosed;
+    expect(b.readyState).toBe(b.OPEN);
+
+    // Ending a session from another one cuts it too.
+    const third = await login(h);
+    const bId = (await request(h.base, "GET", "/_gate/session", { headers: { cookie: other } })).json<{ id: string }>().id;
+    const bClosed = closed(b);
+    await request(h.base, "DELETE", `/_gate/sessions/${bId}`, { headers: sameOrigin(h, { cookie: third }) });
+    await bClosed;
+  });
+
+  it("cuts a device token's open WebSockets when it is revoked", async () => {
+    const { token, record } = await h.gate.core.auth.createToken("laptop");
+    const o = await openWs(`ws://127.0.0.1:${h.port}/terminal/ws`, { authorization: `Bearer ${token}` });
+    if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
+    const done = new Promise<void>((r) => o.ws.once("close", () => r()));
+    const cookieNow = await login(h);
+    await request(h.base, "DELETE", `/_gate/tokens/${record.id}`, { headers: sameOrigin(h, { cookie: cookieNow }) });
+    await done;
+  });
+
   it("refuses a WebSocket from another origin (cross-site WebSocket hijacking)", async () => {
     for (const origin of ["https://evil.example", "null", ""]) {
       const headers: Record<string, string> = { cookie };
