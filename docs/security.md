@@ -28,9 +28,9 @@ over the host.
   others. The shared namespaces belong to sandbox containers only; nothing
   about the host boundary changes.
 - The gate's listener, on the internal network, exactly as an anonymous visitor
-  would: the sign-in page, rate-limited sign-in, and nothing else. It cannot
-  claim another visitor's address there, and it cannot read or write the
-  gate's store.
+  would: the sign-in page, rate-limited sign-in, and nothing else. It is keyed
+  on its own address there and cannot claim another, and it cannot read or
+  write the gate's store. It cannot reach the proxy at all.
 
 ## The front door
 
@@ -51,8 +51,11 @@ Two rules decide the shape of everything that follows:
    that would set or clear one of its own cookies.
 
 Every request goes proxy → gate → sandbox. The proxy (Caddy) terminates TLS in
-standalone mode, compresses, and forwards everything to the gate; it
-authenticates nothing and routes nothing.
+standalone mode, compresses, works out the client's address, and forwards
+everything to the gate; it authenticates nothing and routes nothing. The proxy
+and the gate share a network (`agentbox_front`) with nothing else; the gate and
+the sandbox share another (`agentbox_internal`). The sandbox cannot reach the
+proxy.
 
 - **Routing on the raw path.** Before anything else, the gate refuses (`400`)
   any raw path with a dot-segment, `%2e`, `%2f`, `%5c`, a backslash, `;` or
@@ -68,77 +71,137 @@ authenticates nothing and routes nothing.
   only routes open without one are the sign-in page and its assets, sign-in
   itself, the two calls a device login makes (below) and the CLI download. A
   request from the sandbox to the gate is treated as any anonymous client.
+- **No service workers outside the editor.** A worker controls every page in
+  its scope, for as long as it stays registered — one registered by a page the
+  sandbox serves could answer `/login` with a lookalike. The gate refuses
+  (`403`) any request for a worker's script (`Service-Worker: script`) except
+  under `/vscode/`, where code-server keeps its own, and strips
+  `Service-Worker-Allowed` from every response, so no worker's scope reaches
+  above its script's directory. The gate's pages (`/login`, `/_gate`,
+  `/settings/devices`, `/cli`) are outside every scope a permitted worker can
+  have.
 - **Sessions.** Cookie `__Host-agentbox`: `HttpOnly; Secure; SameSite=Lax;
   Path=/`, 256 random bits, stored only as a SHA-256 digest. A session ends
-  after 12 hours without use; "Remember this device" instead keeps it for 30
-  days, and no session outlives 30 days. Changing the password or two-factor
-  ends every other session. Ending a session — signing out, ending it from
-  another one, a password or two-factor change, the host's commands, or its
-  30 days running out — also cuts every WebSocket it opened, a live terminal
+  after 12 hours without use — a request, or typing into a terminal it opened —
+  unless "Remember this device" was ticked; no session outlives 30 days.
+  Changing the password or two-factor ends every other session. Every way a
+  session ends — signing out, ending it from another one, idling out, its 30
+  days, being the oldest of more than 50, a password or two-factor change, the
+  host's commands — also cuts every WebSocket it opened, a live terminal
   included; revoking a device token does the same. Because the cookie is
   `Secure`, the box must be reached over HTTPS (or on `localhost`).
 - **Same-origin checks.** A state-changing request (anything but GET or HEAD)
-  riding the session cookie must carry an `Origin` naming the box's own host,
-  or `Sec-Fetch-Site: same-origin`, or it is refused `403` before it reaches
-  the sandbox; that is cross-site request forgery closed off at the door, for
-  sign-in and sign-out as well. A WebSocket upgrade on a session must carry an
-  `Origin` naming the box's host too, so a page in another tab cannot open a
-  terminal on your cookie. (ttyd's `--check-origin` and the bridge's own
-  upgrade check still apply behind it.) Device tokens are exempt: a page on
-  another site cannot attach an `Authorization` header.
+  riding the session cookie must carry an `Origin` naming the box's own host —
+  or, when the browser withheld the origin (`Origin: null`, or none), say
+  `Sec-Fetch-Site: same-origin` — or it is refused `403` before it reaches the
+  sandbox; that is cross-site request forgery closed off at the door, for
+  sign-in and sign-out as well. (An opaque, sandboxed document also sends
+  `Origin: null`, but with `Sec-Fetch-Site: cross-site`, and no page can set
+  that header.) The gate's own pages are served with `Referrer-Policy:
+  same-origin` so their forms carry a real `Origin`. A WebSocket upgrade on a
+  session must carry an `Origin` naming the box's host too, so a page in
+  another tab cannot open a terminal on your cookie. (ttyd's `--check-origin`
+  and the bridge's own upgrade check still apply behind it.) Device tokens are
+  exempt: a page on another site cannot attach an `Authorization` header.
+- **Sudo mode.** What would let someone keep the box or lock you out needs
+  fresh credentials, not just the session: approving a device, setting up,
+  confirming or turning off two-factor, changing the password, and revoking
+  device tokens. Re-entering the password — and a code, with two-factor on —
+  puts the session in sudo mode for ten minutes (`POST /_gate/sudo`, or the
+  credentials sent with the request itself, which are always checked). The
+  approval page asks for them in the same form. Ordinary use never asks.
 - **Passwords.** bcrypt with cost 14, in the gate's store. `AGENTBOX_PASSWORD_HASH`
-  in `.env` only seeds a store that does not exist yet; every way of setting the
-  password — the installer's `--password`, `./scripts/agentbox passwd`, the
-  account API — writes the store and ends sessions. Passwords longer than
-  bcrypt's 72 bytes are refused rather than silently truncated.
+  in `.env` only seeds a store that does not exist yet (`./scripts/agentbox
+  passwd` keeps it in step anyway, so restoring the stack's files cannot bring
+  an old password back); every way of setting the password — the installer's
+  `--password`, `passwd`, the account API — writes the store and ends
+  sessions. A sign-in that checked the old password while it changed is
+  refused. Passwords longer than bcrypt's 72 bytes are refused rather than
+  silently truncated.
 - **Rate limits and lockout, in every mode, before bcrypt.** Per client
-  address: five password checks in any minute; from the fifth consecutive
-  failure on, each further try waits 1 s, 2 s, 4 s, … after the last; ten
-  consecutive failures lock the address out for 15 minutes, right password or
-  not. Across all addresses, at most 30 checks a minute — a flood from many
-  addresses can pause sign-in for everyone for that minute, but sessions
-  already open are unaffected. A refused attempt costs a map lookup, not a
-  bcrypt comparison, and the gate's CPU is capped besides. `./scripts/agentbox
-  gate unlock` clears every lock.
-- **Whose address.** The gate believes a forwarding header only on a connection
-  from the proxy (the compose service `proxy`, resolved through Docker's DNS;
-  a sandbox container cannot forge the proxy's source address, having no
-  `NET_RAW`). From the proxy it reads `AGENTBOX_CLIENT_IP_HEADER` when set, and
-  otherwise the last entry of `X-Forwarded-For`, which Caddy writes itself.
-  Standalone mode needs nothing more. The traefik overlay reads
-  `CF-Connecting-IP`, which is right behind Cloudflare and spoofable without
-  it — set `AGENTBOX_CLIENT_IP_HEADER` empty when nothing fronts Traefik. Behind
-  another reverse proxy, name the header it sets (e.g. `X-Real-IP`), or every
-  visitor shares one budget and one visitor's failures can lock everyone out.
+  address (an IPv6 client: per /64): five password checks in any minute —
+  sign-in, sudo mode and the password change all count; from the fifth
+  consecutive failure on, each further try waits 1 s, 2 s, 4 s, … after the
+  last; ten consecutive failures lock the address out for 15 minutes, right
+  password or not. Across all addresses, at most 30 checks a minute — a flood
+  from many addresses can pause sign-in for everyone for that minute, but
+  sessions already open are unaffected. A refused attempt costs a map lookup,
+  not a bcrypt comparison, and the gate's CPU is capped besides. The gate's
+  own endpoints must receive a whole request within 30 seconds (and every
+  request its headers within 20), so slow senders cannot hold them.
+  `./scripts/agentbox gate unlock` clears every lock.
+- **Whose address.** Caddy works it out, because only the proxy knows whom it
+  trusts in front of itself (`proxy/trust/`, chosen by the mode and
+  `AGENTBOX_CLOUDFLARE`): in standalone mode nobody, so it is the address a
+  request arrives from; behind another proxy or Traefik, that proxy (a private
+  address), and walking `X-Forwarded-For` from the right past it; behind
+  Cloudflare, Cloudflare's published ranges as well, with `CF-Connecting-IP`
+  read only when every hop was trusted. Caddy writes the answer into
+  `X-Agentbox-Client-IP`, dropping any copy a client sent, and the gate
+  believes that header only on connections from the proxy — named `proxy` in
+  compose, resolved in the background, and on a network the sandbox is not
+  on. A request that reaches Traefik directly with forged headers is keyed on
+  the address Traefik appends for it; one that calls the gate from the sandbox
+  is keyed on its own. Residual: a client that itself has a private address —
+  another container on a shared edge network, a machine on the host's LAN —
+  can write what it likes further left in `X-Forwarded-For` and pick its own
+  budget. It still meets the global ceiling, and it still needs the password.
 - **Two-factor (optional).** TOTP (RFC 6238: SHA-1, six digits, 30-second
   steps, one step of clock drift either way), each code usable once. Enrolling
   gives ten single-use recovery codes of 80 bits each, stored as SHA-256
   digests. A lost phone is fixed on the host with `./scripts/agentbox totp
   reset`.
 - **Device tokens.** The CLI signs in with a device flow: it asks the gate for a
-  code, the owner — signed in, in a browser — approves it on
-  `/settings/devices?code=XXXX-XXXX`, and the CLI collects a token once. Tokens
-  are `abx_` plus 256 random bits, stored as SHA-256 digests with a name, when
-  they were made and last used, and from where; they work as `Authorization:
-  Bearer` on every authenticated route, ttyd included. They cannot manage the
-  account — sessions, the password, two-factor, approving another device —
-  which takes a signed-in browser. Revoke one from the API, or all of them
-  with `./scripts/agentbox gate revoke-all`.
-- **Headers.** Everything the gate serves carries `Referrer-Policy:
-  no-referrer` and `X-Content-Type-Options: nosniff`, and HTML carries
-  `frame-ancestors 'self'`. The sign-in pages allow nothing but their own
-  files (`default-src 'none'`). HSTS stays with whatever terminates TLS.
+  code, the owner — signed in, in a browser, in sudo mode — approves it on
+  `/settings/devices?code=XXXX-XXXX`, and the CLI collects a token once. One
+  client address may have three logins waiting, and a hundred may wait in
+  all. Tokens are `abx_` plus 256 random bits, stored as SHA-256 digests with a
+  name, when they were made and last used, and from where; they work as
+  `Authorization: Bearer` on every authenticated route, ttyd included. They
+  cannot manage the account — sessions, the password, two-factor, approving
+  another device — which takes a signed-in browser, and a token may revoke
+  only itself. Revoke others from a browser in sudo mode, or all of them with
+  `./scripts/agentbox gate revoke-all`.
+- **Headers.** Everything the gate serves carries `X-Content-Type-Options:
+  nosniff` and — except its own pages, above — `Referrer-Policy: no-referrer`,
+  and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing
+  but their own files (`default-src 'none'`). HSTS stays with whatever
+  terminates TLS.
 - **The host's escape hatches** (`passwd`, `totp reset`, `gate unlock`,
   `gate revoke-all`) reach the running gate through a Unix socket in the gate
   container's private `/tmp`, so only a process already inside that container
-  — `docker compose exec` from the host — can use them.
+  — `docker compose exec` from the host — can use them. With the gate stopped
+  they edit the store directly, and refuse while any gate holds its lease on
+  the volume.
 
-What this does *not* do: a compromised sandbox with internet egress can still
-publish itself through a tunnel of its own; that was always true (see
-"Egress filtering"). The gate guarantees that its own front door never lets
-anyone in without the owner, and never hands the sandbox the owner's
-credentials. `tests/proxy/gate-bypass.sh` runs the real Caddyfiles and the real
-gate image against stand-ins for every sandbox port and proves both.
+### What a compromised sandbox can still do
+
+The box's one origin also serves what the sandbox controls: code-server, the
+ttyd shells and the bridge's app are all programs inside it. So a compromised
+sandbox can run script in your browser, on the box's origin, while you have a
+tab of it open — and that script acts with your session, and could show a
+lookalike prompt and read a password typed into it while it runs. With
+internet egress it can also publish itself through a tunnel of its own; that
+was always true (see "Egress filtering").
+
+What the gate guarantees regardless:
+
+- nothing reaches the sandbox without a session or a device token;
+- no front-door credential — the password, the session cookie, a token — is
+  ever sent into the sandbox;
+- no persistent takeover: no service worker outside the editor, so nothing the
+  sandbox serves outlives the tab or answers for the gate's pages;
+- app content runs without the box's origin in the preview panel (a sandboxed
+  frame). Opened full screen, a path preview does run on the box's origin — the
+  panel warns and asks first — until the app model, which serves every app
+  under an opaque origin, replaces path previews;
+- the changes that would keep the box or lock you out — a new device, the
+  password, two-factor, revoking tokens — need the password again (and a code,
+  with two-factor on), not just the session.
+
+`tests/proxy/gate-bypass.sh` runs the real Caddyfiles and the real gate image,
+wired as compose wires them, against stand-ins for every sandbox port, a real
+Traefik and a stand-in Cloudflare edge, and proves the first three.
 
 ## The Workbench's own surface
 

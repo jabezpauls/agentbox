@@ -26,6 +26,7 @@ prints the resolved command before it runs anything.
 | `--cert-resolver <name>` | `letsencrypt` | traefik: the Traefik certificate resolver for this host. |
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
 | `--preview <off\|path>` | `path` | Kept so older commands still run. Public `/s/<token>` shares are off; see [Signing in](#signing-in). |
+| `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
 | `--agents <list>` | `claude,codex` | Which coding agents to build into the image, comma-separated (`claude`, `codex`). `herdr` is always installed. |
 | `--isolate-host` | off | Firewall the sandbox off the host and other private networks — see below. |
 | `--cpus` / `--memory` | `2` / `4g` | Sandbox ceilings per service. |
@@ -54,10 +55,16 @@ curl -fsSL .../install.sh | bash -s -- \
 
 The gate keeps authenticating every request inside the stack, so the sandbox is
 never reachable unauthenticated even from another container on that network.
-Traefik's own rate limit stays in front of it as an outer ceiling, and the gate
-keys its sign-in limits on `CF-Connecting-IP`, which is right behind Cloudflare;
-if nothing fronts Traefik, set `AGENTBOX_CLIENT_IP_HEADER=` (empty) in `.env`,
-since a client could otherwise send that header itself.
+Traefik's own rate limit stays in front of it as an outer ceiling.
+
+traefik mode assumes the hostname is proxied through Cloudflare
+(`--cloudflare on`, the default here): Caddy then trusts Traefik and
+Cloudflare's published ranges when it works out whose address a sign-in comes
+from, and a client that reaches Traefik directly, forging Cloudflare's
+headers, is still counted as itself. If nothing fronts Traefik, pass
+`--cloudflare off`. Cloudflare's ranges ship with agentbox;
+`scripts/refresh-cloudflare-ips.sh` refreshes them if Cloudflare ever changes
+them.
 
 ### Choosing coding agents
 
@@ -116,13 +123,28 @@ session ends after 12 hours unused. The paths behind it:
 **Changing the password.** `./scripts/agentbox passwd` prompts for a new one
 (leave it blank to generate one) and signs every session out. The gate's store
 is what counts: `AGENTBOX_PASSWORD_HASH` in `.env` only seeds a store that does
-not exist yet, so editing it later changes nothing.
+not exist yet, so editing it by hand changes nothing — `passwd` updates it too,
+so the two never disagree.
+
+**Sudo mode.** Approving a device, two-factor changes, the password and
+revoking device tokens ask for your password again (and a code, with
+two-factor on), then need nothing more for ten minutes. Everything else never
+asks.
 
 **Two-factor.** Optional, and recommended on a box reachable from the internet.
-It is enrolled from the app's Settings → Account (the gate's
-`/_gate/totp/setup` and `/_gate/totp/confirm` underneath): scan the QR code
-with an authenticator app, confirm one code, and keep the ten recovery codes it
-shows — each signs you in once in place of a code. Turning it on or off signs
+The app's Settings screen will enrol it; until your version has that screen,
+use the gate's API from a signed-in tab. In the browser's developer console on
+any page of the box:
+
+```js
+const post = (p, b) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+const { secret, otpauthUrl } = await post("/_gate/totp/setup", { password: "your password" });
+// Add `secret` (or `otpauthUrl`) to your authenticator app, then confirm with the code it shows:
+await post("/_gate/totp/confirm", { code: "123456" });   // returns your ten recovery codes
+```
+
+Keep the ten recovery codes it returns — each signs you in once in place of a
+code. Turning it on or off signs
 every other session out. Lost the phone and the codes? On the server:
 
 ```bash
@@ -168,12 +190,16 @@ services that guess the port. Two things your proxy must do:
   and pass WebSocket upgrades. The gate and the services behind it compare a
   request's `Origin` with its `Host`; a rewritten `Host` refuses every sign-in
   and every terminal.
-- **Say who the visitor is.** To agentbox every request arrives from your
-  proxy, so sign-in limits would count all visitors as one — and one visitor's
-  failures could lock everyone out. Set `AGENTBOX_CLIENT_IP_HEADER` in `.env` to
-  the header your proxy writes the client address into (nginx:
-  `proxy_set_header X-Real-IP $remote_addr;` and `AGENTBOX_CLIENT_IP_HEADER=X-Real-IP`).
-  Behind a Cloudflare Tunnel, use `CF-Connecting-IP`.
+- **Say who the visitor is, in `X-Forwarded-For`.** To agentbox every request
+  arrives from your proxy, so Caddy trusts it (it connects from a private
+  address) and reads the visitor from `X-Forwarded-For`, walking from the right
+  past private addresses. nginx: `proxy_set_header X-Forwarded-For
+  $proxy_add_x_forwarded_for;`. cloudflared sets it by itself; behind a
+  Cloudflare Tunnel or an orange-cloud record, also pass `--cloudflare on`, so
+  Cloudflare's addresses are skipped too. Without this, sign-in limits count
+  every visitor as one, and one visitor's failures can lock everyone out. (A
+  proxy that sends only some other header can name it in
+  `AGENTBOX_CLIENT_IP_HEADER`, which Caddy reads after `X-Forwarded-For`.)
 
 The box must be reached over HTTPS (or on `localhost`): the session cookie is
 `Secure`, and a browser will not keep it over plain HTTP.
@@ -218,8 +244,9 @@ it against `.env.example` after updating and copy across anything missing.
 To adopt a setting on an existing box, pass the install flag to `update`, which
 writes the matching `.env` key and re-applies it: `agentbox update --agents
 claude` rebuilds with just Claude, `agentbox update --mode traefik` swaps the
-overlay, and `--isolate-host`, `--cert-resolver`, `--edge-network`, `--cpus`,
-`--memory`, `--proxy-cpus` and `--proxy-memory` all work the same way. `update`
+overlay, and `--cloudflare`, `--isolate-host`, `--cert-resolver`,
+`--edge-network`, `--cpus`, `--memory`, `--proxy-cpus` and `--proxy-memory`
+all work the same way. `update`
 checks every flag before it writes any of them.
 
 Updating a box from before the gate existed builds the gate, which seeds its
@@ -233,7 +260,17 @@ and the proxy stops authenticating. What changes for you:
 - Public `/s/<token>` links stop opening, and per-port preview hostnames are
   gone. `AGENTBOX_PREVIEW_DOMAIN` can be deleted from `.env`; the wildcard DNS
   record and any route for it on a fronting proxy can go too.
-- Behind another reverse proxy, set `AGENTBOX_CLIENT_IP_HEADER` (see above).
+- Whose address sign-in limits count is now worked out by Caddy (see
+  [behind-proxy](#if-something-already-serves-ports-80-and-443) and
+  [traefik mode](#traefik-mode)), and the new `AGENTBOX_CLOUDFLARE` setting
+  replaces what `AGENTBOX_CLIENT_IP_HEADER` used to do. A re-run of the
+  installer, or `agentbox update`, derives it from the old key: an `.env` naming
+  `CF-Connecting-IP` there becomes `--cloudflare on`, anything else `off`, and
+  a traefik install that never set it `on`, as it always assumed. Check it
+  with `grep CLOUDFLARE .env`; change it with `agentbox update --cloudflare on|off`.
+- `./scripts/agentbox backup` now includes the gate's volume (the password
+  hash, sessions, two-factor, device tokens). Keep the archive as private as
+  `.env`.
 
 Review replaced the bundled lavish-axi, so `AGENTBOX_LAVISH_DOMAIN` and
 `AGENTBOX_LAVISH_URL` no longer do anything and can be deleted from an existing

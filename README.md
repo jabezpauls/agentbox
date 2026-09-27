@@ -105,8 +105,8 @@ address — no ports are opened and Cloudflare terminates TLS:
 code.example.com  →  http://127.0.0.1:8443
 ```
 
-Set `AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env` so sign-in limits
-count each visitor rather than the tunnel as one.
+Pass `--cloudflare on` to the installer so sign-in limits count each visitor
+(read past Cloudflare's addresses) rather than the tunnel as one.
 
 **Order matters.** `cloudflared` matches ingress rules top to bottom, so a
 route placed below a wildcard such as `*.example.com` never runs. The symptom
@@ -137,7 +137,7 @@ root.
 ./scripts/agentbox workbench        # follow the Workbench bridge's log
 ./scripts/agentbox passwd           # change the password
 ./scripts/agentbox totp reset       # turn two-factor off (lost phone)
-./scripts/agentbox backup           # archive workspace and home
+./scripts/agentbox backup           # archive workspace, home and the gate's store
 ./scripts/agentbox update           # pull, rebuild, restart
 ```
 
