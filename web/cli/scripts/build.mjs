@@ -14,7 +14,12 @@ import { build } from "esbuild";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..");
-const { version } = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+// The gate's image builds this with the box's own version (AGENTBOX_VERSION,
+// what /_gate/version reports), so the CLI a box serves says it matches that
+// box; the gate and this package fall back to the same package version.
+const stamped = process.env.AGENTBOX_VERSION ?? "";
+const version = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(stamped) ? stamped : pkg.version;
 // Another place to write it to, for the tests.
 const outfile = path.resolve(process.argv[2] ?? path.join(pkgDir, "dist", "agentbox.mjs"));
 

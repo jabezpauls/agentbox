@@ -60,8 +60,24 @@ describe("the path guard", () => {
 
 describe("the route table", () => {
   it("keeps the gate's own paths", () => {
-    for (const u of ["/login", "/login?next=/x", "/login/assets/login.css", "/_gate/login", "/_gate/anything", "/cli/install", "/settings/devices?code=AAAA-BBBB"]) {
+    for (const u of [
+      "/login",
+      "/login?next=/x",
+      "/login/assets/login.css",
+      "/_gate/login",
+      "/_gate/anything",
+      "/cli/install",
+      "/cli/agentbox.mjs",
+      "/cli/install?x=1",
+      "/settings/devices?code=AAAA-BBBB",
+    ]) {
       expect(at(u), u).toEqual({ kind: "gate" });
+    }
+  });
+
+  it("keeps exactly the CLI's two files, and nothing else under /cli", () => {
+    for (const u of ["/cli", "/cli/", "/cli/other", "/cli/install/", "/cli/install/x", "/cli/agentbox.mjs.map", "/cli/Install", "/clix"]) {
+      expect(at(u), u).toEqual({ kind: "upstream", upstream: "bridge", target: u });
     }
   });
 

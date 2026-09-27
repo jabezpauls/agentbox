@@ -13,7 +13,7 @@ import { isDavPath } from "./path-guard.js";
 export type UpstreamName = "code" | "terminal" | "shell" | "monitor" | "bridge";
 
 export type Route =
-  /** Served by the gate's own handlers: login, `/_gate/*`, `/cli/*`, the device page. */
+  /** Served by the gate's own handlers: login, `/_gate/*`, the CLI's files, the device page. */
   | { kind: "gate" }
   /** A fixed redirect that needs no authentication and reveals nothing. */
   | { kind: "redirect"; location: string }
@@ -30,10 +30,12 @@ export function underSegment(path: string, prefix: string): boolean {
 /**
  * Paths the gate answers itself. `/settings/devices` is the device-approval
  * page the CLI's login opens; the gate serves a minimal one until the app's own
- * Settings screen takes the route over.
+ * Settings screen takes the route over. The CLI's two files are exact paths,
+ * not a prefix: they are served to anyone, so nothing else under `/cli` may
+ * ride along.
  */
-const GATE_PREFIXES = ["/login", "/_gate", "/cli"];
-const GATE_EXACT = new Set(["/settings/devices"]);
+const GATE_PREFIXES = ["/login", "/_gate"];
+const GATE_EXACT = new Set(["/settings/devices", "/cli/install", "/cli/agentbox.mjs"]);
 
 /**
  * ttyd serves each shell under its own base path (`--base-path /terminal`), so

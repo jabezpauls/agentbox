@@ -18,9 +18,15 @@ COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/
 COPY web/vscode-ext/package.json vscode-ext/
+COPY web/cli/package.json cli/
 RUN npm ci
 COPY web/ .
 RUN npm run build -w gate
+# The CLI the gate serves at /cli/, stamped with this box's version, which is
+# what /_gate/version reports and the CLI compares itself with. Declared only
+# here, so a new version rebuilds just this step.
+ARG AGENTBOX_VERSION=dev
+RUN npm run build -w cli
 
 # The gate's production dependencies alone, installed from the lockfile on the
 # same base as the runtime, so the native bcrypt binding matches its libc.
@@ -32,6 +38,7 @@ COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/
 COPY web/vscode-ext/package.json vscode-ext/
+COPY web/cli/package.json cli/
 RUN npm ci --omit=dev --workspace gate
 
 FROM node:22-alpine
@@ -50,6 +57,10 @@ WORKDIR /app
 COPY --from=deps /src/node_modules /app/node_modules
 COPY --from=build /src/gate/package.json /app/package.json
 COPY --from=build /src/gate/dist /app/dist
+# /cli/agentbox.mjs and /cli/install (the gate writes the box's URL into the
+# script as it serves it).
+COPY --from=build /src/cli/dist/agentbox.mjs /app/cli/agentbox.mjs
+COPY --from=build /src/cli/install.sh /app/cli/install
 COPY images/gate/agentbox-gate /usr/local/bin/agentbox-gate
 
 # Last, so a new version rebuilds only this layer.

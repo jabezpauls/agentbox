@@ -14,10 +14,12 @@ COPY web/package.json web/package-lock.json ./
 COPY web/shared/package.json shared/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
-# The gate is its own image (images/gate), but it is a workspace of the same
-# lockfile, so `npm ci` needs its manifest to check against.
+# The gate and the CLI are not part of this image (the gate is its own, and
+# serves the CLI), but they are workspaces of the same lockfile, so `npm ci`
+# needs their manifests to check against.
 COPY web/gate/package.json gate/
 COPY web/vscode-ext/package.json vscode-ext/
+COPY web/cli/package.json cli/
 RUN npm ci
 COPY web/ .
 RUN npm run build && npm prune --omit=dev

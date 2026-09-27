@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { IDLE_MS, bearerToken, type Subject } from "./auth.js";
+import { BUNDLE_NAME, INSTALL_NAME, renderInstallScript } from "./cli-files.js";
 import { clearedSessionCookie, sessionCookie } from "./cookies.js";
 import { cleanDeviceName, TooManyPending } from "./device.js";
 import { infoOf, originOf, safeEqual, safeNext, type GateCore, type RequestInfo } from "./context.js";
@@ -572,21 +573,35 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return html(reply, 200, renderDevices(devicesPage(req, str(req.query.code))));
   });
 
-  // --- the CLI, served by the box itself (Phase E ships the files) ------------
+  // --- the CLI, served by the box itself (see cli-files.ts) --------------------
 
-  const CLI_FILES: Record<string, string> = {
-    install: "text/x-shellscript; charset=utf-8",
-    "agentbox.mjs": "text/javascript; charset=utf-8",
-  };
-  app.get<{ Params: { name: string } }>("/cli/:name", async (req, reply) => {
-    const type = CLI_FILES[req.params.name];
-    if (!type) return reply.code(404).send({ error: "not found" });
+  /** A file from the CLI directory, or `null` when this image has none. */
+  const cliFile = async (name: string): Promise<Buffer | null> => {
     try {
-      const data = await fs.promises.readFile(path.join(config.cliDir, req.params.name));
-      return reply.type(type).send(data);
+      return await fs.promises.readFile(path.join(config.cliDir, name));
     } catch {
-      return reply.code(404).send({ error: "not found" });
+      return null;
     }
+  };
+  // Neither is a page: nothing in them may run as one if a browser opens them.
+  const CLI_CSP = "default-src 'none'; sandbox";
+
+  app.get("/cli/install", async (req, reply) => {
+    const template = await cliFile(INSTALL_NAME);
+    if (!template) return reply.code(404).send({ error: "not found" });
+    const origin = originOf(core, req.raw);
+    const script = renderInstallScript(template.toString("utf8"), origin);
+    if (script === null) {
+      console.error(`[gate] cannot write the install script for ${JSON.stringify(origin)}: not a plain origin`);
+      return reply.code(500).send({ error: "this box's public URL is not a plain https://host[:port]; check AGENTBOX_PUBLIC_URL" });
+    }
+    return reply.type("text/x-shellscript; charset=utf-8").header("content-security-policy", CLI_CSP).send(script);
+  });
+
+  app.get("/cli/agentbox.mjs", async (_req, reply) => {
+    const bundle = await cliFile(BUNDLE_NAME);
+    if (!bundle) return reply.code(404).send({ error: "not found" });
+    return reply.type("text/javascript; charset=utf-8").header("content-security-policy", CLI_CSP).send(bundle);
   });
 
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: "not found" }));

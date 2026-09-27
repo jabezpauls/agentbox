@@ -355,10 +355,14 @@ describe("the sign-in page", () => {
     expect((await request(h.base, "GET", "/login/assets/README.md")).status).toBe(404);
   });
 
-  it("serves no CLI until one is shipped", async () => {
+  it("serves no CLI from an image without one, and nothing else under /cli without a session", async () => {
     expect((await request(h.base, "GET", "/cli/install")).status).toBe(404);
     expect((await request(h.base, "GET", "/cli/agentbox.mjs")).status).toBe(404);
-    expect((await request(h.base, "GET", "/cli/other")).status).toBe(404);
+    const before = h.allSeen().length;
+    for (const p of ["/cli", "/cli/", "/cli/other", "/cli/install/x"]) {
+      expect((await request(h.base, "GET", p)).status, p).toBe(401);
+    }
+    expect(h.allSeen().length).toBe(before);
   });
 
   it("gives an unknown /_gate path a 404 rather than the bridge", async () => {
