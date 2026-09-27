@@ -173,5 +173,10 @@ COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 # staged here and the entrypoint copies it into place on every start.
 COPY --chown=1000:1000 images/workspace/skills /usr/local/share/agentbox/skills
 
+# Which agentbox this is, for the System surface. Last, so a new version
+# rebuilds only this layer.
+ARG AGENTBOX_VERSION=dev
+ENV AGENTBOX_VERSION=${AGENTBOX_VERSION}
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["code-server", "--bind-addr=0.0.0.0:8080", "--auth=none", "/workspace"]

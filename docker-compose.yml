@@ -23,6 +23,10 @@ x-sandbox: &sandbox
       # `-`, not `:-`: an unset key means the default pair, but a key set empty
       # (`--agents ''`) means no agents at all.
       AGENTS: ${AGENTBOX_AGENTS-claude,codex}
+      # Which agentbox this is, as the System surface and the gate's
+      # /_gate/version report it. install.sh and `agentbox update` write the
+      # checkout's description here; a bare `docker compose build` says dev.
+      AGENTBOX_VERSION: ${AGENTBOX_VERSION:-dev}
   image: agentbox/workspace:latest
   restart: unless-stopped
   # UID/GID 1000 inside the image. Never root.
@@ -146,6 +150,8 @@ services:
     build:
       context: .
       dockerfile: images/gate/Dockerfile
+      args:
+        AGENTBOX_VERSION: ${AGENTBOX_VERSION:-dev}
     image: agentbox/gate:latest
     restart: unless-stopped
     read_only: true

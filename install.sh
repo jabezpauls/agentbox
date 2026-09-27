@@ -324,6 +324,14 @@ else
 fi
 cd "$INSTALL_DIR"
 
+# Which agentbox this is: baked into both images and reported by the System
+# surface and the gate. Only this directory's own checkout counts, never one
+# it happens to sit inside; a copy without one is "dev".
+VERSION="dev"
+if [ -e .git ] && command -v git >/dev/null 2>&1; then
+    VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+fi
+
 # --- Credentials ------------------------------------------------------------
 GENERATED="false"
 KEPT="false"
@@ -359,7 +367,7 @@ if [ -f .env ]; then
     # Keep every line this installer does not manage — API keys, TZ, comments,
     # settings added by hand — exactly as it was.
     # AGENTBOX_CLIENT_IP_HEADER is an older key, carried over above.
-    managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_CLIENT_IP_HEADER"
+    managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_VERSION|AGENTBOX_CLIENT_IP_HEADER"
     for pair in $MANAGED; do managed_re="$managed_re|${pair%%:*}"; done
     managed_re="$managed_re)="
     grep -Ev "$managed_re" .env > "$NEW_ENV" || true
@@ -387,6 +395,7 @@ AGENTBOX_CPUS=$CPUS
 AGENTBOX_MEMORY=$MEMORY
 AGENTBOX_PROXY_CPUS=$PROXY_CPUS
 AGENTBOX_PROXY_MEMORY=$PROXY_MEMORY
+AGENTBOX_VERSION=$VERSION
 ENVFILE
 chmod 600 "$NEW_ENV"
 mv "$NEW_ENV" .env

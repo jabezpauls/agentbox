@@ -167,6 +167,8 @@ case "${1:-help}" in
         # A header set by hand is checked before anything restarts.
         real_ip_header_problem "$(grep -m1 '^AGENTBOX_REAL_IP_HEADER=' .env | cut -d= -f2- || true)" && exit 1
         git pull --ff-only
+        # The version the rebuilt images will report (see install.sh).
+        set_env AGENTBOX_VERSION "$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
         # Recompute the overlay in case --mode just changed.
         MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
         OVERLAYS=(-f docker-compose.yml -f "docker-compose.${MODE}.yml")

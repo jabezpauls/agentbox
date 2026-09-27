@@ -87,6 +87,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     staticDir: env.GATE_STATIC_DIR || path.join(here, "static"),
     cliDir: env.GATE_CLI_DIR || path.join(here, "..", "cli"),
-    version: packageVersion(),
+    // Which agentbox this is: the image is built with the checkout's
+    // description (see install.sh); a gate run from source says its package.
+    version: env.AGENTBOX_VERSION || packageVersion(),
   };
 }

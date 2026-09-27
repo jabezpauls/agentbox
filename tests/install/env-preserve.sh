@@ -73,6 +73,25 @@ echo "re-run twice more"
 run --isolate-host
 run
 expect AGENTBOX_PASSWORD_HASH "$HASH" "hash still unchanged after three runs"
+expect AGENTBOX_VERSION dev "outside a checkout the version is dev"
+if [ "$(grep -c '^AGENTBOX_VERSION=' "$DIR/.env")" = 1 ]; then pass "the version is written once"; else fail "AGENTBOX_VERSION duplicated"; fi
+
+echo "the version comes from the install's own checkout"
+seed
+git -C "$DIR" -c init.defaultBranch=main init -q
+git -C "$DIR" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m one
+git -C "$DIR" tag v9.9.9
+echo "AGENTBOX_VERSION=v0.0.1" >> "$DIR/.env"
+run
+expect AGENTBOX_VERSION v9.9.9 "install writes the checkout's tag, replacing the old one"
+git -C "$DIR" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m two
+run
+case "$(get AGENTBOX_VERSION)" in
+    v9.9.9-1-g*) pass "a commit past the tag says so" ;;
+    *) fail "a commit past the tag: '$(get AGENTBOX_VERSION)'" ;;
+esac
+if [ "$(grep -c '^AGENTBOX_VERSION=' "$DIR/.env")" = 1 ]; then pass "and is still written once"; else fail "AGENTBOX_VERSION duplicated"; fi
+rm -rf "$DIR/.git"
 
 echo "a flag overrides just its own key"
 seed
@@ -302,6 +321,36 @@ if grep -q -- "--cloudflare on" "$DIR/err"; then pass "and points at --cloudflar
 seed
 (cd / && "$DIR/scripts/agentbox" update --real-ip-header X-Real-IP) >/dev/null 2>&1 || true
 expect AGENTBOX_REAL_IP_HEADER X-Real-IP "update --real-ip-header X-Real-IP is written"
+
+echo "agentbox update records the version it updates to"
+# A checkout with an upstream to pull from, and a docker that does nothing.
+UP="$(mktemp -d)"
+trap 'rm -rf "$DIR" "$UP"' EXIT
+mkdir -p "$UP/src/scripts" "$UP/bin"
+cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$UP/src/scripts/"
+touch "$UP/src/docker-compose.yml"
+printf '.env\n' > "$UP/src/.gitignore"
+git -C "$UP/src" -c init.defaultBranch=main init -q
+git -C "$UP/src" add -A
+git -C "$UP/src" -c user.name=t -c user.email=t@example.com commit -q -m one
+git -C "$UP/src" tag v9.9.10
+git clone -q "$UP/src" "$UP/box"
+printf '#!/bin/sh\nexit 0\n' > "$UP/bin/docker"
+chmod +x "$UP/bin/docker"
+seed
+cp "$DIR/.env" "$UP/box/.env"
+echo "AGENTBOX_VERSION=v0.0.1" >> "$UP/box/.env"
+upget() { grep -m1 "^$1=" "$UP/box/.env" | cut -d= -f2-; }
+if (cd / && PATH="$UP/bin:$PATH" "$UP/box/scripts/agentbox" update) >/dev/null 2>"$UP/err"; then
+    if [ "$(upget AGENTBOX_VERSION)" = v9.9.10 ]; then pass "update writes the checkout's tag"; else fail "update wrote AGENTBOX_VERSION='$(upget AGENTBOX_VERSION)'"; fi
+else
+    fail "update failed: $(cat "$UP/err")"
+fi
+echo "# changed" >> "$UP/box/docker-compose.yml"
+(cd / && PATH="$UP/bin:$PATH" "$UP/box/scripts/agentbox" update) >/dev/null 2>&1 || true
+if [ "$(upget AGENTBOX_VERSION)" = v9.9.10-dirty ]; then pass "and says when the checkout was changed by hand"; else fail "dirty checkout: '$(upget AGENTBOX_VERSION)'"; fi
+if [ "$(grep -c '^AGENTBOX_VERSION=' "$UP/box/.env")" = 1 ]; then pass "and writes it once"; else fail "AGENTBOX_VERSION duplicated by update"; fi
+if [ "$(upget ANTHROPIC_API_KEY)" = sk-ant-keepme ]; then pass "leaving the rest of .env alone"; else fail "update lost a key"; fi
 
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

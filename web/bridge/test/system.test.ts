@@ -12,6 +12,7 @@ import {
   SystemMonitor,
   versionIn,
 } from "../src/system.js";
+import { loadConfig } from "../src/config.js";
 import { filesFixture, tmpBase } from "./helpers/files.js";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -199,6 +200,12 @@ describe("the system monitor", () => {
         { name: "codex", version: null },
       ],
     });
+  });
+
+  it("reports the version the image was built with", () => {
+    // AGENTBOX_VERSION is baked into the image from the checkout's description.
+    expect(loadConfig({ AGENTBOX_VERSION: "v1.4.0-3-gabc1234-dirty" }).version).toBe("v1.4.0-3-gabc1234-dirty");
+    expect(loadConfig({}).version).toBeNull();
   });
 
   it("is served at /api/system", async () => {

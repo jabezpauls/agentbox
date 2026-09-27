@@ -52,6 +52,10 @@ COPY --from=build /src/gate/package.json /app/package.json
 COPY --from=build /src/gate/dist /app/dist
 COPY images/gate/agentbox-gate /usr/local/bin/agentbox-gate
 
+# Last, so a new version rebuilds only this layer.
+ARG AGENTBOX_VERSION=dev
+ENV AGENTBOX_VERSION=${AGENTBOX_VERSION}
+
 USER 10001:10001
 VOLUME /data
 EXPOSE 7900
