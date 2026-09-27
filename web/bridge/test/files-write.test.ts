@@ -81,6 +81,28 @@ describe("write, mkdir, move, copy", () => {
     expect((await post("/api/files/move", { from: "d", to: "../escape" })).statusCode).toBe(403);
   });
 
+  it("never copies or moves agentbox's own state, however it is named", async () => {
+    // The reviewer's case: a copy of .agentbox is built inside .agentbox/uploads
+    // and would copy itself until the disk filled.
+    const trash = path.join(ws, ".agentbox", "trash", "a".repeat(24));
+    fs.mkdirSync(trash, { recursive: true });
+    fs.writeFileSync(path.join(trash, "big"), Buffer.alloc(1024 * 1024));
+    fs.mkdirSync(path.join(ws, ".agentbox", "review"), { recursive: true });
+    fs.symlinkSync(".agentbox", path.join(ws, "state-link"));
+    fs.mkdirSync(path.join(f.home, ".agentbox", "review"), { recursive: true });
+    for (const from of [".agentbox", ".agentbox/trash", ".agentbox/review", "", "state-link/trash", "~/.agentbox/review", "~"]) {
+      for (const op of ["copy", "move"]) {
+        const res = await post(`/api/files/${op}`, { from, to: `copied-${op}-${from.replace(/\W/g, "_")}` });
+        expect(res.statusCode, `${op} ${from}`).toBe(403);
+      }
+    }
+    // Refused before any scratch work began.
+    expect(fs.existsSync(path.join(ws, ".agentbox", "uploads"))).toBe(false);
+    // The link itself is not state: it can be copied as a link.
+    expect((await post("/api/files/copy", { from: "state-link", to: "state-link-2" })).statusCode).toBe(200);
+    expect(fs.readlinkSync(path.join(ws, "state-link-2"))).toBe(".agentbox");
+  });
+
   it("moves a symlink as a link, and between the two roots", async () => {
     fs.symlinkSync(f.base, path.join(ws, "out"));
     expect((await post("/api/files/move", { from: "out", to: "out2" })).statusCode).toBe(200);

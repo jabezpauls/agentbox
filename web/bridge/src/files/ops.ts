@@ -81,6 +81,7 @@ export class FileOps {
   async move(body: { from?: unknown; to?: unknown; overwrite?: unknown }): Promise<FileEntry> {
     const src = await this.roots.entry(body.from);
     this.roots.assertMutable(src);
+    await this.roots.assertMovable(src);
     const dest = await this.roots.creatable(body.to);
     this.roots.assertMutable(dest);
     if (dest.abs === src.abs) return describe(src.abs, src.fs, await this.roots.realRoot(src.root));
@@ -103,6 +104,7 @@ export class FileOps {
    */
   async copy(body: { from?: unknown; to?: unknown; overwrite?: unknown }): Promise<FileEntry> {
     const src = await this.roots.entry(body.from);
+    await this.roots.assertMovable(src);
     const dest = await this.roots.creatable(body.to);
     this.roots.assertMutable(dest);
     if (dest.abs === src.abs) throw new FilesError(409, "a copy needs a different name", "exists");

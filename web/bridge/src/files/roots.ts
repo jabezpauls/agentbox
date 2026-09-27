@@ -164,6 +164,31 @@ export class Roots {
     }
   }
 
+  /**
+   * Refuse to copy or move anything that is, holds, or sits inside a root's
+   * `.agentbox`. Carrying the trash and upload scratch along is never what a
+   * person meant — and a copy is built inside that very scratch space, so a
+   * copy of it would copy itself until the disk filled. Checked on the path
+   * as named and as resolved, since a link can lead there.
+   */
+  async assertMovable(ref: EntryRef): Promise<void> {
+    for (const root of this.all) {
+      const lexical = this.stateDir(root);
+      const real = await this.realRoot(root).then(
+        (r) => path.join(r, STATE_DIR),
+        () => null,
+      );
+      for (const [p, state] of [
+        [ref.abs, lexical],
+        [ref.fs, real],
+      ] as const) {
+        if (state && (within(p, state) || within(state, p))) {
+          throw new FilesError(403, `${ref.abs} holds agentbox's own state`, "reserved");
+        }
+      }
+    }
+  }
+
   /** Resolve through every symlink; the destination must stay in the root. */
   async target(input: unknown): Promise<TargetRef> {
     const loc = this.locate(input);

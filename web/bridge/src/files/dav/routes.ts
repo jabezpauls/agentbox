@@ -530,6 +530,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
 
     const src = await roots.entry(abs);
     if (move) roots.assertMutable(src);
+    await roots.assertMovable(src);
     if (destAbs === src.abs) return reply.code(403).send();
     const dest = await roots.creatable(destAbs);
     roots.assertMutable(dest);
