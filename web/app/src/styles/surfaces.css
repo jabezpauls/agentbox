@@ -1,0 +1,505 @@
+/* Shared pieces of the surfaces — cards, meters, badges, lists — and Home. */
+
+/* --- small shared pieces ---------------------------------------------------- */
+
+.linklike {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.linklike:hover {
+  color: var(--accent);
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+p code,
+.empty-sub code,
+.field-hint code {
+  padding: 1px 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.segmented.is-wide {
+  display: flex;
+}
+.segmented.is-wide .segmented-btn {
+  flex: 1;
+}
+
+.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 45%;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+.branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vis-badge.is-private {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.vis-badge.is-public {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.vis-until {
+  opacity: 0.85;
+}
+.live-badge.is-live {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.live-badge.is-down {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+/* A determinate bar: the fill in accent over a tint of it. */
+.progress {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--accent-tint);
+}
+.progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.progress-fill.is-indeterminate {
+  width: 30% !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .progress-fill.is-indeterminate {
+    animation: indeterminate 1.2s var(--ease-out) infinite;
+  }
+  @keyframes indeterminate {
+    from {
+      left: -30%;
+    }
+    to {
+      left: 100%;
+    }
+  }
+}
+
+/* --- cards ------------------------------------------------------------------ */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--sp-3);
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:hover {
+    border-color: var(--border-strong);
+  }
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.card-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.card-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-meta {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.card-live {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
+}
+.card-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+}
+.card-chip.is-port {
+  font-family: var(--font-mono);
+}
+.card-chip-sub {
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}
+.card-chip.is-more {
+  color: var(--text-2);
+}
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: var(--sp-3) calc(var(--sp-2) * -1) calc(var(--sp-2) * -1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.card-actions .btn-ghost {
+  color: var(--text-2);
+}
+.card-error {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.card-url {
+  margin: var(--sp-2) 0 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clone-card .progress {
+  margin-top: var(--sp-3);
+}
+.clone-card.is-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.clone-card.is-error .progress-fill {
+  background: var(--danger);
+}
+.card.is-skeleton {
+  min-height: 132px;
+}
+
+/* --- meters ----------------------------------------------------------------- */
+
+.meter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-3);
+}
+.meter {
+  --meter: var(--accent);
+  --meter-track: var(--accent-tint);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.meter.is-warn {
+  --meter: var(--warning);
+  --meter-track: var(--warning-soft);
+}
+.meter.is-high {
+  --meter: var(--danger);
+  --meter-track: var(--danger-soft);
+}
+.meter-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.meter-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.meter-pct {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.meter-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--meter-track);
+}
+.meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--meter);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.meter-value {
+  font-size: var(--fs-xs);
+  color: var(--text);
+}
+.meter-warn {
+  color: var(--text-2);
+}
+.meter-sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+/* --- Home ------------------------------------------------------------------- */
+
+.home-hero {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-4);
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+/* rubl's one big number per page: the count of things that need a person. */
+.hero-figure {
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 36px;
+  color: var(--text);
+}
+.home-hero.is-clear {
+  align-items: center;
+  margin-bottom: var(--sp-8);
+}
+.hero-clear {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-pill);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 3px;
+}
+.hero-sub {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.need-list {
+  list-style: none;
+  margin: 0 0 var(--sp-8);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.need {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.need + .need {
+  border-top: 1px solid var(--border-subtle);
+}
+.need-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--sp-2) var(--sp-4);
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.need-row:hover {
+  background: var(--surface-2);
+}
+.need-row:focus-visible {
+  outline-offset: -2px;
+}
+.need-glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.need-glyph.is-blocked {
+  background: var(--warning-soft);
+}
+.need-glyph.is-review {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.need-glyph.is-crashed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.need-glyph.is-done {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.need-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.need-title {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.need-detail {
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.need-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+}
+.need.is-done .need-row {
+  padding-right: 44px;
+}
+.need-dismiss {
+  position: absolute;
+  right: var(--sp-3);
+}
+.need.is-done .need-go {
+  display: none;
+}
+.app-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 48px;
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+}
+.app-row + .app-row {
+  border-top: 1px solid var(--border-subtle);
+}
+.app-row-main {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.app-row-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-row-main:hover .app-row-name {
+  color: var(--accent);
+}
+.app-row-port {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.app-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+@media (max-width: 700px) {
+  .home-hero {
+    margin-top: 0;
+  }
+  .card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-row {
+    flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  }
+  .app-row-main {
+    flex-basis: 100%;
+  }
+}

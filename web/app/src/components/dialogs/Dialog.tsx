@@ -47,7 +47,9 @@ export function Dialog({
     const invoker = document.activeElement as HTMLElement | null;
     // A confirm focuses its verb so Enter confirms; a form focuses its first
     // field, not the close button that happens to come first in the DOM.
-    const first = bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+    // A field marked data-autofocus wins over document order.
+    const first =
+      bodyRef.current?.querySelector<HTMLElement>("[data-autofocus]") ?? bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE);
     if (autoFocusSubmit && submitRef.current) submitRef.current.focus();
     else if (first) first.focus();
     else ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
