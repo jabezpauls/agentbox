@@ -19,7 +19,8 @@ jobs:
             images/workspace/entrypoint.sh \
             images/workspace/agentbox-workbench \
             images/gate/agentbox-gate \
-            tests/proxy/gate-bypass.sh tests/install/*.sh
+            scripts/refresh-cloudflare-ips.sh \
+            tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh
 
       - name: Validate Compose files
         run: |
@@ -30,12 +31,15 @@ jobs:
           for mode in standalone behind-proxy traefik; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
           done
-          # The traefik overlay must never publish a port: Traefik reaches the
-          # proxy over the Docker network, and nothing else should reach it.
-          if docker compose -f docker-compose.yml -f docker-compose.traefik.yml config | grep -q '^ *ports:'; then
-            echo "the traefik overlay publishes a port" >&2
-            exit 1
-          fi
+
+      - name: Who can reach whom, in each mode
+        # The proxy shares a network with the gate alone (the sandbox cannot
+        # reach it), the gate joins the sandbox's network, and only the proxy
+        # publishes a port — none at all in traefik mode.
+        run: tests/proxy/topology.sh
+
+      - name: The two copies of Cloudflare's ranges agree
+        run: scripts/refresh-cloudflare-ips.sh --check
 
       - name: What a re-run of the installer keeps
         run: tests/install/env-preserve.sh
@@ -51,10 +55,15 @@ jobs:
       - name: Validate the Caddy configuration
         # Compose validation cannot catch a malformed Caddyfile; an undefined
         # snippet or a renamed directive only fails when the proxy starts.
+        # Each Caddyfile with each trust file the overlays can choose, mounted
+        # the way docker-compose.yml mounts them.
         run: |
           for file in Caddyfile.standalone Caddyfile.behind-proxy; do
-            docker run --rm -v "$PWD/proxy:/p:ro" -e AGENTBOX_DOMAIN=example.com \
-              caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+            for trust in standalone-off standalone-on proxied-off proxied-on; do
+              docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
+                -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" -e AGENTBOX_CLIENT_IP_HEADER= \
+                caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+            done
           done
 
   gate-bypass:
@@ -63,9 +72,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Nothing gets past the gate
         # Builds the gate image, then runs the real Caddyfiles in the real Caddy
-        # image in front of it, with echo servers for every sandbox port: no
-        # unauthenticated path, header or WebSocket trick reaches the sandbox,
-        # no front-door credential arrives there, and sign-in locks out.
+        # image in front of it, wired as compose wires them, with echo servers
+        # for every sandbox port: no unauthenticated path, header, WebSocket or
+        # service-worker trick reaches the sandbox, no front-door credential
+        # arrives there, no forged address changes whose sign-in budget is
+        # spent (a real Traefik and a stand-in Cloudflare edge included), and
+        # sign-in locks out.
         run: tests/proxy/gate-bypass.sh
 
   web:

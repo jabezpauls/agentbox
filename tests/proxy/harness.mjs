@@ -1,20 +1,21 @@
-// The sandbox side of the gate bypass suite. Runs in a plain node container
-// that takes the network alias `code`, standing in for the sandbox's shared
-// namespace: an echo server on every port the gate forwards to — the editor
-// (:8080), the three ttyd services (:7681-7683), the bridge (:7800) and its
-// future data plane (:7801).
+// The stand-ins of the gate bypass suite, all in plain node containers.
 //
-// Every request is answered with what arrived — method, path, headers — and
-// logged as a HIT line, so the suite can prove both what crossed the gate and
-// that nothing crossed it at all. A WebSocket handshake is accepted with the
-// same report base64-encoded in an `X-Echo` header, then closed.
+//   node harness.mjs
+//     The sandbox: takes the network alias `code` and serves an echo server on
+//     every port the gate forwards to — the editor (:8080), the three ttyd
+//     services (:7681-7683), the bridge (:7800) and its future data plane
+//     (:7801). Every request is answered with what arrived (method, path,
+//     headers) and logged as a HIT line, so the suite can prove both what
+//     crossed the gate and that nothing crossed it at all. A WebSocket
+//     handshake is accepted with the same report base64-encoded in `X-Echo`,
+//     then closed. A path containing "swa" is answered with
+//     `Service-Worker-Allowed: /`, which must never reach a browser.
 //
-//   node harness.mjs                     serve
-//   node harness.mjs direct <n> <pass>   sign in to gate:7900 directly, as a
-//                                        process in the sandbox would, with a
-//                                        forged X-Forwarded-For each time
-//   node harness.mjs proxied <n> <pass>  the same through the proxy, as a
-//                                        second client with its own address
+//   node harness.mjs signins <base-url> <n> <password> [Header=value ...]
+//     A client: n sign-in attempts at <base-url>, wrong passwords and then the
+//     right one last; prints the statuses. `{i}` in a header value becomes the
+//     attempt's number, for a forged address that changes every time. Prints
+//     "unreachable" when it cannot connect at all.
 import crypto from "node:crypto";
 import http from "node:http";
 
@@ -30,7 +31,9 @@ function serve() {
       console.log(`HIT ${port} ${req.method} ${req.url}`);
       req.resume();
       req.on("end", () => {
-        res.writeHead(200, { "content-type": "application/json" });
+        const headers = { "content-type": "application/json" };
+        if (req.url.includes("swa")) headers["service-worker-allowed"] = "/";
+        res.writeHead(200, headers);
         res.end(JSON.stringify(report(port, req)));
       });
     });
@@ -52,25 +55,34 @@ function serve() {
   console.log("READY");
 }
 
-async function signIns(base, n, password) {
+async function signins(base, n, password, headerArgs) {
   const codes = [];
   for (let i = 0; i < n; i++) {
-    const res = await fetch(`${base}/_gate/login`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        origin: base,
-        "x-forwarded-for": `198.51.100.${i + 1}`,
-        "cf-connecting-ip": `198.51.100.${i + 1}`,
-      },
-      body: JSON.stringify({ username: "ci", password: i === n - 1 ? password : "wrong-password" }),
-    });
-    codes.push(res.status);
+    const headers = { "content-type": "application/json", origin: base };
+    for (const arg of headerArgs) {
+      const eq = arg.indexOf("=");
+      headers[arg.slice(0, eq)] = arg.slice(eq + 1).replaceAll("{i}", String(i + 1));
+    }
+    try {
+      const res = await fetch(`${base}/_gate/login`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ username: "ci", password: i === n - 1 ? password : "wrong-password" }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      codes.push(res.status);
+    } catch {
+      console.log("unreachable");
+      return;
+    }
   }
   console.log(codes.join(" "));
 }
 
-const [mode, n, password] = process.argv.slice(2);
-if (mode === "direct") await signIns("http://gate:7900", Number(n), password);
-else if (mode === "proxied") await signIns("http://proxy:8080", Number(n), password);
-else serve();
+const [mode, ...rest] = process.argv.slice(2);
+if (mode === "signins") {
+  const [base, n, password, ...headers] = rest;
+  await signins(base, Number(n), password, headers);
+} else {
+  serve();
+}
