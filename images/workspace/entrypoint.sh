@@ -19,6 +19,25 @@ if [ -d /usr/local/share/agentbox/skills ]; then
     cp -r /usr/local/share/agentbox/skills/. /home/coder/.claude/skills/ || true
 fi
 
+# The editor extension that joins code-server to the app lives on the home
+# volume like any extension, so an image update would never reach a volume
+# that already has an older copy. Reinstall it when the image's build stamp
+# differs from the one recorded at the last install — only in the editor's own
+# container, since every sandbox service shares this volume.
+vsix=/usr/local/share/agentbox/agentbox-connect.vsix
+marker=/home/coder/.local/share/code-server/agentbox-connect.installed
+if [ "${1:-}" = code-server ] && [ -f "$vsix" ]; then
+    want="$(cat /usr/local/share/agentbox/agentbox-connect.version 2>/dev/null || true)"
+    have="$(cat "$marker" 2>/dev/null || true)"
+    if [ -n "$want" ] && [ "$want" != "$have" ]; then
+        if code-server --install-extension "$vsix" --force >/dev/null 2>&1; then
+            mkdir -p "$(dirname "$marker")" && printf '%s\n' "$want" >"$marker"
+        else
+            echo "note: could not install the agentbox connect extension" >&2
+        fi
+    fi
+fi
+
 # Git works out of the box inside the sandbox rather than erroring on ownership.
 git config --global --get safe.directory >/dev/null 2>&1 || \
     git config --global --add safe.directory '*'

@@ -17,6 +17,7 @@ COPY web/app/package.json app/
 # The gate is its own image (images/gate), but it is a workspace of the same
 # lockfile, so `npm ci` needs its manifest to check against.
 COPY web/gate/package.json gate/
+COPY web/vscode-ext/package.json vscode-ext/
 RUN npm ci
 COPY web/ .
 RUN npm run build && npm prune --omit=dev
@@ -143,6 +144,17 @@ WORKDIR /workspace
 # must not fail the build — the CLIs and the terminal remain the primary path.
 RUN code-server --install-extension anthropic.claude-code \
     || echo "note: Claude Code editor extension unavailable; use the CLI or /terminal"
+
+# agentbox connect: joins the editor to the app, so "Open in editor" anywhere
+# lands here. Unlike the one above it is ours and must install. A fresh home
+# volume gets it from this layer; the entrypoint brings an existing volume up
+# to the image's copy.
+COPY --from=web /src/vscode-ext/dist/agentbox-connect.vsix /src/vscode-ext/dist/agentbox-connect.version \
+     /usr/local/share/agentbox/
+RUN code-server --install-extension /usr/local/share/agentbox/agentbox-connect.vsix \
+    && code-server --list-extensions | grep -qx agentbox.agentbox-connect \
+    && cp /usr/local/share/agentbox/agentbox-connect.version \
+          /home/coder/.local/share/code-server/agentbox-connect.installed
 
 # The Workbench, from the build stage above. `npm prune --omit=dev` left the
 # workspace's node_modules hoisted at the root, so the bridge's dependencies

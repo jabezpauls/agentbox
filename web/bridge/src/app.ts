@@ -24,6 +24,8 @@ import { registerSystemRoutes } from "./routes/system.js";
 import { BridgeEvents } from "./events.js";
 import { Projects } from "./projects.js";
 import { registerProjectRoutes } from "./routes/projects.js";
+import { EditorChannel } from "./editor.js";
+import { registerEditorRoutes } from "./routes/editor.js";
 import { listListeningPorts } from "./ports.js";
 import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 
@@ -59,6 +61,8 @@ export interface AppDeps {
   events?: BridgeEvents;
   /** The project cards; defaults to one over the workspace root and the live ports. */
   projects?: Projects;
+  /** The editor channel the VS Code extension connects to. */
+  editor?: EditorChannel;
 }
 
 /**
@@ -129,9 +133,12 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
       events,
     });
   app.addHook("onClose", async () => projects.stop());
+  const editor = deps.editor ?? new EditorChannel();
+  app.addHook("onClose", async () => editor.close());
 
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
   registerProjectRoutes(app, projects);
+  registerEditorRoutes(app, editor, files);
   registerFilesRoutes(app, files);
   registerDavRoutes(app, files);
   registerSystemRoutes(

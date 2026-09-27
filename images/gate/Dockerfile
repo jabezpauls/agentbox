@@ -17,6 +17,7 @@ COPY web/shared/package.json shared/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/
+COPY web/vscode-ext/package.json vscode-ext/
 RUN npm ci
 COPY web/ .
 RUN npm run build -w gate
@@ -30,6 +31,7 @@ COPY web/shared/package.json shared/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/
+COPY web/vscode-ext/package.json vscode-ext/
 RUN npm ci --omit=dev --workspace gate
 
 FROM node:22-alpine

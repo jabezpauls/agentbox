@@ -233,6 +233,20 @@ export interface SystemVersions {
   /** Each coding-agent CLI found on PATH. */
   agents: { name: string; version: string | null }[];
 }
+/**
+ * The editor channel: the `agentbox-connect` VS Code extension holds a socket
+ * to the bridge (`/ws/editor`, loopback only) and opens what it is sent.
+ * Frames are JSON text.
+ */
+export type EditorClientMessage =
+  | { type: "hello"; version: string; focused: boolean }
+  | { type: "focus"; focused: boolean }
+  | { type: "opened"; id: string; ok: boolean; error?: string };
+export type EditorServerMessage = { type: "open"; id: string; path: string; line?: number; column?: number };
+/** `POST /api/editor/open` → whether a running editor opened it. */
+export interface EditorOpenResult { delivered: boolean; error?: string }
+/** `GET /api/editor/status`: how many editor windows are connected. */
+export interface EditorStatus { connected: number }
 /** Percent-encode a (possibly byte-escaped) path for a query string. */
 export function encodePathParam(path: string): string {
   let out = "";

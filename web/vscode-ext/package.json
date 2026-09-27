@@ -1,0 +1,44 @@
+{
+  "name": "agentbox-connect",
+  "displayName": "agentbox connect",
+  "description": "Lets agentbox open files in this editor: “Open in editor” anywhere in the app lands here, at the line.",
+  "publisher": "agentbox",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0", "node": ">=22" },
+  "categories": ["Other"],
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onStartupFinished"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "It only opens files agentbox asks it to open; it runs nothing from the workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "agentbox",
+      "properties": {
+        "agentbox.bridgeUrl": {
+          "type": "string",
+          "default": "ws://127.0.0.1:7800/ws/editor",
+          "description": "The agentbox bridge's editor channel, as seen from inside the sandbox."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test"
+  },
+  "dependencies": { "ws": "^8" },
+  "devDependencies": {
+    "@types/node": "^22", "@types/vscode": "1.80.0", "@types/ws": "^8", "esbuild": "^0.28", "yazl": "^3.3.1",
+    "typescript": "^5.6", "vitest": "^2", "eslint": "^9", "typescript-eslint": "^8"
+  }
+}

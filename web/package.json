@@ -2,11 +2,11 @@
   "name": "workbench",
   "private": true,
   "engines": { "node": ">=22" },
-  "workspaces": ["shared", "bridge", "app", "gate"],
+  "workspaces": ["shared", "bridge", "app", "gate", "vscode-ext"],
   "scripts": {
-    "build": "npm run build -w app && npm run build -w bridge && npm run build -w gate",
-    "test": "npm run test -w bridge && npm run test -w app && npm run test -w gate",
-    "lint": "npm run lint -w bridge && npm run lint -w app && npm run lint -w gate",
-    "typecheck": "npm run typecheck -w bridge && npm run typecheck -w app && npm run typecheck -w gate"
+    "build": "npm run build -w app && npm run build -w bridge && npm run build -w gate && npm run build -w vscode-ext",
+    "test": "npm run test -w bridge && npm run test -w app && npm run test -w gate && npm run test -w vscode-ext",
+    "lint": "npm run lint -w bridge && npm run lint -w app && npm run lint -w gate && npm run lint -w vscode-ext",
+    "typecheck": "npm run typecheck -w bridge && npm run typecheck -w app && npm run typecheck -w gate && npm run typecheck -w vscode-ext"
   }
 }

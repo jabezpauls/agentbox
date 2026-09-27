@@ -170,6 +170,10 @@ jobs:
         run: |
           docker run --rm agentbox/workspace:ci \
             node /usr/local/lib/agentbox-workbench/bridge/bridge/src/main.js --help
+      - name: The editor extension must be installed
+        run: |
+          docker run --rm agentbox/workspace:ci code-server --list-extensions \
+            | grep -x agentbox.agentbox-connect
       - name: Build the gate image
         run: docker build -t agentbox/gate:ci -f images/gate/Dockerfile .
       - name: The gate must run unprivileged, and its admin command work
