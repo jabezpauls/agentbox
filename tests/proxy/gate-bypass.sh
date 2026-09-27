@@ -254,6 +254,18 @@ for CADDYFILE in $CADDYFILES; do
     done
     pass "${#variants[@]} path tricks answered 400/401/404"
 
+    # The CLI's two files are open to anyone, served by the gate itself (the
+    # install script naming this box); nothing else under /cli is.
+    req GET /cli/install
+    { [ "$STATUS" = 200 ] && [[ "$BODY" == *"BOX='$ORIGIN'"* ]]; } || fail "the install script: $STATUS"
+    req GET /cli/agentbox.mjs
+    { [ "$STATUS" = 200 ] && [[ "$BODY" == '#!/usr/bin/env node'* ]]; } || fail "the CLI bundle: $STATUS"
+    for p in /cli /cli/ /cli/other /cli/install/x /cli/agentbox.mjs.map /cli/Install; do
+        req GET "$p" -H 'Accept: application/json'
+        [ "$STATUS" = 401 ] || fail "GET $p without a session: $STATUS"
+    done
+    pass "the CLI's two files are served to anyone, and nothing else under /cli is"
+
     # Header tricks: nothing a client can say about itself opens a door.
     B64="$(printf '%s:%s' "$USER_NAME" "$PASSWORD" | base64)"
     header_tricks=(
