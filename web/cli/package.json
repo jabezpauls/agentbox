@@ -6,7 +6,7 @@
   "files": ["dist/agentbox.mjs"],
   "scripts": {
     "build": "node scripts/build.mjs", "e2e": "node e2e/run.mjs",
-    "test": "vitest run", "typecheck": "tsc -p tsconfig.json", "lint": "eslint src test scripts"
+    "test": "vitest run", "typecheck": "tsc -p tsconfig.json", "lint": "eslint src test e2e scripts"
   },
   "devDependencies": { "esbuild": "^0.28", "ws": "^8", "@types/ws": "^8", "typescript": "^5.6", "vitest": "^2", "@types/node": "^22", "eslint": "^9", "typescript-eslint": "^8" }
 }
