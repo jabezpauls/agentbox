@@ -62,7 +62,66 @@ export type EventsMessage =
   | { kind: "event"; event: HerdrEventName; data: unknown }
   | { kind: "ports"; ports: ListeningPort[]; readable?: boolean }
   | { kind: "reset"; reason: string }
-  | ProjectCloneEvent;
+  | ProjectCloneEvent
+  | AppOpenEvent
+  | AppsChangedEvent;
+
+/**
+ * Apps. An app is a server in the sandbox (a dev server, usually) with one URL,
+ * `/a/<id>/`. The record lives in the gate, outside the sandbox: the sandbox
+ * may register, change and remove apps, always private; only the owner can
+ * make one public. The gate's own copy of this shape is `web/gate/src/apps.ts`.
+ */
+export type AppVisibilityMode = "private" | "link" | "passcode";
+export interface AppVisibility {
+  mode: AppVisibilityMode;
+  /** Milliseconds; null = until sharing is stopped. */
+  expiresAt: number | null;
+  /** When it was last made public. */
+  sharedAt?: number;
+}
+export interface App {
+  /** 26 characters of lowercase base32: 128 random bits. */
+  id: string;
+  name: string;
+  /** The loopback port in the sandbox. */
+  port: number;
+  /** The app was started with base `/a/<id>/`: forward the full path rather than strip it. */
+  keepPrefix: boolean;
+  /** Where it was started, and how to start it again. */
+  cwd?: string;
+  command?: string;
+  /** Relaunched when the box starts ("staging"). */
+  pinned: boolean;
+  createdBy: "owner" | "agent";
+  createdAt: number;
+  visibility: AppVisibility;
+  /** `auto`: the gate's path fixes apply; `off`: HTML passes untouched. */
+  compat: "auto" | "off";
+}
+/** What the bridge sees of an app right now. */
+export interface AppLive {
+  /** Something answers on the port. */
+  listening: boolean;
+  pid: number | null;
+  process: string | null;
+  /** The listening process's working directory. */
+  cwd: string | null;
+  /** The herdr pane the server runs in, when it can be told. */
+  paneId: string | null;
+  tabId: string | null;
+  workspaceId: string | null;
+}
+/** `GET /api/apps`: each record with its live state and its URL. */
+export interface AppView extends App {
+  /** Always `/a/<id>/`, on the box's own origin. */
+  url: string;
+  live: AppLive;
+}
+/** Every open tab shows this app in its Preview, with a toast naming who asked. */
+export interface AppOpenEvent { kind: "app.open"; id: string; name: string; by: string; path?: string }
+/** The app list changed (registered, renamed, shared, stopped…): read `/api/apps` again. */
+export interface AppsChangedEvent { kind: "apps.changed" }
 
 /**
  * A project: a top-level directory of the workspace, with what is going on in
