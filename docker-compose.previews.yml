@@ -1,0 +1,12 @@
+# Empty, and kept for one release only.
+#
+# Per-port preview hostnames are gone (the gate's sign-in cookie is host-only
+# and never reaches another hostname), and nothing composes this file in any
+# more. It stays so that the first `./scripts/agentbox update` from an older
+# checkout still works: that update runs the older script, which pulls this
+# version and then adds `-f docker-compose.previews.yml` whenever
+# AGENTBOX_PREVIEW_DOMAIN is set in .env. Without the file, Compose would
+# refuse to start the stack at all.
+#
+# Remove it in the release after this one.
+services: {}

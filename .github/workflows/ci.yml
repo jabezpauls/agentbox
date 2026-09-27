@@ -31,6 +31,13 @@ jobs:
           for mode in standalone behind-proxy traefik; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
           done
+          # The first update from an older checkout runs the older script, which
+          # adds the (now empty) previews overlay when AGENTBOX_PREVIEW_DOMAIN
+          # is set: that must still compose.
+          echo "AGENTBOX_PREVIEW_DOMAIN=p.example.com" >> .env
+          for mode in standalone behind-proxy traefik; do
+            docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" -f docker-compose.previews.yml config -q
+          done
 
       - name: Who can reach whom, in each mode
         # The proxy shares a network with the gate alone (the sandbox cannot
