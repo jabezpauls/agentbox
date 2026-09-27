@@ -130,7 +130,15 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
         const real = await roots.realRoot(r).catch(() => null);
         if (real) exclude.add(path.join(real, STATE_DIR));
       }
-      return reply.send(zipStream(sources, (err) => req.log.warn({ err }, "zip stream failed"), exclude));
+      // A HEAD asks what the download is, not for the download: build nothing.
+      if (req.method === "HEAD") return reply.send();
+      // A client that goes away stops the walk, rather than leaving it to
+      // lstat the rest of the tree for nobody.
+      const abort = new AbortController();
+      reply.raw.once("close", () => abort.abort());
+      return reply.send(
+        zipStream(sources, (err) => req.log.warn({ err }, "zip stream failed"), { exclude, signal: abort.signal }),
+      );
     }),
   );
 
