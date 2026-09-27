@@ -30,7 +30,12 @@ export interface ZipSource {
  * are written with U+FFFD in place of the stray bytes (the format flags every
  * name as UTF-8), which is lossy only for the name, never the content.
  */
-export function zipStream(sources: ZipSource[], onError: (err: unknown) => void): NodeJS.ReadableStream {
+export function zipStream(
+  sources: ZipSource[],
+  onError: (err: unknown) => void,
+  /** Real paths left out wherever they turn up — the roots' own state. */
+  exclude: ReadonlySet<string> = new Set(),
+): NodeJS.ReadableStream {
   const zip = new yazl.ZipFile();
   const used = new Set<string>();
   const fail = (err: unknown): void => {
@@ -62,6 +67,7 @@ export function zipStream(sources: ZipSource[], onError: (err: unknown) => void)
       const names = await fsp.readdir(fsPath(fs), { encoding: "buffer" });
       for (const raw of names) {
         const child = decodeName(raw);
+        if (exclude.has(path.join(fs, child))) continue;
         await walk(path.join(fs, child), `${name}/${entryName(child)}`);
       }
     } else if (st.isFile()) {

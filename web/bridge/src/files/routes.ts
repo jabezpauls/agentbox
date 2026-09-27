@@ -5,7 +5,7 @@ import type { FileEntry } from "@workbench/shared";
 import { describe, listDirectory, MAX_PAGE } from "./entries.js";
 import { fsPath, parseQuery } from "./names.js";
 import { sendFile, disposition, FILE_HEADERS } from "./raw.js";
-import { fsError, FilesError } from "./roots.js";
+import { fsError, FilesError, STATE_DIR } from "./roots.js";
 import { searchNames } from "./search.js";
 import type { FilesService } from "./service.js";
 import { zipStream } from "./zip.js";
@@ -123,7 +123,14 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
       reply.headers(FILE_HEADERS);
       reply.header("content-type", "application/zip");
       reply.header("content-disposition", disposition("attachment", name));
-      return reply.send(zipStream(sources, (err) => req.log.warn({ err }, "zip stream failed")));
+      // A zip of a whole root is the user's files, not the trash and upload
+      // scratch space that sit beside them.
+      const exclude = new Set<string>();
+      for (const r of roots.list()) {
+        const real = await roots.realRoot(r).catch(() => null);
+        if (real) exclude.add(path.join(real, STATE_DIR));
+      }
+      return reply.send(zipStream(sources, (err) => req.log.warn({ err }, "zip stream failed"), exclude));
     }),
   );
 

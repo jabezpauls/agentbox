@@ -237,6 +237,16 @@ describe("zip", () => {
     expect(entriesOf(res.rawPayload)).toEqual(["a-dir/", "file9.txt", "n�.txt"]);
   });
 
+  it("leaves the root's own trash and scratch space out of a zip of the root", async () => {
+    fs.mkdirSync(path.join(ws, ".agentbox", "trash", "x"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".agentbox", "trash", "x", "meta.json"), "{}");
+    const res = await f.app.inject({ method: "GET", url: `/api/files/zip?path=${q(ws)}` });
+    expect(res.statusCode).toBe(200);
+    const names = entriesOf(res.rawPayload);
+    expect(names).toContain("workspace/file9.txt");
+    expect(names.some((n) => n.includes(".agentbox"))).toBe(false);
+  });
+
   it("refuses a path outside before sending anything", async () => {
     const res = await f.app.inject({ method: "GET", url: `/api/files/zip?path=${q("link-out")}` });
     expect(res.statusCode).toBe(403);
