@@ -9,7 +9,7 @@ import { ApiError, CliError, EXIT, UsageError } from "../errors.js";
 import { FilesApi, joinRemote, MAX_CHUNK, remoteBase } from "../files-api.js";
 import { formatBytes, formatTime, safeText, table } from "../format.js";
 import { Progress } from "../progress.js";
-import type { FileEntry } from "../remote.js";
+import type { FileEntry } from "@workbench/shared";
 import { downloadFile, ResumeStore, streamTo, uploadFile } from "../transfer.js";
 import { command, type Command } from "./types.js";
 

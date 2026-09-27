@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { ApiError } from "./errors.js";
 import type { BoxClient, Response } from "./http.js";
-import type { FileEntry, FileListing, TrashResult, UploadSession } from "./remote.js";
+import { encodePathParam, type FileEntry, type FileListing, type TrashItem, type UploadSession } from "@workbench/shared";
 
 /**
  * The box's files API (`/api/files/*`), typed. Paths are the box's: absolute,
@@ -14,19 +14,15 @@ export const MAX_CHUNK = 50 * 1024 * 1024;
 /** A folder is listed this many entries a page. */
 export const PAGE = 5000;
 
-/**
- * Percent-encode a path for a query string. A file name that is not UTF-8
- * arrives from the box with each stray byte as U+DC80 + byte; it goes back as
- * that byte, so such a file can still be fetched or removed.
- */
-export function encodePathParam(p: string): string {
-  let out = "";
-  for (const ch of p) {
-    const cp = ch.codePointAt(0) ?? 0;
-    out += cp >= 0xdc80 && cp <= 0xdcff ? `%${(cp - 0xdc00).toString(16).toUpperCase()}` : encodeURIComponent(ch);
-  }
-  return out;
+/** `POST /api/files/trash`: what went, and what was already gone. */
+export interface TrashResult {
+  trashed: TrashItem[];
+  missing: string[];
 }
+
+// A name that is not UTF-8 arrives with each stray byte as U+DC80 + byte, and
+// goes back as that byte, so such a file can still be fetched or removed.
+export { encodePathParam };
 
 /** `dir` + `/` + `name`, for paths on the box. */
 export function joinRemote(dir: string, name: string): string {

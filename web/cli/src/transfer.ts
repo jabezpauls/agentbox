@@ -6,7 +6,7 @@ import { sleep as defaultSleep } from "./device.js";
 import { ApiError, CliError, EXIT } from "./errors.js";
 import { MAX_CHUNK, type FilesApi } from "./files-api.js";
 import type { OutStream } from "./context.js";
-import type { FileEntry, UploadSession } from "./remote.js";
+import type { FileEntry, UploadSession } from "@workbench/shared";
 
 /**
  * Moving file contents: chunked, resumable uploads and streamed downloads.
