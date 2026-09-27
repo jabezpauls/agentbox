@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { createWriteStream } from "node:fs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { decodeComponent, decodeName, displayName, encodeSegment, fsPath } from "../names.js";
-import { contentTypeFor, etagOf, sendFile } from "../raw.js";
+import { contentTypeFor, etagOf, loadedAsCode, sendFile } from "../raw.js";
 import { fsError, FilesError, STATE_DIR, within, type Located } from "../roots.js";
 import { closeIfBodyUnread, sendError } from "../routes.js";
 import type { FilesService } from "../service.js";
@@ -418,6 +418,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
     reply.code(200).headers({ dav: "1, 2", "ms-author-via": "DAV", allow: ALLOW, "content-length": "0" }).send();
 
   const get = async (req: FastifyRequest, reply: FastifyReply, abs: string) => {
+    if (loadedAsCode(req)) throw new FilesError(403, "a file cannot be loaded as a script or stylesheet", "not-code");
     const r = await resource(abs);
     if (!r) throw new FilesError(404, "not found");
     if (r.st.isDirectory()) return reply.code(405).header("allow", ALLOW).send();

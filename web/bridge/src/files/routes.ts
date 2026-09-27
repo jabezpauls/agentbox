@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { FileEntry } from "@workbench/shared";
 import { describe, listDirectory, MAX_PAGE } from "./entries.js";
 import { fsPath, parseQuery } from "./names.js";
-import { sendFile, disposition, FILE_HEADERS } from "./raw.js";
+import { sendFile, disposition, FILE_HEADERS, loadedAsCode } from "./raw.js";
 import { fsError, FilesError, STATE_DIR } from "./roots.js";
 import { searchNames } from "./search.js";
 import type { FilesService } from "./service.js";
@@ -100,6 +100,7 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
     method: ["GET", "HEAD"],
     url: "/api/files/raw",
     handler: wrap(async (req, reply) => {
+      if (loadedAsCode(req)) throw new FilesError(403, "a file cannot be loaded as a script or stylesheet", "not-code");
       const q = parseQuery(req.raw.url ?? "");
       const ref = await roots.target(one(q, "path"));
       const st = await fsp.stat(fsPath(ref.real));

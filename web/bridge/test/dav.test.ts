@@ -263,6 +263,10 @@ describe("the WebDAV protocol, as Finder and gio use it", () => {
     expect((await dav("GET", "/leak")).status).toBe(403);
 
     fs.writeFileSync(path.join(ws(), "page.html"), "<script>alert(1)</script>");
+    fs.writeFileSync(path.join(ws(), "code.js"), "alert(1)");
+    for (const dest of ["script", "worker", "style"]) {
+      expect((await dav("GET", "/code.js", { headers: { "sec-fetch-dest": dest } })).status, dest).toBe(403);
+    }
     const page = await dav("GET", "/page.html");
     expect(page.headers.get("content-security-policy")).toBe("sandbox");
     expect(page.headers.get("x-content-type-options")).toBe("nosniff");

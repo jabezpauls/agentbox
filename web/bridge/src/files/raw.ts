@@ -36,9 +36,11 @@ const DOWNLOAD_TYPES: Record<string, string> = {
   ".htm": "text/html",
   ".svg": "image/svg+xml",
   ".json": "application/json",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
+  // Never a script or stylesheet type: with nosniff, a browser then refuses
+  // to run the file as code even if it is asked to (see loadedAsCode).
+  ".js": "text/plain",
+  ".mjs": "text/plain",
+  ".css": "text/plain",
   ".md": "text/markdown",
   ".txt": "text/plain",
   ".csv": "text/csv",
@@ -52,6 +54,29 @@ const DOWNLOAD_TYPES: Record<string, string> = {
   ".wav": "audio/wav",
   ".woff2": "font/woff2",
 };
+
+/** Fetch destinations that would run or apply what they load as code. */
+const CODE_DESTINATIONS = new Set([
+  "script",
+  "worker",
+  "sharedworker",
+  "serviceworker",
+  "style",
+  "audioworklet",
+  "paintworklet",
+  "xslt",
+]);
+
+/**
+ * True when a browser is loading a file as code — a `<script>`, a worker, a
+ * stylesheet — which a file from the workspace must never be, whatever page
+ * asked: loaded that way it would run as the box's own origin, and the
+ * sandbox header on the response does not apply to a script.
+ */
+export function loadedAsCode(req: FastifyRequest): boolean {
+  const dest = req.headers["sec-fetch-dest"];
+  return typeof dest === "string" && CODE_DESTINATIONS.has(dest.toLowerCase());
+}
 
 /** The type a download of `name` is labelled with. */
 export function contentTypeFor(name: string): string {

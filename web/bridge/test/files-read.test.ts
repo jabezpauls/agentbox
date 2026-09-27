@@ -176,6 +176,22 @@ describe("raw", () => {
     expect(res.body).toBe("<script>alert(1)</script>");
   });
 
+  it("refuses to be loaded as a script, worker or stylesheet", async () => {
+    fs.writeFileSync(path.join(ws, "evil.js"), "alert(document.domain)");
+    for (const dest of ["script", "worker", "sharedworker", "serviceworker", "style", "audioworklet", "paintworklet"]) {
+      const res = await get("evil.js", "", { "sec-fetch-dest": dest });
+      expect(res.statusCode, dest).toBe(403);
+      expect(res.body).not.toContain("alert");
+    }
+    for (const dest of ["document", "iframe", "image", "empty"]) {
+      expect((await get("evil.js", "", { "sec-fetch-dest": dest })).statusCode, dest).toBe(200);
+    }
+    // And a script or stylesheet never carries a type a browser would run.
+    for (const p of ["evil.js"]) {
+      expect((await get(p)).headers["content-type"]).toBe("text/plain");
+    }
+  });
+
   it("keeps a hostile filename out of the header", async () => {
     const res = await get("line\nbreak.txt");
     const cd = res.headers["content-disposition"] as string;
