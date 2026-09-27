@@ -161,10 +161,12 @@ address out for 15 minutes. The page says how long to wait. To clear it early:
 ./scripts/agentbox gate unlock
 ```
 
-**Devices.** The command-line client signs in without your password: it shows
-a code and opens `/settings/devices?code=…`, where you approve it while signed
-in. It then holds a token of its own, which you can revoke. To end every session
-and revoke every device token at once — a lost laptop, say:
+**Devices.** The command-line client, installed on your own machine with
+`curl -fsSL https://<your box>/cli/install | sh` (see [docs/cli.md](cli.md)),
+signs in without your password: it shows a code and opens
+`/settings/devices?code=…`, where you approve it while signed in. It then holds
+a token of its own, which you can revoke. To end every session and revoke
+every device token at once — a lost laptop, say:
 
 ```bash
 ./scripts/agentbox gate revoke-all

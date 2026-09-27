@@ -62,8 +62,8 @@ proxy.
   `//` — forms that one parser normalises and another does not — so no
   difference between Caddy, the gate and an upstream can move a request from
   one branch to another. Then, on the raw path: `/login` and the gate's own
-  `/_gate/*` API, `/cli/*` (the CLI download, empty until it ships) and the
-  device-approval page stay in the gate; `/vscode/*` goes to code-server with
+  `/_gate/*` API, exactly `/cli/install` and `/cli/agentbox.mjs` (the CLI,
+  below) and the device-approval page stay in the gate; `/vscode/*` goes to code-server with
   the prefix stripped; `/terminal`, `/shell` and `/monitor` go to their ttyd
   services unchanged; everything else goes to the bridge unchanged.
 - **One exemption, for filenames.** A WebDAV client names files in the path,
@@ -184,6 +184,20 @@ proxy.
   another device — which takes a signed-in browser, and a token may revoke
   only itself. Revoke others from a signed-in browser with the password, or
   all of them with `./scripts/agentbox gate revoke-all`.
+- **The CLI, served by the box.** `/cli/agentbox.mjs` (the bundle) and
+  `/cli/install` (the script `curl … | sh` runs) are open-source files baked
+  into the gate's image, served to anyone — and only those two exact paths:
+  anything else under `/cli` is an ordinary authenticated route to the bridge.
+  The gate writes the box's own origin into the install script (the configured
+  public URL, or the request's `Host`) only when it is a plain
+  `scheme://host[:port]`, between single quotes where the shell expands
+  nothing. On the laptop the CLI keeps the device token in one file, readable
+  by its owner alone, and never prints it. `agentbox mount` needs the token
+  carried for the OS's WebDAV client, so it serves the box's `/api/dav/` on
+  `127.0.0.1` only, under a random 128-bit path, answering only a loopback
+  `Host` (no DNS rebinding), and forwarding nothing a normalising proxy could
+  turn into a path outside `/api/dav/` (dot segments, encoded or not, slashes,
+  backslashes). See [docs/cli.md](cli.md).
 - **Headers.** Everything the gate serves carries `X-Content-Type-Options:
   nosniff` and — except its own pages, above — `Referrer-Policy: no-referrer`,
   and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing

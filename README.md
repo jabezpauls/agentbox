@@ -50,6 +50,21 @@ said. No extra hostname and no extra container.
 
 See [docs/workbench.md](docs/workbench.md).
 
+## From your laptop
+
+The box serves its own command-line client. On any machine with Node.js 20+:
+
+```bash
+curl -fsSL https://code.example.com/cli/install | sh
+```
+
+That installs `agentbox` and signs it in through your browser — no password
+in the terminal; the laptop gets a device token you can revoke. Then
+`agentbox attach` puts herdr's TUI in your terminal, `agentbox shell` a bash,
+`agentbox files put ./data -r` uploads a folder (resumably), `agentbox mount`
+shows the workspace in Finder or your file manager, and `agentbox status` says
+how the box is doing. See [docs/cli.md](docs/cli.md).
+
 ## Coding agents
 
 [Claude Code](https://github.com/anthropics/claude-code) and
