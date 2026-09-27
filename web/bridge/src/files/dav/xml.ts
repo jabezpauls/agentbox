@@ -18,10 +18,25 @@ export class XmlError extends Error {}
 
 const ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
+/** A character XML 1.0 allows at all (its `Char` production). */
+function isXmlChar(cp: number): boolean {
+  return (
+    cp === 0x9 ||
+    cp === 0xa ||
+    cp === 0xd ||
+    (cp >= 0x20 && cp <= 0xd7ff) ||
+    (cp >= 0xe000 && cp <= 0xfffd) ||
+    (cp >= 0x10000 && cp <= 0x10ffff)
+  );
+}
+
 function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (m, e: string) => {
-    if (e.startsWith("#x")) return String.fromCodePoint(parseInt(e.slice(2), 16));
-    if (e.startsWith("#")) return String.fromCodePoint(parseInt(e.slice(1), 10));
+    if (e.startsWith("#")) {
+      const cp = e.startsWith("#x") ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      if (!isXmlChar(cp)) throw new XmlError(`character reference ${m} is not an XML character`);
+      return String.fromCodePoint(cp);
+    }
     const v = ENTITIES[e];
     if (v === undefined) throw new XmlError(`unknown entity ${m}`);
     return v;
@@ -36,11 +51,27 @@ function nameAt(src: string, at: number): string | null {
   return NAME.exec(src)?.[0] ?? null;
 }
 
+/**
+ * Bounds on what a request body may hold. A WebDAV body is a handful of
+ * elements; these stop a hostile one from costing more than a moment.
+ */
+export const XML_LIMITS = { elements: 10_000, attributes: 64, depth: 64 };
+
+const XML_NS = "http://www.w3.org/XML/1998/namespace";
+
+interface Frame {
+  el: XmlElement;
+  name: string;
+  /** Only the namespaces this element itself declares; lookups walk the stack. */
+  decls: Map<string, string> | null;
+}
+
 /** Parse a document and return its root element. */
 export function parseXml(src: string): XmlElement {
   let i = 0;
-  const stack: { el: XmlElement; name: string; scope: Map<string, string> }[] = [];
+  const stack: Frame[] = [];
   let root: XmlElement | null = null;
+  let elements = 0;
 
   const fail = (msg: string): never => {
     throw new XmlError(`${msg} at ${i}`);
@@ -94,24 +125,35 @@ export function parseXml(src: string): XmlElement {
         const end = src.indexOf(q!, i + 1);
         if (end === -1) fail("unterminated attribute");
         raw.set(a!, decodeEntities(src.slice(i + 1, end)));
+        if (raw.size > XML_LIMITS.attributes) fail("too many attributes");
         i = end + 1;
       }
-      const parentScope = stack[stack.length - 1]?.scope ?? new Map([["xml", "http://www.w3.org/XML/1998/namespace"]]);
-      const scope = new Map(parentScope);
+      if (++elements > XML_LIMITS.elements) fail("too many elements");
+      // An element's own declarations only. Copying the whole scope for every
+      // element made a body of many declarations and many elements cost their
+      // product; the stack is short (see the depth limit), so walking it is not.
+      let decls: Map<string, string> | null = null;
       const attrs = new Map<string, string>();
       for (const [k, v] of raw) {
-        if (k === "xmlns") scope.set("", v);
+        if (k === "xmlns") (decls ??= new Map()).set("", v);
         else if (k.startsWith("xmlns:")) {
           // Namespaces in XML 1.0: a prefix cannot be bound to the empty name.
           if (v === "") fail(`empty namespace for prefix ${k.slice(6)}`);
-          scope.set(k.slice(6), v);
-        }
-        else attrs.set(k, v);
+          (decls ??= new Map()).set(k.slice(6), v);
+        } else attrs.set(k, v);
       }
+      const lookup = (prefix: string): string | undefined => {
+        if (decls?.has(prefix)) return decls.get(prefix);
+        for (let k = stack.length - 1; k >= 0; k--) {
+          const d = stack[k]!.decls;
+          if (d?.has(prefix)) return d.get(prefix);
+        }
+        return prefix === "xml" ? XML_NS : undefined;
+      };
       const colon = name.indexOf(":");
       const prefix = colon === -1 ? "" : name.slice(0, colon);
       const local = colon === -1 ? name : name.slice(colon + 1);
-      const ns = scope.get(prefix);
+      const ns = lookup(prefix);
       if (ns === undefined && prefix !== "") fail(`unbound prefix ${prefix}`);
       const el: XmlElement = { ns: ns ?? "", local, attrs, children: [], text: "" };
       const parent = stack[stack.length - 1];
@@ -122,7 +164,8 @@ export function parseXml(src: string): XmlElement {
         i += 2;
       } else {
         i += 1;
-        stack.push({ el, name, scope });
+        if (stack.length >= XML_LIMITS.depth) fail("elements nested too deeply");
+        stack.push({ el, name, decls });
       }
     } else {
       const end = src.indexOf("<", i);

@@ -20,7 +20,8 @@ export const DAV_PREFIX = "/api/dav";
 export const DAV_METHODS = ["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK"] as const;
 
 const ALLOW = "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK";
-const MAX_XML = 1024 * 1024;
+/** A WebDAV request body is a few kilobytes; nothing a client sends comes near this. */
+const MAX_XML = 256 * 1024;
 const MS = "urn:schemas-microsoft-com:";
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
