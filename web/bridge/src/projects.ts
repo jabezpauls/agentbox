@@ -106,11 +106,13 @@ function settled(clone: Clone): void {
  * A URL as it may be shown: whatever sits before the `@` of an http(s) or git
  * URL is a credential (a token often goes there as the "user"), and so is the
  * password half of any URL. An scp-style `git@host:path` user is not secret.
+ * A password may itself hold an `@` (unencoded, git takes it), so everything
+ * up to the last `@` before the first `/` goes.
  */
 export function redactUrl(url: string): string {
   return url
-    .replace(/^((?:https?|git):\/\/)[^/@]+@/i, "$1***@")
-    .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/:@]*):[^/@]*@/i, "$1:***@");
+    .replace(/^((?:https?|git):\/\/)[^/]*@/i, "$1***@")
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/:@]*):[^/]*@/i, "$1:***@");
 }
 
 /** The same, for every URL inside a message (git's own errors quote the URL). */

@@ -314,6 +314,14 @@ describe("redacting clone URLs", () => {
     expect(redactUrl("https://user:pass@host/r")).toBe("https://***@host/r");
     expect(redactUrl("ssh://git:pw@host/r")).toBe("ssh://git:***@host/r");
     expect(redactUrl("ssh://git@host/r")).toBe("ssh://git@host/r");
+    // An @ inside the secret: all of it goes, up to the host.
+    expect(redactUrl("https://user:p@ss@host/r")).toBe("https://***@host/r");
+    expect(redactUrl("https://tok@en@host")).toBe("https://***@host");
+    expect(redactUrl("ssh://git:p@ss@host/r")).toBe("ssh://git:***@host/r");
+    // An @ in the path is not a credential.
+    expect(redactUrl("https://host/o/r@v1")).toBe("https://host/o/r@v1");
+    expect(redactUrl("https://tok@host/o/r@v1")).toBe("https://***@host/o/r@v1");
+    expect(redactText("fatal: 'https://a:b@c@h/x' and 'https://d@e@h/y'")).toBe("fatal: 'https://***@h/x' and 'https://***@h/y'");
     expect(redactUrl("git@github.com:o/r.git")).toBe("git@github.com:o/r.git");
     expect(redactUrl("https://github.com/o/r")).toBe("https://github.com/o/r");
     expect(redactText("fatal: repository 'https://tok@h/x/' not found")).toBe("fatal: repository 'https://***@h/x/' not found");
