@@ -16,7 +16,15 @@ export const FILE_HEADERS: Record<string, string> = {
   "cache-control": "private, no-cache",
 };
 
-/** Types a browser may show inline: pictures and PDF. Never HTML or SVG. */
+/**
+ * Types a browser may show inline: pictures and PDF. Never HTML or SVG.
+ *
+ * PDF keeps the sandbox header like everything else: Chromium's and
+ * Firefox's built-in viewers both render it under `CSP: sandbox`, at the top
+ * level and in a frame (checked headed in both). Chromium refuses a PDF in a
+ * frame that has a `sandbox` *attribute*, so a quick look should frame the
+ * raw URL without one — the header already gives it an opaque origin.
+ */
 const INLINE_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",

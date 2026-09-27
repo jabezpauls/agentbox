@@ -184,6 +184,13 @@ describe("raw", () => {
       expect(res.headers["content-type"], p).toBe("text/plain; charset=utf-8");
       expect(res.headers["content-disposition"], p).toMatch(/^inline;/);
     }
+    // A PDF is shown by the browser's own viewer, still under the sandbox.
+    fs.writeFileSync(path.join(ws, "doc.pdf"), "%PDF-1.4\n%%EOF\n");
+    const pdf = await get("doc.pdf", "&inline=1");
+    expect(pdf.headers["content-type"]).toBe("application/pdf");
+    expect(pdf.headers["content-disposition"]).toMatch(/^inline;/);
+    expect(pdf.headers["content-security-policy"]).toBe("sandbox");
+
     const bin = await get("blob.bin", "&inline=1");
     expect(bin.headers["content-disposition"]).toMatch(/^attachment;/);
   });
