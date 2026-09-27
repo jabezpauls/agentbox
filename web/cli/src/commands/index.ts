@@ -3,6 +3,7 @@ import { EXIT } from "../errors.js";
 import { VERSION } from "../version.js";
 import { AUTH_COMMANDS } from "./auth.js";
 import { FILES_COMMANDS } from "./files.js";
+import { MOUNT_COMMANDS } from "./mount.js";
 import { STATUS_COMMANDS } from "./status.js";
 import { TERMINAL_COMMANDS } from "./terminal.js";
 import type { Command } from "./types.js";
@@ -18,6 +19,7 @@ export const COMMANDS: Command[] = [
   ...STATUS_COMMANDS,
   ...TERMINAL_COMMANDS,
   ...FILES_COMMANDS,
+  ...MOUNT_COMMANDS,
 ];
 
 function optionLine(o: OptionSpec): string {
