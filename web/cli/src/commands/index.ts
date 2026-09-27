@@ -2,6 +2,7 @@ import { GLOBAL_OPTIONS, type OptionSpec } from "../args.js";
 import { EXIT } from "../errors.js";
 import { VERSION } from "../version.js";
 import { AUTH_COMMANDS } from "./auth.js";
+import { STATUS_COMMANDS } from "./status.js";
 import type { Command } from "./types.js";
 
 /**
@@ -12,6 +13,7 @@ import type { Command } from "./types.js";
  */
 export const COMMANDS: Command[] = [
   ...AUTH_COMMANDS,
+  ...STATUS_COMMANDS,
 ];
 
 function optionLine(o: OptionSpec): string {
