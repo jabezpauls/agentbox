@@ -177,6 +177,34 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
 
   const locate = (abs: string): Located => roots.locate(abs);
 
+  /**
+   * The real folders a path passes through, from the root down, refusing a
+   * path that goes round a loop: through a link back to a folder it has
+   * already been in, or up to one above it (`proj/up -> ..`). Such a path
+   * names nothing new, and answering it would let a client that walks the
+   * mount — every one does — descend for ever. Stops at the first part that
+   * does not exist, so a path to be created is checked as far as it goes.
+   */
+  const loopCheck = async (abs: string): Promise<Set<string>> => {
+    const rootReal = await roots.realRoot(ws);
+    const seen = new Set([rootReal]);
+    let prev = rootReal;
+    let lexical = ws.path;
+    for (const part of path.relative(ws.path, abs).split(path.sep).filter(Boolean)) {
+      lexical = path.join(lexical, part);
+      let real: string;
+      try {
+        real = decodeName(await fsp.realpath(fsPath(lexical), { encoding: "buffer" }));
+      } catch {
+        break;
+      }
+      if (seen.has(real) || within(prev, real)) throw new FilesError(404, "not found");
+      seen.add(real);
+      prev = real;
+    }
+    return seen;
+  };
+
   /** Stat a resource the way DAV sees it: through links that stay inside. */
   const resource = async (abs: string): Promise<{ real: string; st: Stats } | null> => {
     try {
@@ -284,7 +312,13 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
     }
   };
 
-  async function* members(abs: string, real: string, st: Stats, names: string[]): AsyncGenerator<Resource> {
+  /**
+   * The folder's own resource, then its members. A link that leads out of the
+   * root is left out, and so is one that leads back to a folder on the way
+   * here or above it (see {@link loopCheck}): shown as a folder, it would be
+   * an endless tree to any client that walks the mount.
+   */
+  async function* members(abs: string, real: string, st: Stats, names: string[], path_: Set<string>): AsyncGenerator<Resource> {
     yield { abs, st, locks: locks.covering(abs) };
     const rootReal = await roots.realRoot(ws);
     for (const name of names) {
@@ -295,6 +329,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
         if (cst.isSymbolicLink()) {
           const target = decodeName(await fsp.realpath(fsPath(childReal), { encoding: "buffer" }));
           if (!within(target, rootReal)) continue;
+          if (path_.has(target) || within(real, target)) continue;
           cst = await fsp.stat(fsPath(target));
         }
       } catch {
@@ -404,11 +439,12 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
     const r = await resource(abs);
     if (!r) throw new FilesError(404, "not found");
     const names = depth === "1" && r.st.isDirectory() ? await memberNames(abs, r.real) : [];
+    const visited = await loopCheck(abs);
     // Streamed: a directory of a hundred thousand entries is a long answer.
     return reply
       .code(207)
       .header("content-type", "application/xml; charset=utf-8")
-      .send(Readable.from(multistatus(members(abs, r.real, r.st, names), want)));
+      .send(Readable.from(multistatus(members(abs, r.real, r.st, names, visited), want)));
   };
 
   const proppatch = async (req: FastifyRequest, reply: FastifyReply, abs: string) => {
@@ -647,6 +683,8 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
   const handler = async (req: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
     try {
       const abs = toAbs(rawPathOf(req));
+      // A path that goes round a symlink loop names nothing, for every method.
+      if (req.method !== "OPTIONS") await loopCheck(abs);
       switch (req.method) {
         case "OPTIONS":
           return options(req, reply);

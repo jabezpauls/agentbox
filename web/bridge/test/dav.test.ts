@@ -290,6 +290,45 @@ describe("what a mounted folder does not show", () => {
   });
 });
 
+describe("symlink loops", () => {
+  const hrefs = (text: string) => [...text.matchAll(/<D:href>([^<]*)<\/D:href>/g)].map((m) => m[1]);
+
+  it("does not present a link back up the tree as a folder, or serve paths through it", async () => {
+    fs.mkdirSync(path.join(ws(), "loop", "proj"), { recursive: true });
+    fs.writeFileSync(path.join(ws(), "loop", "proj", "f.txt"), "x");
+    fs.symlinkSync("..", path.join(ws(), "loop", "proj", "up"));
+    fs.symlinkSync(".", path.join(ws(), "loop", "proj", "self"));
+    fs.mkdirSync(path.join(ws(), "loop", "proj", "sub"));
+    fs.symlinkSync("sub", path.join(ws(), "loop", "proj", "sideways"));
+
+    const listing = await dav("PROPFIND", "/loop/proj/", { headers: { depth: "1" } });
+    expect(listing.status).toBe(207);
+    expect(hrefs(listing.text).sort()).toEqual(
+      ["/api/dav/loop/proj/", "/api/dav/loop/proj/f.txt", "/api/dav/loop/proj/sideways/", "/api/dav/loop/proj/sub/"].sort(),
+    );
+
+    // The reviewer's walk down the loop names nothing.
+    for (const p of ["/loop/proj/up/", "/loop/proj/up/proj/up/proj/", "/loop/proj/self/", "/loop/proj/self/f.txt"]) {
+      expect((await dav("PROPFIND", p, { headers: { depth: "1" } })).status, p).toBe(404);
+      expect((await dav("GET", p)).status, p).toBe(404);
+    }
+    // A link that is not a loop still works.
+    expect((await dav("PROPFIND", "/loop/proj/sideways/", { headers: { depth: "0" } })).status).toBe(207);
+  });
+
+  it("hides two folders that link to each other after the first step", async () => {
+    fs.mkdirSync(path.join(ws(), "pair", "a"), { recursive: true });
+    fs.mkdirSync(path.join(ws(), "pair", "b"));
+    fs.symlinkSync("../b", path.join(ws(), "pair", "a", "to-b"));
+    fs.symlinkSync("../a", path.join(ws(), "pair", "b", "to-a"));
+    const inB = await dav("PROPFIND", "/pair/a/to-b/", { headers: { depth: "1" } });
+    expect(inB.status).toBe(207);
+    // From a into b, the link back to a is where we came from.
+    expect(hrefs(inB.text)).toEqual(["/api/dav/pair/a/to-b/"]);
+    expect((await dav("PROPFIND", "/pair/a/to-b/to-a/", { headers: { depth: "0" } })).status).toBe(404);
+  });
+});
+
 describe("If header parsing", () => {
   it("reads tagged and untagged lists, Not, and entity tags", () => {
     expect(parseIf('(<urn:a> ["etag"]) (Not <DAV:no-lock>)')).toEqual([
