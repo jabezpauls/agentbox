@@ -3,6 +3,7 @@ import { EXIT } from "../errors.js";
 import { VERSION } from "../version.js";
 import { AUTH_COMMANDS } from "./auth.js";
 import { FILES_COMMANDS } from "./files.js";
+import { FORWARD_COMMANDS } from "./forward.js";
 import { MOUNT_COMMANDS } from "./mount.js";
 import { STATUS_COMMANDS } from "./status.js";
 import { TERMINAL_COMMANDS } from "./terminal.js";
@@ -21,6 +22,7 @@ export const COMMANDS: Command[] = [
   ...TERMINAL_COMMANDS,
   ...FILES_COMMANDS,
   ...MOUNT_COMMANDS,
+  ...FORWARD_COMMANDS,
   ...UPDATE_COMMANDS,
 ];
 
