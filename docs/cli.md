@@ -197,7 +197,10 @@ path, adds the token itself, and mounts that with what the system has:
 | Windows | `net use` (the WebClient service) | the drive letter `[dir]`, default the next free one |
 
 When the helper is missing it says so and how to install it — on Debian or
-Ubuntu, `sudo apt install gvfs-backends libglib2.0-bin`. `--no-mount` works
+Ubuntu, `sudo apt install gvfs-backends libglib2.0-bin`. On Linux the folder
+is gvfs's FUSE view (under `$XDG_RUNTIME_DIR/gvfs/`), which a desktop session
+runs; without it (a server, a container) the mount is still there for GIO
+applications such as Files, at the `dav://` address the command prints. `--no-mount` works
 anywhere: point any WebDAV client at the URL it prints (`rclone` with
 `:webdav,url=<url>,vendor=other:`, `cadaver`, a file manager's "connect to
 server"). `--port` picks the local port.
