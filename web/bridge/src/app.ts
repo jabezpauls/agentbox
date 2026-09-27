@@ -19,6 +19,8 @@ import { LiveShares } from "./share/live.js";
 import { pathGuard } from "./path-guard.js";
 import { FilesService } from "./files/service.js";
 import { registerFilesRoutes } from "./files/routes.js";
+import { SystemMonitor } from "./system.js";
+import { registerSystemRoutes } from "./routes/system.js";
 import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 
 /**
@@ -47,6 +49,8 @@ export interface AppDeps {
   streams?: TerminalStreams;
   /** The files API's roots, trash and uploads; defaults to the configured roots. */
   files?: FilesService;
+  /** The system view's sampler; defaults to one over the configured cgroup and roots. */
+  system?: SystemMonitor;
 }
 
 /**
@@ -108,6 +112,19 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
   registerFilesRoutes(app, files);
   registerDavRoutes(app, files);
+  registerSystemRoutes(
+    app,
+    deps.system ??
+      new SystemMonitor({
+        cgroupRoot: config.cgroupRoot,
+        disks: [
+          { label: "workspace", path: config.workspaceRoot },
+          { label: "home", path: config.homeRoot },
+        ],
+        version: config.version,
+        herdrVersion: () => deps.hub.version,
+      }),
+  );
   registerReviewRoutes(app, config, review);
   registerShareApiRoutes(app, config, shareDeps);
   registerEventsWs(app, deps.hub, deps.ports);

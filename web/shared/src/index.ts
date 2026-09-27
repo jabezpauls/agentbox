@@ -139,6 +139,51 @@ export interface UploadSession {
   received: number;
   overwrite: boolean; created: number; updated: number; done: boolean;
 }
+/**
+ * `GET /api/system`: how the sandbox is doing. CPU and memory are the
+ * bridge's own cgroup (v2), which is the sandbox container the agents run in;
+ * `limit` is null when the cgroup sets none.
+ */
+export interface SystemInfo {
+  at: number;
+  /** False when no cgroup v2 files could be read; the figures fall back to the host's. */
+  cgroup: boolean;
+  cpu: {
+    /** CPUs busy over the last sample (0.5 = half of one core); null before a second sample exists. */
+    usage: number | null;
+    /** CPUs the cgroup may use, e.g. 2; null when unlimited. */
+    limit: number | null;
+    /** Logical CPUs on the host. */
+    cores: number;
+  };
+  memory: {
+    /** Bytes in use, not counting reclaimable page cache. */
+    used: number;
+    limit: number | null;
+    /** The host's memory. */
+    total: number;
+  };
+  pids: { current: number | null; limit: number | null };
+  disks: SystemDisk[];
+  /** Seconds. `box` is since the sandbox started; null when it cannot be told. */
+  uptime: { box: number | null; bridge: number; host: number };
+  /** The busiest processes, most CPU first. */
+  processes: SystemProcess[];
+  versions: SystemVersions;
+}
+export interface SystemDisk { label: FileRoot; path: string; total: number; used: number; available: number }
+export interface SystemProcess {
+  pid: number; name: string; command: string;
+  /** Percent of one core over the last sample. */
+  cpu: number;
+  /** Resident bytes. */
+  memory: number;
+}
+export interface SystemVersions {
+  agentbox: string | null; herdr: string | null; codeServer: string | null; node: string;
+  /** Each coding-agent CLI found on PATH. */
+  agents: { name: string; version: string | null }[];
+}
 /** Percent-encode a (possibly byte-escaped) path for a query string. */
 export function encodePathParam(path: string): string {
   let out = "";

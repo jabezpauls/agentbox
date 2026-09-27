@@ -18,6 +18,10 @@ export interface Config {
    * and never shareable — a public link must not reach a shell.
    */
   infraPorts: number[];
+  /** The cgroup v2 mount the system view reads the sandbox's limits from. */
+  cgroupRoot: string;
+  /** What the system view reports as agentbox's version, when the image says. */
+  version: string | null;
 }
 export function defaultSocketPath(env = process.env): string {
   if (env.HERDR_SOCKET_PATH) return env.HERDR_SOCKET_PATH;
@@ -45,5 +49,7 @@ export function loadConfig(env = process.env): Config {
     // `path` (the default) allows public sharing; `off` refuses to mint or
     // serve shares. Set by the installer's `--preview` flag.
     previewSharing: (env.WORKBENCH_PREVIEW_MODE ?? "path") !== "off",
+    cgroupRoot: env.WORKBENCH_CGROUP_ROOT ?? "/sys/fs/cgroup",
+    version: env.AGENTBOX_VERSION || null,
   };
 }

@@ -6,6 +6,7 @@ import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
 import type { SessionHub } from "../../src/herdr/session.js";
 import { FilesService, type FilesOptions } from "../../src/files/service.js";
+import { SystemMonitor } from "../../src/system.js";
 
 export const stubHub = {
   connected: false,
@@ -51,7 +52,18 @@ export async function filesFixture(opts: Partial<FilesOptions> = {}): Promise<Fi
     WORKBENCH_SHARES_DIR: path.join(base, "shares"),
     HOME: home,
   });
-  const app = await buildApp(config, { hub: stubHub, files });
+  // Versions are probed on an empty PATH: a test must not run the
+  // developer's own agent CLIs.
+  const system = new SystemMonitor({
+    cgroupRoot: config.cgroupRoot,
+    disks: [
+      { label: "workspace", path: workspace },
+      { label: "home", path: home },
+    ],
+    version: null,
+    env: { PATH: "" },
+  });
+  const app = await buildApp(config, { hub: stubHub, files, system });
   await app.ready();
   return {
     base,
