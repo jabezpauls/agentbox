@@ -189,30 +189,44 @@ export interface UploadSession {
   overwrite: boolean; created: number; updated: number; done: boolean;
 }
 /**
- * `GET /api/system`: how the sandbox is doing. CPU and memory are the
- * bridge's own cgroup (v2), which is the sandbox container the agents run in;
- * `limit` is null when the cgroup sets none.
+ * `GET /api/system`: how the sandbox is doing.
+ *
+ * The sandbox is several containers — the editor, the terminals, the monitor
+ * and the Workbench — sharing one process table, and each has its own
+ * cgroup and limits. So there are two views, and neither is "the box":
+ * `sandbox` is every process the sandbox runs, summed from /proc; `container`
+ * is the Workbench container's own cgroup, the only one the bridge can read.
  */
 export interface SystemInfo {
   at: number;
-  /** False when no cgroup v2 files could be read; the figures fall back to the host's. */
-  cgroup: boolean;
-  cpu: {
-    /** CPUs busy over the last sample (0.5 = half of one core); null before a second sample exists. */
-    usage: number | null;
-    /** CPUs the cgroup may use, e.g. 2; null when unlimited. */
-    limit: number | null;
-    /** Logical CPUs on the host. */
+  sandbox: {
+    /** CPUs busy over the last sample (0.5 = half of one core), summed over every process; null before a second sample. */
+    cpu: number | null;
+    /** Resident memory summed over every process (a page shared by several counts once for each). */
+    memory: number;
+    processes: number;
+  };
+  host: {
+    /** Logical CPUs. */
     cores: number;
+    /** Bytes of memory. */
+    memory: number;
   };
-  memory: {
-    /** Bytes in use, not counting reclaimable page cache. */
-    used: number;
-    limit: number | null;
-    /** The host's memory. */
-    total: number;
+  /**
+   * The Workbench container, from its own cgroup (v2): what it uses and what
+   * it may. It is where the bridge runs, and — when the bridge started herdr,
+   * as it does — where the agents and what they start run too. A `limit` is
+   * null when the cgroup sets none; `readable` is false when there is no
+   * cgroup v2 to read.
+   */
+  container: {
+    service: "workbench";
+    readable: boolean;
+    cpu: { usage: number | null; limit: number | null };
+    /** `used` leaves out page cache the kernel can reclaim. */
+    memory: { used: number | null; limit: number | null };
+    pids: { current: number | null; limit: number | null };
   };
-  pids: { current: number | null; limit: number | null };
   disks: SystemDisk[];
   /** Seconds. `box` is since the sandbox started; null when it cannot be told. */
   uptime: { box: number | null; bridge: number; host: number };

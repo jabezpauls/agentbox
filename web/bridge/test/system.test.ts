@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SystemInfo } from "@workbench/shared";
@@ -106,17 +107,22 @@ describe("the system monitor", () => {
     });
 
     const first = await monitor.info();
-    expect(first.cgroup).toBe(true);
-    expect(first.cpu.limit).toBe(2);
-    expect(first.memory).toMatchObject({ used: 1342177280 - 268435456, limit: 4 * 1024 ** 3 });
-    expect(first.pids).toEqual({ current: 42, limit: 512 });
+    expect(first.container.readable).toBe(true);
+    expect(first.container.service).toBe("workbench");
+    expect(first.container.cpu.limit).toBe(2);
+    expect(first.container.memory).toEqual({ used: 1342177280 - 268435456, limit: 4 * 1024 ** 3 });
+    expect(first.container.pids).toEqual({ current: 42, limit: 512 });
 
     // Some work happens, then the next reading measures it.
     host.setCgroupUsage(5_000_000 + 400_000);
     host.setProc(200, "node", 40, 50_000, 10_000, "node server.js --port 3000");
     await new Promise((r) => setTimeout(r, 200));
     const info: SystemInfo = await monitor.info();
-    expect(info.cpu.usage).toBeGreaterThan(0);
+    expect(info.container.cpu.usage).toBeGreaterThan(0);
+    // The sandbox as a whole: every process, summed from /proc.
+    expect(info.sandbox.cpu).toBeGreaterThan(0);
+    expect(info.sandbox.processes).toBe(3);
+    expect(info.sandbox.memory).toBe(info.processes.reduce((n, p) => n + p.memory, 0));
     expect(info.processes[0]).toMatchObject({ pid: 200, name: "node", command: "node server.js --port 3000" });
     expect(info.processes[0]!.cpu).toBeGreaterThan(0);
     expect(info.processes.find((p) => p.pid === 300)?.cpu).toBe(0);
@@ -134,18 +140,37 @@ describe("the system monitor", () => {
     const host = fakeHost(base, "unlimited");
     host.setProc(1, "init", 0, 0, 1, "init");
     const info = await new SystemMonitor({ cgroupRoot: host.cg, procRoot: host.proc, disks: [], version: null, env: { PATH: "" } }).info();
-    expect(info.cpu.limit).toBeNull();
-    expect(info.memory.limit).toBeNull();
-    expect(info.pids).toEqual({ current: 7, limit: null });
+    expect(info.container.cpu.limit).toBeNull();
+    expect(info.container.memory.limit).toBeNull();
+    expect(info.container.pids).toEqual({ current: 7, limit: null });
   });
 
-  it("keeps only the fifteen busiest processes", async () => {
+  it("keeps only the fifteen busiest processes, and reads only their command lines", async () => {
     const host = fakeHost(base, "limited");
     for (let pid = 1; pid <= 30; pid++) host.setProc(pid, `p${pid}`, 0, 1, pid, `p${pid}`);
+    const readFile = vi.spyOn(fsp, "readFile");
     const info = await new SystemMonitor({ cgroupRoot: host.cg, procRoot: host.proc, disks: [], version: null, env: { PATH: "" } }).info();
+    const cmdlines = readFile.mock.calls.filter((c) => String(c[0]).endsWith("/cmdline")).length;
+    readFile.mockRestore();
     expect(info.processes).toHaveLength(15);
     // All idle, so the largest come first.
     expect(info.processes[0]?.pid).toBe(30);
+    expect(info.processes[0]?.command).toBe("p30");
+    expect(cmdlines).toBe(15);
+    // The whole sandbox is still counted.
+    expect(info.sandbox.processes).toBe(30);
+  });
+
+  it("reads /proc without holding up the thread", async () => {
+    const host = fakeHost(base, "limited");
+    for (let pid = 1; pid <= 400; pid++) host.setProc(pid, `p${pid}`, pid, 1, pid, `p${pid}`);
+    const readFileSync = vi.spyOn(fs, "readFileSync");
+    const readdirSync = vi.spyOn(fs, "readdirSync");
+    await new SystemMonitor({ cgroupRoot: host.cg, procRoot: host.proc, disks: [], version: null, env: { PATH: "" } }).info();
+    const sync = readFileSync.mock.calls.length + readdirSync.mock.calls.length;
+    readFileSync.mockRestore();
+    readdirSync.mockRestore();
+    expect(sync).toBe(0);
   });
 
   it("finds the agent CLIs on PATH and asks each for its version", async () => {

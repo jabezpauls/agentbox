@@ -1,9 +1,9 @@
-import { execFile, execFileSync } from "node:child_process";
-import fs from "node:fs";
+import { execFile } from "node:child_process";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { SystemDisk, SystemInfo, SystemProcess, SystemVersions } from "@workbench/shared";
+import { mapLimit } from "./files/entries.js";
 
 // --- parsing (pure, tested against fixtures) --------------------------------
 
@@ -90,13 +90,15 @@ export interface SystemOptions {
 
 interface Sample {
   at: number;
+  /** Host uptime in seconds when the sample was taken. */
+  uptime: number;
   cgroupUsec: number | null;
   procs: Map<number, ProcStat>;
 }
 
-function read(file: string): string | null {
+async function read(file: string): Promise<string | null> {
   try {
-    return fs.readFileSync(file, "utf8");
+    return await fsp.readFile(file, "utf8");
   } catch {
     return null;
   }
@@ -110,59 +112,73 @@ function run(bin: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs = 50
   });
 }
 
+/** `getconf <name>`, or the usual Linux value. */
+async function sysconf(name: string, fallback: number): Promise<number> {
+  const out = Number((await run("getconf", [name], process.env, 2000))?.trim());
+  return Number.isFinite(out) && out > 0 ? out : fallback;
+}
+
 /**
  * What the System surface shows. CPU use is a rate, so it needs two readings:
  * the monitor keeps the last one, and when there is none recent enough it
- * takes a pair a quarter of a second apart.
+ * takes a pair a quarter of a second apart. Everything is read without
+ * blocking: the bridge serves terminals on the same thread, and a process
+ * table is hundreds of small files.
  */
 export class SystemMonitor {
   private last: Sample | null = null;
   private busy: Promise<SystemInfo> | null = null;
   private versions: { at: number; value: Promise<SystemVersions> } | null = null;
-  private clkTck: number | null = null;
-  private pageSize: number | null = null;
+  private consts: Promise<{ clk: number; page: number }> | null = null;
   private readonly proc: string;
 
   constructor(private readonly opts: SystemOptions) {
     this.proc = opts.procRoot ?? "/proc";
   }
 
-  /** Clock ticks per second, asked of the system on first use. */
-  private get clk(): number {
-    return (this.clkTck ??= sysconf("CLK_TCK", 100));
-  }
-
-  private get page(): number {
-    return (this.pageSize ??= sysconf("PAGESIZE", 4096));
+  /** Clock ticks per second and the page size, asked of the system once. */
+  private constants(): Promise<{ clk: number; page: number }> {
+    this.consts ??= Promise.all([sysconf("CLK_TCK", 100), sysconf("PAGESIZE", 4096)]).then(([clk, page]) => ({ clk, page }));
+    return this.consts;
   }
 
   /** The cgroup directory this process is in, or the mount itself. */
-  private cgroupDir(): string {
+  private async cgroupDir(): Promise<string> {
     // Inside a container with its own cgroup namespace the mount *is* our
     // cgroup; with the host's, our path under it is in /proc/self/cgroup.
-    const rel = /^0::(\/.*)$/m.exec(read(path.join(this.proc, "self", "cgroup")) ?? "")?.[1];
+    const rel = /^0::(\/.*)$/m.exec((await read(path.join(this.proc, "self", "cgroup"))) ?? "")?.[1];
     if (rel && rel !== "/") {
       const dir = path.join(this.opts.cgroupRoot, rel);
-      if (fs.existsSync(path.join(dir, "cgroup.procs")) || fs.existsSync(path.join(dir, "cpu.stat"))) return dir;
+      const known = await fsp.access(path.join(dir, "cpu.stat")).then(
+        () => true,
+        () => false,
+      );
+      if (known) return dir;
     }
     return this.opts.cgroupRoot;
   }
 
-  private sample(cg: string): Sample {
-    const cpuStat = read(path.join(cg, "cpu.stat"));
+  private async sample(cg: string): Promise<Sample> {
+    const [cpuStat, uptime, names] = await Promise.all([
+      read(path.join(cg, "cpu.stat")),
+      read(path.join(this.proc, "uptime")),
+      fsp.readdir(this.proc).catch(() => [] as string[]),
+    ]);
     const procs = new Map<number, ProcStat>();
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(this.proc);
-    } catch {
-      // no /proc: no process table
-    }
-    for (const n of names) {
-      if (!/^\d+$/.test(n)) continue;
-      const st = parseProcStat(read(path.join(this.proc, n, "stat")) ?? "");
-      if (st) procs.set(st.pid, st);
-    }
-    return { at: Date.now(), cgroupUsec: cpuStat ? (parseKeyed(cpuStat).get("usage_usec") ?? null) : null, procs };
+    await mapLimit(
+      names.filter((n) => /^\d+$/.test(n)),
+      32,
+      async (n) => {
+        const st = parseProcStat((await read(path.join(this.proc, n, "stat"))) ?? "");
+        if (st) procs.set(st.pid, st);
+      },
+    );
+    return {
+      at: Date.now(),
+      uptime: Number((uptime ?? "").split(/\s+/)[0]) || os.uptime(),
+      cgroupUsec: cpuStat ? (parseKeyed(cpuStat).get("usage_usec") ?? null) : null,
+      procs,
+    };
   }
 
   info(): Promise<SystemInfo> {
@@ -174,74 +190,87 @@ export class SystemMonitor {
   }
 
   private async collect(): Promise<SystemInfo> {
-    const cg = this.cgroupDir();
+    const { clk, page } = await this.constants();
+    const cg = await this.cgroupDir();
     let prev = this.last;
     if (!prev || Date.now() - prev.at > 10_000) {
-      prev = this.sample(cg);
+      prev = await this.sample(cg);
       await new Promise((r) => setTimeout(r, 250));
     }
-    const now = this.sample(cg);
+    const now = await this.sample(cg);
     this.last = now;
     const secs = Math.max(0.001, (now.at - prev.at) / 1000);
 
-    const cpuMax = read(path.join(cg, "cpu.max"));
-    const memCurrent = read(path.join(cg, "memory.current"));
-    const memMax = read(path.join(cg, "memory.max"));
-    const memStat = parseKeyed(read(path.join(cg, "memory.stat")) ?? "");
-    const pidsCurrent = read(path.join(cg, "pids.current"));
-    const pidsMax = read(path.join(cg, "pids.max"));
-    const cgroup = now.cgroupUsec !== null || memCurrent !== null;
+    const cgFile = (f: string) => read(path.join(cg, f));
+    const [cpuMax, memCurrent, memMax, memStatText, pidsCurrent, pidsMax] = await Promise.all([
+      cgFile("cpu.max"),
+      cgFile("memory.current"),
+      cgFile("memory.max"),
+      cgFile("memory.stat"),
+      cgFile("pids.current"),
+      cgFile("pids.max"),
+    ]);
+    const memStat = parseKeyed(memStatText ?? "");
 
-    // Page cache the kernel can drop is not memory anyone is using.
-    const memUsed =
-      memCurrent !== null
-        ? Math.max(0, Number(memCurrent.trim()) - (memStat.get("inactive_file") ?? 0))
-        : os.totalmem() - os.freemem();
-    const usage =
-      now.cgroupUsec !== null && prev.cgroupUsec !== null
-        ? (now.cgroupUsec - prev.cgroupUsec) / 1e6 / secs
-        : null;
-
-    const processes: SystemProcess[] = [];
+    // Every process, and what each did since the last reading. One that
+    // started since then did all of its work in the window.
+    let busyTicks = 0;
+    let rss = 0;
+    const rows: SystemProcess[] = [];
     for (const [pid, st] of now.procs) {
       const before = prev.procs.get(pid);
-      const delta = before && before.start === st.start ? st.ticks - before.ticks : 0;
-      processes.push({
-        pid,
-        name: st.name,
-        command: this.command(pid) ?? st.name,
-        cpu: Math.round((delta / this.clk / secs) * 1000) / 10,
-        memory: Math.max(0, st.rssPages) * this.page,
-      });
+      const bornAfter = now.uptime - st.start / clk < secs;
+      const delta = Math.max(0, before && before.start === st.start ? st.ticks - before.ticks : bornAfter ? st.ticks : 0);
+      busyTicks += delta;
+      const memory = Math.max(0, st.rssPages) * page;
+      rss += memory;
+      rows.push({ pid, name: st.name, command: st.name, cpu: Math.round((delta / clk / secs) * 1000) / 10, memory });
     }
-    processes.sort((a, b) => b.cpu - a.cpu || b.memory - a.memory || a.pid - b.pid);
+    rows.sort((a, b) => b.cpu - a.cpu || b.memory - a.memory || a.pid - b.pid);
+    // Only the rows shown are worth a command line each.
+    const processes = await Promise.all(
+      rows.slice(0, 15).map(async (p) => ({ ...p, command: (await this.command(p.pid)) ?? p.name })),
+    );
 
-    const hostUp = Number((read(path.join(this.proc, "uptime")) ?? "").split(/\s+/)[0]) || os.uptime();
     const init = now.procs.get(1);
-    const boxUp = init && Number.isFinite(init.start) ? Math.max(0, hostUp - init.start / this.clk) : null;
+    const boxUp = init && Number.isFinite(init.start) ? Math.max(0, now.uptime - init.start / clk) : null;
+    const containerCpu =
+      now.cgroupUsec !== null && prev.cgroupUsec !== null ? (now.cgroupUsec - prev.cgroupUsec) / 1e6 / secs : null;
 
     return {
       at: now.at,
-      cgroup,
-      cpu: {
-        usage: usage === null ? null : Math.round(usage * 1000) / 1000,
-        limit: cpuMax === null ? null : parseCpuMax(cpuMax),
-        cores: os.cpus().length || 1,
+      sandbox: {
+        cpu: Math.round((busyTicks / clk / secs) * 1000) / 1000,
+        memory: rss,
+        processes: now.procs.size,
       },
-      memory: { used: memUsed, limit: memMax === null ? null : parseLimit(memMax), total: os.totalmem() },
-      pids: {
-        current: pidsCurrent === null ? null : parseLimit(pidsCurrent),
-        limit: pidsMax === null ? null : parseLimit(pidsMax),
+      host: { cores: os.cpus().length || 1, memory: os.totalmem() },
+      container: {
+        service: "workbench",
+        readable: now.cgroupUsec !== null || memCurrent !== null,
+        cpu: {
+          usage: containerCpu === null ? null : Math.round(containerCpu * 1000) / 1000,
+          limit: cpuMax === null ? null : parseCpuMax(cpuMax),
+        },
+        memory: {
+          // Page cache the kernel can drop is not memory anyone is using.
+          used: memCurrent === null ? null : Math.max(0, Number(memCurrent.trim()) - (memStat.get("inactive_file") ?? 0)),
+          limit: memMax === null ? null : parseLimit(memMax),
+        },
+        pids: {
+          current: pidsCurrent === null ? null : parseLimit(pidsCurrent),
+          limit: pidsMax === null ? null : parseLimit(pidsMax),
+        },
       },
       disks: await this.disks(),
-      uptime: { box: boxUp === null ? null : Math.round(boxUp), bridge: Math.round(process.uptime()), host: Math.round(hostUp) },
-      processes: processes.slice(0, 15),
+      uptime: { box: boxUp === null ? null : Math.round(boxUp), bridge: Math.round(process.uptime()), host: Math.round(now.uptime) },
+      processes,
       versions: await this.versionsCached(),
     };
   }
 
-  private command(pid: number): string | null {
-    const raw = read(path.join(this.proc, String(pid), "cmdline"));
+  private async command(pid: number): Promise<string | null> {
+    const raw = await read(path.join(this.proc, String(pid), "cmdline"));
     if (!raw) return null;
     const cmd = raw.replace(/\0+$/, "").split("\0").join(" ");
     return cmd.length > 200 ? `${cmd.slice(0, 199)}…` : cmd;
@@ -271,50 +300,36 @@ export class SystemMonitor {
 
   private async probeVersions(): Promise<SystemVersions> {
     const env = this.opts.env ?? process.env;
-    const onPath = (name: string): string | null => {
-      for (const dir of (env.PATH ?? "").split(path.delimiter)) {
-        if (!dir) continue;
+    const dirs = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
+    const onPath = async (name: string): Promise<string | null> => {
+      for (const dir of dirs) {
         const p = path.join(dir, name);
-        try {
-          fs.accessSync(p, fs.constants.X_OK);
-          return p;
-        } catch {
-          // keep looking
-        }
+        const ok = await fsp.access(p, fsp.constants.X_OK).then(
+          () => true,
+          () => false,
+        );
+        if (ok) return p;
       }
       return null;
     };
-    const probe = async (name: string): Promise<string | null> => {
-      const bin = onPath(name);
+    const probe = async (bin: string | null): Promise<string | null> => {
       if (!bin) return null;
       const out = await run(bin, ["--version"], env);
       return out === null ? null : versionIn(out);
     };
-    const agentNames = AGENT_CLIS.filter((n) => onPath(n) !== null);
-    const [herdr, codeServer, ...agents] = await Promise.all([
-      this.opts.herdrVersion?.() ?? probe("herdr"),
-      probe("code-server"),
-      ...agentNames.map(probe),
+    const found = await Promise.all(AGENT_CLIS.map(async (n) => [n, await onPath(n)] as const));
+    const agents = found.filter(([, bin]) => bin !== null);
+    const [herdr, codeServer, ...agentVersions] = await Promise.all([
+      this.opts.herdrVersion?.() ?? onPath("herdr").then(probe),
+      onPath("code-server").then(probe),
+      ...agents.map(([, bin]) => probe(bin)),
     ]);
     return {
       agentbox: this.opts.version,
       herdr: herdr ?? null,
       codeServer: codeServer ?? null,
       node: process.versions.node,
-      agents: agentNames.map((name, i) => ({ name, version: agents[i] ?? null })),
+      agents: agents.map(([name], i) => ({ name, version: agentVersions[i] ?? null })),
     };
-  }
-}
-
-/** `getconf <name>` once, falling back to the usual Linux value. */
-function sysconf(name: string, fallback: number): number {
-  try {
-    const out = Number(
-      // Synchronous and once per process; tiny.
-      execFileSync("getconf", [name], { encoding: "utf8", timeout: 2000 }).trim(),
-    );
-    return Number.isFinite(out) && out > 0 ? out : fallback;
-  } catch {
-    return fallback;
   }
 }
