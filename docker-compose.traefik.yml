@@ -10,9 +10,9 @@
 #
 # Requires: an external network Traefik already watches (AGENTBOX_EDGE_NETWORK,
 # conventionally `edge-prod`) and a DNS record for AGENTBOX_DOMAIN pointing at
-# the host. Caddy keeps authenticating every request inside the stack, so the
+# the host. The gate keeps authenticating every request inside the stack, so the
 # sandbox is never reachable unauthenticated even from another container on
-# that network.
+# that network — and the gate itself is not on that network at all.
 services:
   proxy:
     networks:
@@ -31,10 +31,10 @@ services:
       - traefik.http.routers.agentbox.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
       - traefik.http.services.agentbox.loadbalancer.server.port=8080
       - traefik.http.routers.agentbox.middlewares=agentbox-ratelimit,agentbox-headers
-      # A password with no lockout is a password being guessed at whatever rate
-      # the network allows. Normal use is a handful of requests a second — the
-      # editor's assets, a port poll, a review poll — so a ceiling well above
-      # that is invisible to a person and ruinous to a guesser.
+      # An outer limit, in front of the gate's own sign-in limits and lockout.
+      # Normal use is a handful of requests a second — the editor's assets, a
+      # port poll, a review poll — so a ceiling well above that is invisible to
+      # a person and ruinous to a flood.
       - traefik.http.middlewares.agentbox-ratelimit.ratelimit.average=60
       - traefik.http.middlewares.agentbox-ratelimit.ratelimit.burst=120
       - traefik.http.middlewares.agentbox-ratelimit.ratelimit.period=1s
@@ -47,22 +47,14 @@ services:
       - traefik.http.middlewares.agentbox-headers.headers.stsincludesubdomains=false
       - traefik.http.middlewares.agentbox-headers.headers.referrerpolicy=no-referrer
       - traefik.http.middlewares.agentbox-headers.headers.contenttypenosniff=true
-      # Public preview shares (/s/<token>) are the one unauthenticated path, so
-      # they get their own rate limit rather than sharing the login's. Same
-      # ceiling and client-IP criterion — well above a real viewer loading a
-      # dev server's assets, ruinous to anyone probing tokens. A higher-priority
-      # router carries it; it reuses the same backend service.
-      - traefik.http.routers.agentbox-shares.rule=Host(`${AGENTBOX_DOMAIN}`) && PathPrefix(`/s/`)
-      - traefik.http.routers.agentbox-shares.priority=100
-      - traefik.http.routers.agentbox-shares.entrypoints=websecure
-      - traefik.http.routers.agentbox-shares.tls=true
-      - traefik.http.routers.agentbox-shares.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
-      - traefik.http.routers.agentbox-shares.service=agentbox
-      - traefik.http.routers.agentbox-shares.middlewares=agentbox-shares-ratelimit,agentbox-headers
-      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.average=60
-      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.burst=120
-      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.period=1s
-      - traefik.http.middlewares.agentbox-shares-ratelimit.ratelimit.sourcecriterion.requestheadername=${AGENTBOX_CLIENT_IP_HEADER:-CF-Connecting-IP}
+
+  gate:
+    environment:
+      # The gate keys its sign-in limits on this header from the proxy: right
+      # behind Cloudflare, spoofable without it — set AGENTBOX_CLIENT_IP_HEADER
+      # empty in .env when nothing fronts Traefik, and the gate falls back to
+      # the proxy's X-Forwarded-For (which is then Traefik's address).
+      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER-CF-Connecting-IP}
 
 networks:
   edge:

@@ -5,6 +5,10 @@
 # service that publishes a port is the proxy, and which address it binds to is
 # decided by the mode overlay (docker-compose.standalone.yml or
 # docker-compose.behind-proxy.yml) rather than here.
+#
+# Every request goes proxy → gate → sandbox. The gate decides who gets in, and
+# it lives outside the sandbox (its own image, user and volume), because the
+# sandbox runs agents and anything it holds an agent can change.
 
 x-sandbox: &sandbox
   # The context is the repository root, not images/workspace: the Dockerfile's
@@ -48,7 +52,7 @@ services:
     command:
       - code-server
       - --bind-addr=0.0.0.0:8080
-      - --auth=none          # the proxy authenticates; see proxy/Caddyfile.*
+      - --auth=none          # the gate authenticates; see web/gate
       - --disable-telemetry
       - --disable-update-check
       - /workspace
@@ -117,12 +121,12 @@ services:
       TZ: ${TZ:-UTC}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Blank means path previews only; set it and each port also gets its own
-      # hostname, which is a separate origin and needs no iframe sandbox.
-      WORKBENCH_PREVIEW_DOMAIN: ${AGENTBOX_PREVIEW_DOMAIN:-}
-      # `path` (default) allows opt-in public shares under /s/<token>; `off`
-      # refuses to mint or serve them and hides the panel's Share action.
-      WORKBENCH_PREVIEW_MODE: ${AGENTBOX_PREVIEW_MODE:-path}
+      # Public `/s/<token>` shares stay off: the bridge would decide who may see
+      # them, and the bridge is inside the sandbox. The gate admits nobody
+      # without a session, so a share link could only ever open for the owner.
+      # (Per-port preview hostnames are gone for the same reason: the session
+      # cookie is host-only and never reaches another hostname.)
+      WORKBENCH_PREVIEW_MODE: "off"
       # Only used to print a clickable link from `agentbox-review open`; unset,
       # the bridge falls back to whatever Host the request arrived with.
       WORKBENCH_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
@@ -133,19 +137,65 @@ services:
       retries: 5
       start_period: 20s
 
+  # The front door: sign-in, sessions, two-factor, device tokens, rate limits,
+  # and the routing of every request to the services above — with every
+  # front-door credential stripped before anything reaches the sandbox.
+  # Outside the sandbox on purpose: its own image and user (10001, not 1000),
+  # its own volume, which no sandbox container mounts.
+  gate:
+    build:
+      context: .
+      dockerfile: images/gate/Dockerfile
+    image: agentbox/gate:latest
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      # The admin socket `agentbox-gate` talks to, and nothing else.
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The gate runs bcrypt, which is deliberately slow. Its rate limits refuse
+    # a flood before any bcrypt work, and this ceiling bounds what is left, so
+    # nothing else on the host pays for a guesser.
+    cpus: ${AGENTBOX_GATE_CPUS:-1}
+    mem_limit: ${AGENTBOX_GATE_MEMORY:-256m}
+    pids_limit: 128
+    networks:
+      - internal
+    depends_on:
+      - code
+    environment:
+      TZ: ${TZ:-UTC}
+      AGENTBOX_USER: ${AGENTBOX_USER:-admin}
+      # Seeds a fresh store only. Afterwards the gate's store is the source of
+      # truth: ./scripts/agentbox passwd changes the password there.
+      AGENTBOX_PASSWORD_HASH: ${AGENTBOX_PASSWORD_HASH:?run install.sh to generate a password hash}
+      AGENTBOX_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
+      # Which header carries the client's address on a request from the proxy.
+      # Empty: the proxy's own X-Forwarded-For. The traefik overlay sets
+      # CF-Connecting-IP. Only the proxy's connections are believed.
+      AGENTBOX_CLIENT_IP_HEADER: ${AGENTBOX_CLIENT_IP_HEADER:-}
+      GATE_TRUSTED_PROXIES: proxy
+    volumes:
+      - gate:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7900/login').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # TLS where it terminates (standalone), compression, and nothing else: it
+  # forwards every request to the gate and decides nothing about who gets in.
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
-      - code
+      - gate
     security_opt:
       - no-new-privileges:true
-    # The proxy verifies a bcrypt hash on every authentication attempt, which
-    # is deliberately slow. Without a ceiling, an unauthenticated flood of
-    # Authorization headers turns that cost into a CPU-exhaustion attack on
-    # whatever else shares the host. A cap makes the flood the proxy's problem
-    # and no one else's; a rate limit in front of it (see the reverse-proxy
-    # overlays) keeps it from becoming even that.
     cpus: ${AGENTBOX_PROXY_CPUS:-1}
     mem_limit: ${AGENTBOX_PROXY_MEMORY:-256m}
     pids_limit: 256
@@ -153,11 +203,6 @@ services:
       - internal
     environment:
       AGENTBOX_DOMAIN: ${AGENTBOX_DOMAIN:-localhost}
-      AGENTBOX_USER: ${AGENTBOX_USER:-admin}
-      AGENTBOX_PASSWORD_HASH: ${AGENTBOX_PASSWORD_HASH:?run install.sh to generate a password hash}
-      # Always defined so the Caddyfile's placeholders resolve; when it is
-      # empty the preview hostname rules can never match anything.
-      AGENTBOX_PREVIEW_DOMAIN: ${AGENTBOX_PREVIEW_DOMAIN:-}
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -172,5 +217,8 @@ volumes:
     name: agentbox_workspace
   home:
     name: agentbox_home
+  # The gate's store: password hash, sessions, two-factor, device tokens.
+  gate:
+    name: agentbox_gate
   caddy_data:
   caddy_config:

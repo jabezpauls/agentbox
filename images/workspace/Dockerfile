@@ -14,6 +14,9 @@ COPY web/package.json web/package-lock.json ./
 COPY web/shared/package.json shared/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
+# The gate is its own image (images/gate), but it is a workspace of the same
+# lockfile, so `npm ci` needs its manifest to check against.
+COPY web/gate/package.json gate/
 RUN npm ci
 COPY web/ .
 RUN npm run build && npm prune --omit=dev

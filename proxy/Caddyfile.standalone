@@ -1,102 +1,18 @@
-# Standalone: Caddy terminates TLS for AGENTBOX_DOMAIN and authenticates every
-# request before it reaches the sandbox.
+# Standalone: Caddy terminates TLS for AGENTBOX_DOMAIN and hands every request
+# to the gate. It authenticates nothing and routes nothing: the gate decides who
+# gets in and where each path goes (see web/gate).
 {
 	admin off
-
-	# Certificates for hostnames that are not known at start-up: the preview
-	# wildcard's PORT.<preview-domain> names. Caddy asks the gate below before
-	# it will issue one, so an attacker pointing any DNS name at this box
-	# cannot make it mint certificates on demand.
-	on_demand_tls {
-		# 127.0.0.1, not localhost: the gate below binds IPv4 only, and this
-		# must not depend on a ::1 → 127.0.0.1 fallback.
-		ask http://127.0.0.1:9444/ask
-	}
-}
-
-# The on-demand gate. Answers 200 only for a numeric preview subdomain, and 404
-# for everything else, which is what stops unbounded issuance. Bound to
-# loopback inside the proxy container, so nothing outside can reach it.
-:9444 {
-	# Loopback only, inside the proxy container: Caddy asks itself, and nothing
-	# on the network can reach the gate.
-	bind 127.0.0.1
-
-	# The suffix is compared literally rather than folded into the regular
-	# expression, where the domain's own dots would have matched any character
-	# and let a lookalike name through.
-	@allowed expression {query.domain}.matches("^[0-9]{1,5}[.]") && {query.domain}.endsWith(".{$AGENTBOX_PREVIEW_DOMAIN}")
-	handle @allowed {
-		respond 200
-	}
-	respond 404
-}
-
-# Shared routing, defined before use: Caddy resolves snippets in file order.
-(routes) {
-	# herdr's client, full-screen: the agent multiplexer, handy for running
-	# agents as a TUI. Shares the editor's network namespace.
-	handle /terminal* {
-		reverse_proxy code:7681
-	}
-
-	# The Workbench: the browser client for herdr, served under its own base
-	# path (the app is built with that prefix, so no rewriting is needed).
-	handle /workbench* {
-		reverse_proxy code:7800
-	}
-
-	# Live CPU, memory and process usage for the sandbox.
-	handle /monitor* {
-		reverse_proxy code:7682
-	}
-
-	# A plain bash shell, when you want that instead of the herdr client.
-	handle /shell* {
-		reverse_proxy code:7683
-	}
-
-	# Everything else is the editor, served at the root so VS Code needs no
-	# sub-path gymnastics.
-	handle {
-		reverse_proxy code:8080
-	}
 }
 
 {$AGENTBOX_DOMAIN} {
 	encode zstd gzip
 
-	# The one unauthenticated route: a public preview share, /s/<token>/.
-	#
-	# "Public" is decided on the raw request URI, not on Caddy's cleaned path:
-	# the `path` matcher resolves dot-segments and decodes %2e/%2f before
-	# matching, while the bridge routes on the raw string, so a path matcher here
-	# would let `/workbench/…/../../s/x` skip the login yet reach a private
-	# route. The raw URI must start with a 32-hex token and carry none of the
-	# forms that two parsers read differently (dot-segments, %2e, %2f, %5c, a
-	# backslash, `;`, `//`); anything else takes the login like every other path.
-	@public expression `{http.request.orig_uri}.matches(r'^/s/[0-9a-f]{32}(/|\?|$)') && !{http.request.orig_uri}.matches(r'^[^?]*(?:(?i:%2e|%2f|%5c)|\\|;|//|/\.\.?(?:/|\?|$))')`
-	@protected expression `!({http.request.orig_uri}.matches(r'^/s/[0-9a-f]{32}(/|\?|$)') && !{http.request.orig_uri}.matches(r'^[^?]*(?:(?i:%2e|%2f|%5c)|\\|;|//|/\.\.?(?:/|\?|$))'))`
-
-	# A client must never be able to claim the public branch itself: drop any
-	# copy of the marker on every request, then set it on the public one only.
-	# The bridge refuses a marked request whose raw path is not a share, which
-	# is the decisive check — it judges the same string it routes on.
-	request_header -X-Agentbox-Public
-
-	basic_auth @protected {
-		{$AGENTBOX_USER} {$AGENTBOX_PASSWORD_HASH}
-	}
-
-	handle @public {
-		reverse_proxy code:7800 {
-			header_up X-Agentbox-Public 1
-		}
-	}
-
-	import routes
+	# The original Host passes through unchanged — the gate and the services
+	# behind it compare a WebSocket's Origin against it — and Caddy sets
+	# X-Forwarded-For, -Proto and -Host itself, replacing any a client sent,
+	# since it trusts no proxy in front of it. The gate believes those headers
+	# only on connections from this container. WebSocket upgrades and
+	# streamed responses (terminals, long polls) pass through as they are.
+	reverse_proxy gate:7900
 }
-
-# Optional per-port preview hostnames, mounted only when a preview domain is
-# configured (see docker-compose.previews.yml). Each file here is a site block.
-import /etc/caddy/previews/*
