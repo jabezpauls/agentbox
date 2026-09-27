@@ -38,10 +38,22 @@ const CREDENTIALS = new Set(["authorization", "proxy-authorization"]);
  * marker the proxy used to set on public `/s/` requests — the gate makes
  * nothing public that way, so no request may carry it.
  */
-const IDENTITY = new Set(["forwarded", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-agentbox-public"]);
+const IDENTITY = new Set([
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "x-forwarded-host",
+  "x-agentbox-public",
+  "x-agentbox-client-ip",
+]);
 
-/** Response headers the gate sets itself on everything it serves. */
-const OWN_RESPONSE_HEADERS = new Set(["referrer-policy", "x-content-type-options"]);
+/**
+ * Response headers the gate sets itself on everything it serves, and headers
+ * no upstream may send at all. `Service-Worker-Allowed` would let a worker
+ * claim a scope above its own script's directory — from a page in the
+ * sandbox, over the whole box, the sign-in page included.
+ */
+const OWN_RESPONSE_HEADERS = new Set(["referrer-policy", "x-content-type-options", "service-worker-allowed"]);
 
 export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ["Referrer-Policy", "no-referrer"],
@@ -67,6 +79,8 @@ export interface ProxyOptions {
    * gate's own filtering), for a route that needs its own policy.
    */
   responseHeaders?: (pairs: Array<[string, string]>, upstream: IncomingMessage) => Array<[string, string]>;
+  /** Called as the client sends data over an upgraded connection. */
+  onClientData?: () => void;
 }
 
 function connectionTokens(req: IncomingMessage): Set<string> {
@@ -262,6 +276,7 @@ export function proxyUpgrade(upstream: Upstream, req: IncomingMessage, socket: D
     socket.on("close", end);
     upSocket.pipe(socket);
     socket.pipe(upSocket);
+    if (opts.onClientData) socket.on("data", opts.onClientData);
   });
 
   // The upstream answered without upgrading (a 403 from an origin check, a

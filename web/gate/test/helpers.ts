@@ -111,7 +111,6 @@ export async function startHarness(overrides: Partial<Config> = {}, deps: GateDe
     seedPasswordHash: await seed(),
     bcryptCost: COST,
     trustedProxies: [],
-    clientIpHeader: null,
     publicUrl: null,
     upstreams: Object.fromEntries(names.map((n) => [n, { host: "127.0.0.1", port: echoes[n].port }])) as Config["upstreams"],
     staticDir,
@@ -200,7 +199,8 @@ export function sameOrigin(h: Harness, extra: Record<string, string> = {}): Reco
 /** Sign in through the API and return the session cookie pair. */
 export async function login(h: Harness, extra: { remember?: boolean; code?: string; ip?: string } = {}): Promise<string> {
   const headers: Record<string, string> = sameOrigin(h);
-  if (extra.ip) headers["x-forwarded-for"] = extra.ip;
+  // As the proxy states it; believed only when the harness trusts loopback.
+  if (extra.ip) headers["x-agentbox-client-ip"] = extra.ip;
   const res = await request(h.base, "POST", "/_gate/login", {
     headers,
     body: { username: USER, password: PASSWORD, remember: extra.remember ?? false, ...(extra.code ? { code: extra.code } : {}) },

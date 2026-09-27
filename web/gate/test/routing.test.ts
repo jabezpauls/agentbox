@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cookieFrom, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
+import { PASSWORD, cookieFrom, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
 
 let h: Harness;
 let cookie: string;
@@ -242,13 +242,71 @@ describe("with a session", () => {
   });
 
   it("cuts a device token's open WebSockets when it is revoked", async () => {
-    const { token, record } = await h.gate.core.auth.createToken("laptop");
-    const o = await openWs(`ws://127.0.0.1:${h.port}/terminal/ws`, { authorization: `Bearer ${token}` });
-    if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
-    const done = new Promise<void>((r) => o.ws.once("close", () => r()));
-    const cookieNow = await login(h);
-    await request(h.base, "DELETE", `/_gate/tokens/${record.id}`, { headers: sameOrigin(h, { cookie: cookieNow }) });
-    await done;
+    // Its own harness: the shared one has spent its sign-in budget by now.
+    const hh = await startHarness();
+    try {
+      const { token, record } = await hh.gate.core.auth.createToken("laptop");
+      const o = await openWs(`ws://127.0.0.1:${hh.port}/terminal/ws`, { authorization: `Bearer ${token}` });
+      if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
+      const done = new Promise<void>((r) => o.ws.once("close", () => r()));
+      const cookieNow = await login(hh);
+      const res = await request(hh.base, "DELETE", `/_gate/tokens/${record.id}`, {
+        headers: sameOrigin(hh, { cookie: cookieNow }),
+        body: { password: PASSWORD },
+      });
+      expect(res.status).toBe(204);
+      await done;
+    } finally {
+      await hh.close();
+    }
+  });
+
+  it("keeps a session alive while its user types into a terminal, and cuts a silent one when it idles out", async () => {
+    let t = Date.now();
+    const hh = await startHarness({}, { now: () => t });
+    try {
+      const open = async (c: string) => {
+        const o = await openWs(`ws://127.0.0.1:${hh.port}/terminal/ws`, { origin: hh.base, cookie: c });
+        if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
+        return o.ws;
+      };
+      const busy = await open(await login(hh));
+      const silent = await open(await login(hh));
+      const silentClosed = new Promise<void>((r) => silent.once("close", () => r()));
+      // Eleven hours in, the busy one types; the silent one never does.
+      t += 11 * 3600_000;
+      const echoed = new Promise<void>((r) => busy.once("message", () => r()));
+      busy.send("ls\n");
+      await echoed;
+      t += 2 * 3600_000;
+      await hh.gate.core.auth.prune();
+      await silentClosed;
+      expect(busy.readyState).toBe(busy.OPEN);
+      expect(hh.gate.core.auth.listSessions()).toHaveLength(1);
+      busy.close();
+    } finally {
+      await hh.close();
+    }
+  });
+
+  it("cuts the sockets of sessions the session cap evicts", async () => {
+    let t = Date.now();
+    const hh = await startHarness({ trustedProxies: ["127.0.0.1"] }, { now: () => t });
+    try {
+      const first = await login(hh);
+      const o = await openWs(`ws://127.0.0.1:${hh.port}/terminal/ws`, { origin: hh.base, cookie: first });
+      if (!("ws" in o)) throw new Error(`upgrade refused: ${o.status}`);
+      const closed = new Promise<void>((r) => o.ws.once("close", () => r()));
+      // Fifty more sign-ins (from distinct clients, a minute apart, so no
+      // rate limit is what stops them) push the first past the cap.
+      for (let i = 0; i < 50; i++) {
+        t += 61_000;
+        await login(hh, { ip: `10.8.${i}.1` });
+      }
+      await closed;
+    } finally {
+      await hh.close();
+    }
   });
 
   it("refuses a WebSocket from another origin (cross-site WebSocket hijacking)", async () => {

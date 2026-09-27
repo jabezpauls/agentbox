@@ -33,13 +33,17 @@ export function originMatchesHost(headers: IncomingHttpHeaders): boolean {
 }
 
 /**
- * A state-changing request is ours when its `Origin` is this host, or — for a
- * browser that omits `Origin` — when it says `Sec-Fetch-Site: same-origin`.
- * Neither can be set by a page on another site.
+ * A state-changing request is ours when its `Origin` is this host, or — when
+ * the browser withheld the origin — when it says `Sec-Fetch-Site:
+ * same-origin`. A form posted from a page whose referrer policy is
+ * `no-referrer` sends `Origin: null` though it is same-origin; a sandboxed or
+ * otherwise opaque document sends `Origin: null` too, but with
+ * `Sec-Fetch-Site: cross-site`, and no page can set that header itself.
  */
 export function isSameOriginRequest(headers: IncomingHttpHeaders): boolean {
   if (originMatchesHost(headers)) return true;
-  return headers.origin === undefined && headers["sec-fetch-site"] === "same-origin";
+  const withheld = headers.origin === undefined || headers.origin === "null";
+  return withheld && headers["sec-fetch-site"] === "same-origin";
 }
 
 export function isSafeMethod(method: string | undefined): boolean {

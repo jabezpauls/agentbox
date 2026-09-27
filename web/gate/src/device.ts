@@ -18,7 +18,12 @@ import type { DeviceCodeRecord, Store } from "./store.js";
 
 export const DEVICE_TTL_MS = 10 * 60_000;
 export const POLL_INTERVAL_S = 5;
-const MAX_PENDING = 20;
+/**
+ * Logins waiting at once: per client address, so one address cannot fill the
+ * queue and lock the owner's CLI out for ten minutes; and in all, as a bound.
+ */
+export const MAX_PENDING_PER_CLIENT = 3;
+export const MAX_PENDING = 100;
 
 // No vowels, so a code never spells a word, and nothing that reads as another
 // character (0/O, 1/I).
@@ -61,9 +66,17 @@ export class DeviceFlow {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async start(name: string, ip: string): Promise<{ deviceCode: string; userCode: string; expiresIn: number; interval: number }> {
+  /** Start a login for a device named `name`, asked for by `ip` (limits count against `key`). */
+  async start(
+    name: string,
+    ip: string,
+    key: string = ip,
+  ): Promise<{ deviceCode: string; userCode: string; expiresIn: number; interval: number }> {
     await this.prune();
     const pending = this.store.data.deviceCodes.filter((d) => d.status === "pending");
+    if (pending.filter((d) => (d.key ?? d.ip) === key).length >= MAX_PENDING_PER_CLIENT) {
+      throw new TooManyPending(`${MAX_PENDING_PER_CLIENT} device logins from your address are already waiting; finish or let them expire`);
+    }
     if (pending.length >= MAX_PENDING) throw new TooManyPending("too many device logins are waiting; try again later");
     const t = this.now();
     const deviceCode = newSecret();
@@ -77,6 +90,7 @@ export class DeviceFlow {
       createdAt: t,
       expiresAt: t + DEVICE_TTL_MS,
       ip,
+      key,
       status: "pending",
       tokenId: null,
     };
@@ -119,10 +133,17 @@ export class DeviceFlow {
   async approve(userCode: string): Promise<DeviceCodeRecord | null> {
     const rec = this.pending(userCode);
     if (!rec) return null;
-    const { token, record } = await this.auth.createToken(rec.name);
+    // Claimed before the first await, so a second approval arriving meanwhile
+    // finds nothing pending and one code can never mint two tokens.
     rec.status = "approved";
-    rec.tokenId = record.id;
-    this.minted.set(rec.id, token);
+    try {
+      const { token, record } = await this.auth.createToken(rec.name);
+      rec.tokenId = record.id;
+      this.minted.set(rec.id, token);
+    } catch (err) {
+      rec.status = "pending";
+      throw err;
+    }
     await this.store.save();
     return rec;
   }

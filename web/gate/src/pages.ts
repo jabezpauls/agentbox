@@ -76,7 +76,6 @@ function shell(title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="referrer" content="no-referrer">
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="/login/assets/tokens.css">
 <link rel="stylesheet" href="/login/assets/login.css">
@@ -140,6 +139,11 @@ export interface DeviceView {
   unknownCode: string | null;
   /** The outcome of a decision just made. */
   result: "approved" | "denied" | "gone" | null;
+  /** Approving needs fresh credentials: this session is not in sudo mode. */
+  needSudo: boolean;
+  twoFactor: boolean;
+  /** Why the last attempt to approve was refused. */
+  error: string | null;
 }
 
 export function renderDevices(v: DeviceView): string {
@@ -158,6 +162,23 @@ export function renderDevices(v: DeviceView): string {
   if (v.pending) {
     const p = v.pending;
     const when = new Date(p.createdAt).toISOString().replace("T", " ").slice(0, 16);
+    // Approving hands out full access, so it asks for the password (and a
+    // code) unless this session confirmed it in the last few minutes.
+    const confirm = v.needSudo
+      ? `<div class="field">
+<label class="field-label" for="password">Your password</label>
+<input class="input" id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+</div>${
+          v.twoFactor
+            ? `
+<div class="field">
+<label class="field-label" for="code">Two-factor code</label>
+<input class="input" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" required>
+</div>`
+            : ""
+        }`
+      : "";
+    const error = v.error ? `<p class="gate-msg is-error" role="alert">${escapeHtml(v.error)}</p>` : "";
     return shell(
       "Approve a device · agentbox",
       `<section class="gate-card" aria-labelledby="gate-title">
@@ -168,10 +189,13 @@ export function renderDevices(v: DeviceView): string {
 <dt>Requested from</dt><dd>${escapeHtml(p.ip)}</dd>
 <dt>At</dt><dd>${escapeHtml(when)} UTC</dd>
 </dl>
-<div class="gate-actions">
-<form method="post" action="/_gate/device/deny"><input type="hidden" name="userCode" value="${escapeHtml(p.userCode)}"><button class="btn" type="submit">Deny</button></form>
-<form method="post" action="/_gate/device/approve"><input type="hidden" name="userCode" value="${escapeHtml(p.userCode)}"><button class="btn btn-primary" type="submit">Approve</button></form>
-</div>
+<form class="gate-form" id="approve-form" method="post" action="/_gate/device/approve">
+<input type="hidden" name="userCode" value="${escapeHtml(p.userCode)}">
+${confirm}
+${error}
+<button class="btn btn-primary gate-submit" type="submit">Approve</button>
+</form>
+<form class="gate-actions" method="post" action="/_gate/device/deny"><input type="hidden" name="userCode" value="${escapeHtml(p.userCode)}"><button class="btn" type="submit">Deny</button></form>
 </section>`,
     );
   }

@@ -4,9 +4,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { IDLE_MS, bearerToken, type Subject } from "./auth.js";
 import { clearedSessionCookie, sessionCookie } from "./cookies.js";
 import { cleanDeviceName, TooManyPending } from "./device.js";
-import { infoOf, originOf, safeEqual, safeNext, type GateCore } from "./context.js";
+import { infoOf, originOf, safeEqual, safeNext, type GateCore, type RequestInfo } from "./context.js";
 import { isSafeMethod, isSameOriginRequest } from "./origin.js";
-import { PAGE_CSP, loginMessage, renderDevices, renderLogin, type LoginError } from "./pages.js";
+import { PAGE_CSP, loginMessage, renderDevices, renderLogin, type DeviceView, type LoginError } from "./pages.js";
 import { hashPassword, passwordProblem } from "./password.js";
 import { SECURITY_HEADERS } from "./proxy.js";
 import { emptyTotp } from "./store.js";
@@ -25,6 +25,17 @@ import {
  * device-approval page and the CLI download. Proxied traffic never reaches
  * Fastify; the dispatcher in app.ts hands over only the paths the route table
  * marks as the gate's.
+ *
+ * Sudo mode. The box's origin also serves what the sandbox controls — the
+ * editor, the terminals, the bridge's app — so script from a compromised
+ * sandbox can run with the owner's session. What would let it keep the box or
+ * lock the owner out therefore asks for fresh credentials: approving a device,
+ * two-factor changes, the password, and revoking device tokens. Re-entering
+ * the password (and a code, with two-factor on) puts the session in sudo mode
+ * for ten minutes. Any of those requests may carry the credentials itself
+ * (`password`, and `code`), which are checked first — a wrong one fails the
+ * request even in sudo mode — and grant sudo mode on success. Without them it
+ * needs a session already in sudo mode, else `403 {error: "sudo_required"}`.
  */
 
 const REMEMBER_SECONDS = 30 * 24 * 60 * 60;
@@ -70,12 +81,86 @@ function retryAfter(reply: FastifyReply, ms: number): void {
   reply.header("retry-after", String(Math.max(1, Math.ceil(ms / 1000))));
 }
 
+/**
+ * One of the gate's pages. `same-origin`, not `no-referrer`: a form posted from
+ * a `no-referrer` page carries `Origin: null`, and the same-origin check would
+ * have nothing to go on. Links off the box still send no referrer.
+ */
 function html(reply: FastifyReply, status: number, page: string): FastifyReply {
-  return reply.code(status).type("text/html; charset=utf-8").header("content-security-policy", PAGE_CSP).send(page);
+  return reply
+    .code(status)
+    .type("text/html; charset=utf-8")
+    .header("content-security-policy", PAGE_CSP)
+    .header("referrer-policy", "same-origin")
+    .send(page);
+}
+
+/** Why proving it is the owner failed. */
+interface Refused {
+  status: number;
+  error: LoginError | "sudo_required";
+  message: string;
+  retryAfterMs: number;
 }
 
 export async function registerApi(app: FastifyInstance, core: GateCore): Promise<void> {
   const { config, store, auth, devices, limiter } = core;
+  const twoFactorOn = (): boolean => store.data.totp.secret !== null;
+
+  /**
+   * The password — and a code, with two-factor on — checked like a sign-in:
+   * rate-limited before bcrypt, and refused if the credentials changed while
+   * it was being checked. `null` means proven.
+   */
+  async function proveOwner(info: RequestInfo, password: string, code: string): Promise<Refused | null> {
+    const refusal = limiter.attempt(info.key);
+    if (refusal) return { status: 429, error: refusal.reason, message: loginMessage(refusal.reason, refusal.retryAfterMs), retryAfterMs: refusal.retryAfterMs };
+    const generation = store.data.generation;
+    if (!(await core.passwords.verify(password, store.data.password?.hash ?? null))) {
+      limiter.failure(info.key);
+      return { status: 401, error: "invalid", message: "The password is not right.", retryAfterMs: 0 };
+    }
+    if (twoFactorOn()) {
+      if (!code) return { status: 401, error: "code_required", message: loginMessage("code_required"), retryAfterMs: 0 };
+      if (!(await acceptSecondFactor(core, code))) {
+        limiter.failure(info.key);
+        return { status: 401, error: "invalid_code", message: loginMessage("invalid_code"), retryAfterMs: 0 };
+      }
+    }
+    if (store.data.generation !== generation) {
+      return { status: 401, error: "invalid", message: "The password changed while this was being checked. Try again.", retryAfterMs: 0 };
+    }
+    limiter.success(info.key);
+    return null;
+  }
+
+  /**
+   * Sudo mode for this request's session, from credentials in the request or
+   * a window already open. `null` means granted.
+   */
+  async function sudo(req: FastifyRequest, password: string, code: string): Promise<Refused | null> {
+    const session = req.subject as Subject;
+    if (password) {
+      const refused = await proveOwner(infoOf(req.raw), password, code);
+      if (refused) return refused;
+      auth.grantSudo(session.id);
+      return null;
+    }
+    if (auth.sudoUntil(session.id) !== null) return null;
+    return {
+      status: 403,
+      error: "sudo_required",
+      message: twoFactorOn()
+        ? "Confirm it is you: enter your password and a two-factor code."
+        : "Confirm it is you: enter your password.",
+      retryAfterMs: 0,
+    };
+  }
+
+  function refuseJson(reply: FastifyReply, r: Refused): FastifyReply {
+    if (r.retryAfterMs > 0) retryAfter(reply, r.retryAfterMs);
+    return reply.code(r.status).send({ error: r.error, message: r.message, twoFactor: twoFactorOn() });
+  }
 
   app.decorateRequest("subject", null);
 
@@ -111,7 +196,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   });
 
   app.addHook("onSend", async (_req, reply, payload) => {
-    for (const [n, v] of SECURITY_HEADERS) reply.header(n, v);
+    for (const [n, v] of SECURITY_HEADERS) if (!reply.hasHeader(n)) reply.header(n, v);
     if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
     return payload;
   });
@@ -160,41 +245,48 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     if (!username || !password) return refuse(400, "bad_request");
 
     // Before bcrypt, always: a refused attempt costs a map lookup.
-    const refusal = limiter.attempt(info.ip);
+    const refusal = limiter.attempt(info.key);
     if (refusal) {
       console.warn(`[gate] sign-in refused (${refusal.reason}) from ${info.ip}`);
       return refuse(429, refusal.reason, refusal.retryAfterMs);
     }
 
+    // Noted before the slow check: if the credentials change while it runs,
+    // this sign-in used the old ones and must not outlive the change.
+    const generation = store.data.generation;
     const stored = store.data.password;
     // Both halves are checked every time, so neither the answer nor its timing
     // says which one was wrong.
     const userOk = safeEqual(username, config.user);
     const passOk = await core.passwords.verify(password, stored?.hash ?? null);
     if (!stored) {
-      limiter.failure(info.ip);
+      limiter.failure(info.key);
       return refuse(503, "not_set_up");
     }
     if (!userOk || !passOk) {
-      limiter.failure(info.ip);
+      limiter.failure(info.key);
       console.warn(`[gate] sign-in failed from ${info.ip}`);
       return refuse(401, "invalid");
     }
 
-    const totp = store.data.totp;
-    if (totp.secret) {
+    if (twoFactorOn()) {
       const code = str(b.code).trim();
       // Right password, second factor still to come. The attempt was counted;
       // it is not a failure.
       if (!code) return refuse(401, "code_required");
       if (!(await acceptSecondFactor(core, code))) {
-        limiter.failure(info.ip);
+        limiter.failure(info.key);
         console.warn(`[gate] two-factor code refused from ${info.ip}`);
         return refuse(401, "invalid_code");
       }
     }
 
-    limiter.success(info.ip);
+    if (store.data.generation !== generation) {
+      console.warn(`[gate] sign-in from ${info.ip} refused: the credentials changed while it was checked`);
+      return refuse(401, "invalid");
+    }
+
+    limiter.success(info.key);
     const remember = truthy(b.remember);
     const { secret } = await auth.createSession({
       remember,
@@ -214,7 +306,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return reply.code(204).send();
   });
 
-  // --- the current session, and the others ------------------------------------
+  // --- the current session, sudo mode, and the other sessions -----------------
 
   app.get("/_gate/session", { config: { auth: "any" } }, async (req) => {
     const s = req.subject as Subject;
@@ -229,8 +321,18 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       createdAt: session.createdAt,
       remember: session.remember,
       expiresAt: session.remember ? session.expiresAt : Math.min(session.expiresAt, session.lastSeenAt + IDLE_MS),
-      twoFactor: store.data.totp.secret !== null,
+      twoFactor: twoFactorOn(),
+      sudoUntil: auth.sudoUntil(session.id),
     };
+  });
+
+  app.post("/_gate/sudo", { config: { auth: "session" } }, async (req, reply) => {
+    const b = body(req);
+    const password = str(b.password);
+    if (!password) return reply.code(400).send({ error: "bad_request", message: "Enter your password." });
+    const refused = await sudo(req, password, str(b.code).trim());
+    if (refused) return refuseJson(reply, refused);
+    return { sudoUntil: auth.sudoUntil((req.subject as Subject).id) };
   });
 
   app.get("/_gate/sessions", { config: { auth: "session" } }, async (req) => {
@@ -261,6 +363,8 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- password ---------------------------------------------------------------
 
+  // `current` is the password field here: when given it is checked (and grants
+  // sudo mode); a session already in sudo mode may leave it out.
   app.post("/_gate/password", { config: { auth: "session" } }, async (req, reply) => {
     const b = body(req);
     const info = infoOf(req.raw);
@@ -269,17 +373,10 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     const next = str(b.next);
     const problem = passwordProblem(next);
     if (problem) return reply.code(400).send({ error: "weak", message: `The new password is not acceptable: ${problem}.` });
-    const refusal = limiter.attempt(info.ip);
-    if (refusal) {
-      retryAfter(reply, refusal.retryAfterMs);
-      return reply.code(429).send({ error: refusal.reason, message: loginMessage(refusal.reason, refusal.retryAfterMs) });
-    }
-    if (!(await core.passwords.verify(str(b.current), store.data.password?.hash ?? null))) {
-      limiter.failure(info.ip);
-      return reply.code(401).send({ error: "invalid", message: "The current password is not right." });
-    }
-    limiter.success(info.ip);
+    const refused = await sudo(req, str(b.current), str(b.code).trim());
+    if (refused) return refuseJson(reply, refused.error === "invalid" ? { ...refused, message: "The current password is not right." } : refused);
     store.data.password = { hash: await hashPassword(next, config.bcryptCost), updatedAt: core.now() };
+    store.data.generation += 1;
     // Changing the password ends every other session.
     const ended = await auth.endSessions((req.subject as Subject).id);
     console.log(`[gate] password changed from ${info.ip}; ended ${ended} other session(s)`);
@@ -289,6 +386,9 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   // --- two-factor -------------------------------------------------------------
 
   app.post("/_gate/totp/setup", { config: { auth: "session" } }, async (req, reply) => {
+    const b = body(req);
+    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    if (refused) return refuseJson(reply, refused);
     const totp = store.data.totp;
     if (totp.secret) return reply.code(409).send({ error: "already_enabled", message: "Two-factor is already on. Turn it off first to enrol a new device." });
     const secret = generateSecret();
@@ -301,11 +401,16 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   app.post("/_gate/totp/confirm", { config: { auth: "session" } }, async (req, reply) => {
     const info = infoOf(req.raw);
-    const wait = core.totpConfirms.take(info.ip);
+    const b = body(req);
+    const wait = core.totpConfirms.take(info.key);
     if (wait !== null) {
       retryAfter(reply, wait);
       return reply.code(429).send({ error: "rate", message: loginMessage("rate", wait) });
     }
+    // `code` here is the new authenticator's; sudo mode comes from the window
+    // setup opened, or from `password` in this request.
+    const refused = await sudo(req, str(b.password), "");
+    if (refused) return refuseJson(reply, refused);
     const totp = store.data.totp;
     if (totp.secret) return reply.code(409).send({ error: "already_enabled" });
     const pending = totp.pending;
@@ -313,7 +418,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     if (!pending || core.now() - pending.createdAt > 60 * 60_000) {
       return reply.code(409).send({ error: "no_enrolment", message: "Start two-factor setup again." });
     }
-    const step = verifyTotp(pending.secret, str(body(req).code).trim(), core.now(), 0);
+    const step = verifyTotp(pending.secret, str(b.code).trim(), core.now(), 0);
     if (step === null) return reply.code(400).send({ error: "invalid_code", message: loginMessage("invalid_code") });
     const recoveryCodes = generateRecoveryCodes();
     store.data.totp = {
@@ -323,6 +428,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       lastStep: step,
       recoveryCodes: recoveryCodes.map(hashRecoveryCode),
     };
+    store.data.generation += 1;
     // Changing two-factor ends every other session.
     const ended = await auth.endSessions((req.subject as Subject).id);
     console.log(`[gate] two-factor enabled from ${info.ip}; ended ${ended} other session(s)`);
@@ -331,17 +437,11 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   app.delete("/_gate/totp", { config: { auth: "session" } }, async (req, reply) => {
     const info = infoOf(req.raw);
-    const refusal = limiter.attempt(info.ip);
-    if (refusal) {
-      retryAfter(reply, refusal.retryAfterMs);
-      return reply.code(429).send({ error: refusal.reason, message: loginMessage(refusal.reason, refusal.retryAfterMs) });
-    }
-    if (!(await core.passwords.verify(str(body(req).password), store.data.password?.hash ?? null))) {
-      limiter.failure(info.ip);
-      return reply.code(401).send({ error: "invalid", message: "The password is not right." });
-    }
-    limiter.success(info.ip);
+    const b = body(req);
+    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    if (refused) return refuseJson(reply, refused);
     store.data.totp = emptyTotp();
+    store.data.generation += 1;
     const ended = await auth.endSessions((req.subject as Subject).id);
     console.log(`[gate] two-factor turned off from ${info.ip}; ended ${ended} other session(s)`);
     return reply.code(204).send();
@@ -351,7 +451,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   app.post("/_gate/device/start", async (req, reply) => {
     const info = infoOf(req.raw);
-    const wait = core.deviceStarts.take(info.ip);
+    const wait = core.deviceStarts.take(info.key);
     if (wait !== null) {
       retryAfter(reply, wait);
       return reply.code(429).send({ error: "slow_down" });
@@ -359,7 +459,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     const name = cleanDeviceName(body(req).name);
     if (!name) return reply.code(400).send({ error: "invalid_request", message: "name the device, e.g. {\"name\": \"laptop\"}" });
     try {
-      const started = await devices.start(name, info.ip);
+      const started = await devices.start(name, info.ip, info.key);
       return {
         ...started,
         verifyUrl: `${originOf(core, req.raw)}/settings/devices?code=${started.userCode}`,
@@ -374,7 +474,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   // `authorization_pending`, `slow_down`, `access_denied` or `expired_token`.
   app.post("/_gate/device/poll", async (req, reply) => {
     const info = infoOf(req.raw);
-    if (core.devicePolls.take(info.ip) !== null) return reply.code(400).send({ error: "slow_down" });
+    if (core.devicePolls.take(info.key) !== null) return reply.code(400).send({ error: "slow_down" });
     const deviceCode = str(body(req).deviceCode);
     if (!deviceCode) return reply.code(400).send({ error: "invalid_request" });
     const result = await devices.poll(deviceCode);
@@ -391,18 +491,52 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return { userCode: rec.userCode, name: rec.name, ip: rec.ip, createdAt: rec.createdAt, expiresAt: rec.expiresAt };
   });
 
-  const decide = (approve: boolean) => async (req: FastifyRequest, reply: FastifyReply) => {
-    const code = str(body(req).userCode);
-    const rec = approve ? await devices.approve(code) : await devices.deny(code);
-    if (rec) console.log(`[gate] device "${rec.name}" ${approve ? "approved" : "denied"} from ${infoOf(req.raw).ip}`);
+  /** The approval page for `code`, as it stands for this session. */
+  function devicesPage(req: FastifyRequest, code: string, error: string | null = null): DeviceView {
+    const rec = code ? devices.pending(code) : null;
+    return {
+      pending: rec ? { userCode: rec.userCode, name: rec.name, ip: rec.ip, createdAt: rec.createdAt } : null,
+      unknownCode: code && !rec ? code.slice(0, 16) : null,
+      result: null,
+      needSudo: auth.sudoUntil((req.subject as Subject).id) === null,
+      twoFactor: twoFactorOn(),
+      error,
+    };
+  }
+
+  // Approving gives a new device full access, so it needs sudo mode: the page
+  // asks for the password (and a code) in the same form. Denying does not.
+  app.post("/_gate/device/approve", { config: { auth: "session" } }, async (req, reply) => {
+    const b = body(req);
+    const code = str(b.userCode);
+    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    if (refused) {
+      if (isForm(req)) {
+        if (refused.retryAfterMs > 0) retryAfter(reply, refused.retryAfterMs);
+        return html(reply, refused.status, renderDevices(devicesPage(req, code, refused.message)));
+      }
+      return refuseJson(reply, refused);
+    }
+    const rec = await devices.approve(code);
+    if (rec) console.log(`[gate] device "${rec.name}" approved from ${infoOf(req.raw).ip}`);
     if (isForm(req)) {
-      return html(reply, rec ? 200 : 404, renderDevices({ pending: null, unknownCode: null, result: rec ? (approve ? "approved" : "denied") : "gone" }));
+      return html(reply, rec ? 200 : 404, renderDevices({ ...devicesPage(req, ""), result: rec ? "approved" : "gone" }));
     }
     if (!rec) return reply.code(404).send({ error: "no such login waiting" });
     return { ok: true };
-  };
-  app.post("/_gate/device/approve", { config: { auth: "session" } }, decide(true));
-  app.post("/_gate/device/deny", { config: { auth: "session" } }, decide(false));
+  });
+
+  app.post("/_gate/device/deny", { config: { auth: "session" } }, async (req, reply) => {
+    const rec = await devices.deny(str(body(req).userCode));
+    if (rec) console.log(`[gate] device "${rec.name}" denied from ${infoOf(req.raw).ip}`);
+    if (isForm(req)) {
+      return html(reply, rec ? 200 : 404, renderDevices({ ...devicesPage(req, ""), result: rec ? "denied" : "gone" }));
+    }
+    if (!rec) return reply.code(404).send({ error: "no such login waiting" });
+    return { ok: true };
+  });
+
+  // --- device tokens ------------------------------------------------------------
 
   app.get("/_gate/tokens", { config: { auth: "any" } }, async (req) => {
     const current = req.subject?.kind === "token" ? req.subject.id : null;
@@ -416,10 +550,30 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     }));
   });
 
-  app.delete<{ Params: { id: string } }>("/_gate/tokens/:id", { config: { auth: "any" } }, async (req, reply) => {
-    if (!(await auth.revokeToken(req.params.id))) return reply.code(404).send({ error: "no such token" });
+  /**
+   * A device token may revoke itself (the CLI's logout) and nothing else;
+   * revoking any other token takes a signed-in browser in sudo mode, so a
+   * stolen token cannot lock the owner's other devices out.
+   */
+  const revoke = async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply, id: string) => {
+    const subject = req.subject as Subject;
+    if (subject.kind === "token") {
+      if (id !== subject.id) return reply.code(403).send({ error: "not_yours", message: "a device token can revoke only itself" });
+    } else {
+      const b = body(req);
+      const refused = await sudo(req, str(b.password), str(b.code).trim());
+      if (refused) return refuseJson(reply, refused);
+    }
+    if (!(await auth.revokeToken(id))) return reply.code(404).send({ error: "no such token" });
     return reply.code(204).send();
+  };
+  app.delete<{ Params: { id: string } }>("/_gate/tokens/self", { config: { auth: "any" } }, async (req, reply) => {
+    if (req.subject?.kind !== "token") return reply.code(400).send({ error: "only a device token has a self to revoke" });
+    return revoke(req, reply, req.subject.id);
   });
+  app.delete<{ Params: { id: string } }>("/_gate/tokens/:id", { config: { auth: "any" } }, async (req, reply) =>
+    revoke(req, reply, req.params.id),
+  );
 
   app.get("/_gate/version", { config: { auth: "any" } }, async () => ({ version: config.version }));
 
@@ -430,17 +584,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       const next = safeNext(req.raw.url);
       return reply.code(302).header("location", `/login?next=${encodeURIComponent(next)}`).send();
     }
-    const code = str(req.query.code);
-    const rec = code ? devices.pending(code) : null;
-    return html(
-      reply,
-      200,
-      renderDevices({
-        pending: rec ? { userCode: rec.userCode, name: rec.name, ip: rec.ip, createdAt: rec.createdAt } : null,
-        unknownCode: code && !rec ? code.slice(0, 16) : null,
-        result: null,
-      }),
-    );
+    return html(reply, 200, renderDevices(devicesPage(req, str(req.query.code))));
   });
 
   // --- the CLI, served by the box itself (Phase E ships the files) ------------

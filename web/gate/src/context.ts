@@ -13,6 +13,8 @@ import { underSegment } from "./routes.js";
 export interface RequestInfo {
   /** The client's address, as far as the gate trusts anyone to say. */
   ip: string;
+  /** What limits count against: the address, or its /64 for IPv6. */
+  key: string;
   viaProxy: boolean;
   /** The scheme the browser used, when the proxy says; `http` otherwise. */
   proto: string;

@@ -24,15 +24,11 @@ export interface Config {
   bcryptCost: number;
   /**
    * The proxy: hostnames or addresses whose connections may speak for the
-   * client's address through a forwarding header. Everyone else, the sandbox
-   * included, is judged by the address it connects from.
+   * client's address (in `X-Agentbox-Client-IP`, which the proxy computes).
+   * Everyone else, the sandbox included, is judged by the address it connects
+   * from.
    */
   trustedProxies: string[];
-  /**
-   * The header carrying the client address when the connection is from the
-   * proxy, lowercased; `null` means the proxy's own `X-Forwarded-For`.
-   */
-  clientIpHeader: string | null;
   /** The origin people browse to, for links the gate hands out; `null` derives it per request. */
   publicUrl: string | null;
   upstreams: Record<UpstreamName, Upstream>;
@@ -67,7 +63,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: upstreamHost,
     port: port(env[`GATE_${name}_PORT`], fallback),
   });
-  const header = (env.AGENTBOX_CLIENT_IP_HEADER ?? "").trim().toLowerCase();
   return {
     host: env.GATE_HOST || "0.0.0.0",
     port: port(env.GATE_PORT, 7900),
@@ -82,7 +77,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
-    clientIpHeader: header || null,
     publicUrl: (env.AGENTBOX_PUBLIC_URL || null)?.replace(/\/+$/, "") ?? null,
     upstreams: {
       code: upstream("CODE", 8080),

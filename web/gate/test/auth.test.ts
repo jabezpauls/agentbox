@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ABSOLUTE_MS, Auth, IDLE_MS, type Ended } from "../src/auth.js";
+import { ABSOLUTE_MS, Auth, IDLE_MS, SUDO_MS, type Ended } from "../src/auth.js";
 import { Store } from "../src/store.js";
 
 let dir: string;
@@ -11,38 +11,95 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-describe("ending credentials", () => {
-  it("announces each session and token that ends, so what it opened can be cut", async () => {
-    let t = 1_000_000;
-    const store = await Store.open(dir, null);
-    const auth = new Auth(store, () => t);
-    const heard: Ended[] = [];
-    auth.onEnded((e) => heard.push(...e));
+async function setup() {
+  const clock = { t: 1_000_000 };
+  const store = await Store.open(dir, null);
+  const auth = new Auth(store, () => clock.t);
+  const heard: Ended[] = [];
+  auth.onEnded((e) => heard.push(e));
+  const session = async (remember = false) => (await auth.createSession({ remember, ip: "1", userAgent: "" })).session;
+  return { clock, store, auth, heard, session };
+}
 
-    const a = await auth.createSession({ remember: false, ip: "1", userAgent: "" });
-    const b = await auth.createSession({ remember: true, ip: "1", userAgent: "" });
-    const c = await auth.createSession({ remember: true, ip: "1", userAgent: "" });
-    await auth.endSession(a.session.id);
-    expect(heard).toEqual([{ kind: "session", id: a.session.id }]);
-    await auth.endSessions(b.session.id);
-    expect(heard.at(-1)).toEqual({ kind: "session", id: c.session.id });
+describe("ending credentials", () => {
+  it("announces every way a session or token ends, so what it opened can be cut", async () => {
+    const { auth, heard, session } = await setup();
+    const a = await session();
+    const b = await session(true);
+    await auth.endSession(a.id);
+    expect(heard.at(-1)).toEqual({ kind: "session", ids: [a.id] });
+    await auth.endSessions(b.id);
+    // Everything but the kept one — including sessions no longer in the store.
+    expect(heard.at(-1)).toEqual({ kind: "session", allBut: b.id });
+    await auth.endSessions();
+    expect(heard.at(-1)).toEqual({ kind: "session", allBut: null });
 
     const tok = await auth.createToken("x");
     await auth.revokeToken(tok.record.id);
-    expect(heard.at(-1)).toEqual({ kind: "token", id: tok.record.id });
+    expect(heard.at(-1)).toEqual({ kind: "token", ids: [tok.record.id] });
+    await auth.revokeAllTokens();
+    expect(heard.at(-1)).toEqual({ kind: "token", allBut: null });
+  });
 
-    // Idle is not ended: a session that stopped making requests may still be
-    // holding a live terminal, and it can open nothing new.
-    const idle = await auth.createSession({ remember: false, ip: "1", userAgent: "" });
-    t += IDLE_MS + 1;
-    const count = heard.length;
+  it("announces a session pruned for idleness, and one past its 30 days", async () => {
+    const { clock, auth, heard, session } = await setup();
+    const idle = await session();
+    const remembered = await session(true);
+    clock.t += IDLE_MS + 1;
     await auth.prune();
-    expect(heard.length).toBe(count);
-    expect(store.data.sessions.some((s) => s.id === idle.session.id)).toBe(false);
+    expect(heard.at(-1)).toEqual({ kind: "session", ids: [idle.id] });
+    clock.t += ABSOLUTE_MS;
+    await auth.prune();
+    expect(heard.at(-1)).toEqual({ kind: "session", ids: [remembered.id] });
+  });
 
-    // Past the absolute end, it is.
-    t += ABSOLUTE_MS;
-    await auth.prune();
-    expect(heard.at(-1)).toEqual({ kind: "session", id: b.session.id });
+  it("announces the sessions the cap evicts", async () => {
+    const { clock, heard, session } = await setup();
+    const first = await session();
+    for (let i = 0; i < 49; i++) {
+      clock.t += 1_000;
+      await session();
+    }
+    expect(heard).toEqual([]);
+    clock.t += 1_000;
+    await session();
+    expect(heard.at(-1)).toEqual({ kind: "session", ids: [first.id] });
+  });
+
+  it("counts use of a session — a request, or traffic on its sockets — against idleness", async () => {
+    const { clock, auth, session } = await setup();
+    const s = await session();
+    clock.t += IDLE_MS - 1_000;
+    auth.touchSession(s.id);
+    clock.t += IDLE_MS - 1_000;
+    expect(auth.listSessions().map((x) => x.id)).toEqual([s.id]);
+    clock.t += 2_000;
+    expect(auth.listSessions()).toEqual([]);
+  });
+});
+
+describe("sudo mode", () => {
+  it("lasts ten minutes, and ends with its session", async () => {
+    const { clock, auth, session } = await setup();
+    const s = await session();
+    expect(auth.sudoUntil(s.id)).toBeNull();
+    const until = auth.grantSudo(s.id);
+    expect(until).toBe(clock.t + SUDO_MS);
+    clock.t += SUDO_MS - 1;
+    expect(auth.sudoUntil(s.id)).toBe(until);
+    clock.t += 1;
+    expect(auth.sudoUntil(s.id)).toBeNull();
+
+    auth.grantSudo(s.id);
+    await auth.endSession(s.id);
+    expect(auth.sudoUntil(s.id)).toBeNull();
+
+    const kept = await session();
+    const other = await session();
+    auth.grantSudo(kept.id);
+    auth.grantSudo(other.id);
+    await auth.endSessions(kept.id);
+    expect(auth.sudoUntil(kept.id)).not.toBeNull();
+    expect(auth.sudoUntil(other.id)).toBeNull();
   });
 });

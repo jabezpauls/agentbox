@@ -239,7 +239,11 @@ describe("two-factor", () => {
     const mine = await login(h);
     const other = await login(h);
 
-    const setup = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) });
+    // Enrolling needs sudo mode: the password again.
+    const unconfirmed = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) });
+    expect(unconfirmed.status).toBe(403);
+    expect(unconfirmed.json()).toMatchObject({ error: "sudo_required" });
+    const setup = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } });
     expect(setup.status).toBe(200);
     const { secret, otpauthUrl, qrSvg } = setup.json<{ secret: string; otpauthUrl: string; qrSvg: string }>();
     expect(otpauthUrl).toContain(`secret=${secret}`);
@@ -256,23 +260,22 @@ describe("two-factor", () => {
     expect(await authed(other)("/")).toBe(401);
     expect(await authed(mine)("/")).toBe(200);
 
+    c.advance(60_000); // a fresh window of attempts
     const noCode = await signIn(h, { username: USER, password: PASSWORD });
     expect(noCode.status).toBe(401);
     expect(noCode.json()).toMatchObject({ error: "code_required" });
     expect(noCode.headers["set-cookie"]).toBeUndefined();
 
     expect((await signIn(h, { username: USER, password: PASSWORD, code: "123456" })).json()).toMatchObject({ error: "invalid_code" });
-    // The confirmation used this step's code: it cannot be replayed.
-    expect((await signIn(h, { username: USER, password: PASSWORD, code: hotp(secret, step) })).status).toBe(401);
 
-    // A minute on: a fresh window of attempts, and a fresh code.
-    c.advance(60_000);
+    // A fresh code works once.
     const fresh = hotp(secret, stepAt(c.now()));
     expect((await signIn(h, { username: USER, password: PASSWORD, code: fresh })).status).toBe(200);
     const replayed = await signIn(h, { username: USER, password: PASSWORD, code: fresh });
     expect(replayed.status).toBe(401);
     expect(replayed.json()).toMatchObject({ error: "invalid_code" });
 
+    c.advance(60_000);
     const recovery = recoveryCodes[0] as string;
     expect((await signIn(h, { username: USER, password: PASSWORD, code: recovery.toUpperCase() })).status).toBe(200);
     expect((await signIn(h, { username: USER, password: PASSWORD, code: recovery })).status).toBe(401);
@@ -284,17 +287,24 @@ describe("two-factor", () => {
     expect(again.status).toBe(409);
   });
 
-  it("turns off only with the password", async () => {
+  it("turns off only with the password and a code", async () => {
     const c = clock();
     h = await startHarness({}, { now: c.now });
     const mine = await login(h);
-    const { secret } = (await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) })).json<{ secret: string }>();
+    const setup = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } });
+    const { secret } = setup.json<{ secret: string }>();
     await request(h.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h, { cookie: mine }), body: { code: hotp(secret, stepAt(c.now())) } });
+    // Past the sudo window setup opened, and a step on for a fresh code.
+    c.advance(11 * 60_000);
 
-    const off = (password: string) => request(h!.base, "DELETE", "/_gate/totp", { headers: sameOrigin(h!, { cookie: mine }), body: { password } });
-    expect((await off("wrong")).status).toBe(401);
-    expect((await off(PASSWORD)).status).toBe(204);
+    const off = (body: object) => request(h!.base, "DELETE", "/_gate/totp", { headers: sameOrigin(h!, { cookie: mine }), body });
+    expect((await off({})).json()).toMatchObject({ error: "sudo_required", twoFactor: true });
+    expect((await off({ password: "wrong" })).status).toBe(401);
+    expect((await off({ password: PASSWORD })).json()).toMatchObject({ error: "code_required" });
+    expect(h.gate.core.store.data.totp.secret).not.toBeNull();
+    expect((await off({ password: PASSWORD, code: hotp(secret, stepAt(c.now())) })).status).toBe(204);
     expect(h.gate.core.store.data.totp.secret).toBeNull();
+    c.advance(60_000);
     expect((await signIn(h, { username: USER, password: PASSWORD })).status).toBe(200);
   });
 
@@ -302,7 +312,9 @@ describe("two-factor", () => {
     const c = clock();
     h = await startHarness({}, { now: c.now });
     const mine = await login(h);
-    const { secret } = (await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) })).json<{ secret: string }>();
+    const { secret } = (
+      await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } })
+    ).json<{ secret: string }>();
     await request(h.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h, { cookie: mine }), body: { code: hotp(secret, stepAt(c.now())) } });
     const res = await request(h.base, "POST", "/_gate/login", {
       headers: sameOrigin(h, { "content-type": "application/x-www-form-urlencoded" }),
