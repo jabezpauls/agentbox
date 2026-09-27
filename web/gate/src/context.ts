@@ -67,7 +67,10 @@ export function safeEqual(a: string, b: string): boolean {
  */
 export function safeNext(raw: unknown): string {
   if (typeof raw !== "string" || raw === "" || raw.length > 2048) return "/";
-  if (/[\u0000-\u001f\u007f\s]/.test(raw)) return "/";
+  // Printable ASCII only: a browser percent-encodes everything else, and this
+  // ends up in a Location header, where a raw control or non-ASCII character
+  // is either an injection or an error.
+  if (/[^\x21-\x7e]/.test(raw)) return "/";
   if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
   const { path } = splitTarget(raw);
   if (!isRoutablePath(path)) return "/";

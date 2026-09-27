@@ -73,7 +73,7 @@ describe("signing in", () => {
 
   it("never redirects off the box after signing in", async () => {
     h = await startHarness();
-    for (const next of ["//evil.example", "https://evil.example", "/\\evil.example", "/login"]) {
+    for (const next of ["//evil.example", "https://evil.example", "/\\evil.example", "/login", "/€uro"]) {
       const res = await signIn(h, { username: USER, password: PASSWORD, next });
       expect(res.json().next, next).toBe("/");
     }

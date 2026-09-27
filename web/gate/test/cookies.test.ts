@@ -111,7 +111,7 @@ describe("where sign-in sends you next", () => {
   it("is only ever a path on this box, outside the gate's own pages", () => {
     expect(safeNext("/workbench/?review=abc")).toBe("/workbench/?review=abc");
     expect(safeNext("/vscode/")).toBe("/vscode/");
-    for (const bad of ["//evil.example/", "/\\evil.example", "https://evil.example/", "evil", "/a/../b", "/login", "/login?next=/x", "/_gate/logout", "/a\nb", "", undefined, 3]) {
+    for (const bad of ["//evil.example/", "/\\evil.example", "https://evil.example/", "evil", "/a/../b", "/login", "/login?next=/x", "/_gate/logout", "/a\nb", "/€", "/é", "", undefined, 3]) {
       expect(safeNext(bad), String(bad)).toBe("/");
     }
   });
