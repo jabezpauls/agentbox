@@ -118,6 +118,9 @@ describe("listing", () => {
     const big = path.join(ws, "paged");
     fs.mkdirSync(big);
     for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(big, `p${i}`), "");
+    // Only a directory that has settled is kept (see ListingCache).
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(big, past, past);
     const readdir = vi.spyOn(fsp, "readdir");
     const reads = () => readdir.mock.calls.filter((c) => String(c[0]) === fs.realpathSync(big)).length;
     await list(big, "&limit=100");

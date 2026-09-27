@@ -72,30 +72,65 @@ export interface Named {
   dir: boolean;
 }
 
+export interface ListingCacheOptions {
+  /** How long a listing is kept; 0 keeps nothing. */
+  ttlMs?: number;
+  /** At most this many directories… */
+  maxDirs?: number;
+  /** …holding at most this many names between them. */
+  maxNames?: number;
+  /** How long a directory must have gone unchanged before its listing is kept. */
+  settleMs?: number;
+}
+
 /**
  * Directories' sorted names, kept for a few seconds so paging through a big
  * folder — or a WebDAV client listing it again — does not read and sort the
  * whole of it for every page. An entry is used only while the directory's
  * modification time, change time and inode are what they were when it was
  * read, so adding, removing or renaming anything in it is seen at once.
+ *
+ * That holds only if every change moves the timestamp, and timestamps come
+ * from a clock that ticks coarsely: the kernel's (a scheduler tick, before
+ * Linux 6.13's fine-grained timestamps) or the filesystem's (whole seconds on
+ * some, two on FAT). A second change within the tick of the first leaves the
+ * stamp as it was. So a directory whose modification time is younger than
+ * `settleMs` is read afresh every time and never kept: any later change to a
+ * directory that has settled lands in a later tick.
  */
 export class ListingCache {
   private readonly cache = new Map<string, { at: number; stamp: string; names: Named[] }>();
+  private held = 0;
+  private readonly ttlMs: number;
+  private readonly maxDirs: number;
+  private readonly maxNames: number;
+  private readonly settleMs: number;
 
-  constructor(
-    private readonly ttlMs = 5000,
-    private readonly max = 64,
-  ) {}
+  constructor(opts: ListingCacheOptions = {}) {
+    this.ttlMs = opts.ttlMs ?? 5000;
+    this.maxDirs = opts.maxDirs ?? 64;
+    this.maxNames = opts.maxNames ?? 200_000;
+    this.settleMs = opts.settleMs ?? 2000;
+  }
+
+  /** What is held now: directories, and names across them. */
+  get size(): { dirs: number; names: number } {
+    return { dirs: this.cache.size, names: this.held };
+  }
 
   async names(real: string, where: string): Promise<Named[]> {
+    const now = Date.now();
+    this.expire(now);
     let stamp: string;
+    let mtimeMs: number;
     let dirents: Dirent<Buffer>[];
     try {
       const st = await fsp.stat(fsPath(real), { bigint: true });
       stamp = `${st.ino}:${st.mtimeNs}:${st.ctimeNs}`;
+      mtimeMs = Number(st.mtimeNs / 1_000_000n);
       const hit = this.cache.get(real);
-      if (hit && hit.stamp === stamp && Date.now() - hit.at < this.ttlMs) {
-        // Most recently used last, so the oldest is evicted first.
+      if (hit && hit.stamp === stamp) {
+        // Most recently used last, so the least recently used goes first.
         this.cache.delete(real);
         this.cache.set(real, hit);
         return hit.names;
@@ -107,10 +142,28 @@ export class ListingCache {
     const names = dirents
       .map((d) => ({ name: decodeName(d.name), dir: d.isDirectory() }))
       .sort((a, b) => (a.dir === b.dir ? collator.compare(a.name, b.name) : a.dir ? -1 : 1));
-    this.cache.delete(real);
-    this.cache.set(real, { at: Date.now(), stamp, names });
-    if (this.cache.size > this.max) this.cache.delete(this.cache.keys().next().value!);
+    this.forget(real);
+    // `now` was read before the stat, so a change after the read above
+    // happens later still. A timestamp in the future is never settled.
+    const settled = now - mtimeMs >= this.settleMs;
+    if (this.ttlMs > 0 && settled && names.length <= this.maxNames) {
+      this.cache.set(real, { at: now, stamp, names });
+      this.held += names.length;
+      while (this.cache.size > this.maxDirs || this.held > this.maxNames) this.forget(this.cache.keys().next().value!);
+    }
     return names;
+  }
+
+  private forget(real: string): void {
+    const kept = this.cache.get(real);
+    if (!kept) return;
+    this.cache.delete(real);
+    this.held -= kept.names.length;
+  }
+
+  /** Drop what has outlived its time, used or not, so nothing idles in memory. */
+  private expire(now: number): void {
+    for (const [real, kept] of this.cache) if (now - kept.at >= this.ttlMs) this.forget(real);
   }
 }
 
@@ -131,7 +184,7 @@ export interface ListOptions {
  */
 export async function listDirectory(roots: Roots, dir: TargetRef, opts: ListOptions): Promise<FileListing> {
   const rootReal = await roots.realRoot(dir.root);
-  const all = await (opts.cache ?? new ListingCache(0)).names(dir.real, dir.abs);
+  const all = await (opts.cache ?? new ListingCache({ ttlMs: 0 })).names(dir.real, dir.abs);
   const named = opts.hidden ? all : all.filter((d) => !d.name.startsWith("."));
 
   const page = named.slice(opts.offset, opts.offset + opts.limit);
