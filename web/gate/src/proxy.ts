@@ -102,6 +102,11 @@ export function forwardRequestHeaders(req: IncomingMessage, fwd: Forwarded, upgr
   if (upgrade) {
     out.connection = "Upgrade";
     out.upgrade = req.headers.upgrade ?? "websocket";
+  } else if (req.headers["transfer-encoding"] !== undefined && req.headers["content-length"] === undefined) {
+    // A body of unknown length must stay chunked on the way out: Node only
+    // chunks some methods by default, and a DELETE body would otherwise go
+    // upstream unframed.
+    out["transfer-encoding"] = "chunked";
   }
   out["x-forwarded-for"] = fwd.clientIp;
   out["x-forwarded-proto"] = fwd.proto;

@@ -1,3 +1,4 @@
+import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cookieFrom, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
 
@@ -131,6 +132,33 @@ describe("with a session", () => {
     });
     expect(res.status).toBe(200);
     expect(JSON.parse(res.json<{ body: string }>().body)).toEqual({ method: "session.snapshot", params: {} });
+  });
+
+  it("forwards a chunked body intact, whatever the method", async () => {
+    for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+      const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const r = http.request(
+          {
+            host: "127.0.0.1",
+            port: h.port,
+            method,
+            path: "/workbench/api/thing",
+            headers: { cookie, origin: h.base, "transfer-encoding": "chunked", "content-type": "text/plain" },
+            agent: false,
+          },
+          (resp) => {
+            const chunks: Buffer[] = [];
+            resp.on("data", (c: Buffer) => chunks.push(c));
+            resp.on("end", () => resolve({ status: resp.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+          },
+        );
+        r.on("error", reject);
+        r.write("first-");
+        r.end("second");
+      });
+      expect(res.status, method).toBe(200);
+      expect(JSON.parse(res.body).body, method).toBe("first-second");
+    }
   });
 
   it("refuses a state-changing request from another site, and it never reaches the sandbox", async () => {
