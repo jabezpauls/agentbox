@@ -5,8 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { signIn } from "./gate.ts";
 import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
 
+// The bridge's own port: the in-sandbox CLI calls it directly, never through
+// the gate. The browser only ever sees the gate.
 const PORT = Number(process.env.WORKBENCH_PORT ?? 7800);
 const REVIEW_URL = `http://127.0.0.1:${PORT}/workbench`;
 // The CLI the image installs, run exactly as an agent in the sandbox runs it.
@@ -50,6 +53,9 @@ function review(...args: string[]): Promise<{ code: number; stdout: string }> {
 // one created, the way a person uses the app. Splitting these into independent
 // tests would mean creating a workspace four times for no extra coverage.
 test.describe.configure({ mode: "serial" });
+
+// Everything is behind the gate: sign in through the real page first.
+test.beforeEach(async ({ page }) => signIn(page));
 
 test("the Workbench drives herdr end to end", async ({ page }) => {
   await page.goto("./");

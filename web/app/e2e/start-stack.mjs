@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Boot the real thing for the end-to-end tests: a herdr server on a private
-// socket, then the compiled bridge serving the built app against it.
+// socket, then the compiled bridge serving the built app against it, and the
+// compiled gate in front of both.
 //
 // Nothing here is a stub. The tests drive the same binary the image ships and
 // the same bridge build the image copies in, so a break in either shows up
@@ -17,10 +18,11 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(here, "..");
 const bridgeEntry = path.resolve(appDir, "../bridge/dist/bridge/src/main.js");
+const gateEntry = path.resolve(appDir, "../gate/dist/main.js");
 const staticDir = path.resolve(appDir, "dist");
 const port = Number(process.env.WORKBENCH_PORT ?? 7800);
 
-for (const [what, p] of [["bridge build", bridgeEntry], ["app build", staticDir]]) {
+for (const [what, p] of [["bridge build", bridgeEntry], ["gate build", gateEntry], ["app build", staticDir]]) {
   if (!fs.existsSync(p)) {
     console.error(`missing ${what} at ${p} — run \`npm run build\` first`);
     process.exit(1);
@@ -100,6 +102,8 @@ const bridge = spawn(process.execPath, [bridgeEntry], {
     WORKBENCH_STATIC_DIR: staticDir,
     WORKBENCH_WORKSPACE_ROOT: workspaces,
     WORKBENCH_REVIEW_DIR: reviewDir,
+    // Links the bridge prints (agentbox-review open) point at the gate.
+    WORKBENCH_PUBLIC_URL: `http://127.0.0.1:${process.env.GATE_PORT ?? 7900}`,
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
@@ -107,6 +111,42 @@ children.push(bridge);
 bridge.on("exit", (code) => {
   if (!stopping) {
     console.error(`bridge exited with ${code}`);
+    stop(1);
+  }
+});
+
+// The gate, in front of the bridge exactly as in the stack: the browser only
+// ever talks to it, and signs in first. Its store lives in the throwaway
+// directory. The loopback address stands in for the proxy, so a test can play
+// another client by sending X-Forwarded-For (see e2e/gate.ts).
+const gatePort = Number(process.env.GATE_PORT ?? 7900);
+// Playwright waits on the gate's sign-in page; the bridge behind it must be
+// listening by then, or the first page load is a 502.
+await waitForSocket({ host: "127.0.0.1", port }, 20_000);
+const gateDir = path.join(root, "gate");
+fs.mkdirSync(gateDir, { recursive: true });
+const { hashPassword } = await import(path.resolve(appDir, "../gate/dist/password.js"));
+// A cheap cost for the seed: every sign-in in the suite verifies against it.
+const seed = await hashPassword(process.env.E2E_PASSWORD ?? "e2e-password-1", 4);
+const gate = spawn(process.execPath, [gateEntry], {
+  env: {
+    ...process.env,
+    GATE_HOST: "127.0.0.1",
+    GATE_PORT: String(gatePort),
+    GATE_DATA_DIR: gateDir,
+    GATE_ADMIN_SOCKET: path.join(root, "gate-admin.sock"),
+    GATE_UPSTREAM_HOST: "127.0.0.1",
+    GATE_BRIDGE_PORT: String(port),
+    GATE_TRUSTED_PROXIES: "127.0.0.1",
+    AGENTBOX_USER: process.env.E2E_USER ?? "e2e",
+    AGENTBOX_PASSWORD_HASH: seed,
+  },
+  stdio: ["ignore", "inherit", "inherit"],
+});
+children.push(gate);
+gate.on("exit", (code) => {
+  if (!stopping) {
+    console.error(`gate exited with ${code}`);
     stop(1);
   }
 });

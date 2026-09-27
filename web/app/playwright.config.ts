@@ -1,12 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = Number(process.env.WORKBENCH_PORT ?? 7800);
+/** The gate, which is all the browser ever talks to. The bridge sits behind it on WORKBENCH_PORT. */
+const GATE_PORT = Number(process.env.GATE_PORT ?? 7900);
 
 /**
  * The end-to-end suite runs against the real stack: `e2e/start-stack.mjs`
- * launches a herdr server on a throwaway socket and the compiled bridge
- * serving the built app. Chromium only — this is testing the Workbench, not
- * browser coverage, and a headless Chromium is what CI can afford.
+ * launches a herdr server on a throwaway socket, the compiled bridge serving
+ * the built app, and the compiled gate in front of it. Chromium only — this is
+ * testing the Workbench, not browser coverage, and a headless Chromium is what
+ * CI can afford.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -19,14 +21,14 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["html", { open: "never" }], ["list"]] : "list",
   use: {
-    baseURL: `http://127.0.0.1:${PORT}/workbench/`,
+    baseURL: `http://127.0.0.1:${GATE_PORT}/workbench/`,
     trace: "retain-on-failure",
     video: "off",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: "node e2e/start-stack.mjs",
-    url: `http://127.0.0.1:${PORT}/workbench/api/health`,
+    url: `http://127.0.0.1:${GATE_PORT}/login`,
     reuseExistingServer: false,
     timeout: 60_000,
     stdout: "pipe",
