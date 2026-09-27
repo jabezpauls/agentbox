@@ -102,7 +102,9 @@ Wants=docker.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=$nft -f $rules
-ExecStop=$nft delete table inet agentbox
+# '-': the table may already be gone (a flush, a firewall reload), and a stop
+# that fails on that would leave the unit failed for no reason.
+ExecStop=-$nft delete table inet agentbox
 
 [Install]
 WantedBy=multi-user.target

@@ -15,7 +15,7 @@ import { emptyTotp, type Store } from "./store.js";
  * would be overwritten by the gate's next save. So the command talks to the
  * gate over a Unix socket in the gate container's private /tmp — reachable only
  * by a process already inside that container — and the gate makes the change.
- * When the gate is not running, the command edits the store itself.
+ * For a stack whose gate is stopped, `--offline` edits the store itself.
  */
 
 export interface AdminDeps {

@@ -107,6 +107,31 @@ run --mode behind-proxy
 expect AGENTBOX_DOMAIN localhost "domain defaults to localhost"
 expect AGENTBOX_PUBLIC_URL "" "no https://localhost written as a public URL"
 
+echo "a localhost public URL an older installer wrote is dropped, not kept"
+for stale in https://localhost http://localhost:8443 https://127.0.0.1/ http://127.0.0.1:8443; do
+    cat > "$DIR/.env" <<ENV
+AGENTBOX_DOMAIN=localhost
+AGENTBOX_MODE=behind-proxy
+AGENTBOX_PASSWORD_HASH=$HASH
+AGENTBOX_PUBLIC_URL=$stale
+ENV
+    run
+    expect AGENTBOX_PUBLIC_URL "" "$stale is not kept as the public URL"
+done
+seed
+run
+expect AGENTBOX_PUBLIC_URL https://work.example.com "a real public URL is still kept"
+
+echo "the removed per-port preview hostnames"
+seed
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --preview-domain p.example.com 2>"$DIR/err" >/dev/null; then
+    pass "--preview-domain is still accepted, so old commands keep working"
+else
+    fail "--preview-domain now fails the install"
+fi
+if grep -q "no longer does anything" "$DIR/err"; then pass "and says it is ignored"; else fail "no warning for --preview-domain"; fi
+expect AGENTBOX_PREVIEW_DOMAIN "" "an existing key is left as it was, never set"
+
 echo "bad input"
 seed
 if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --user $'jabe\nAGENTBOX_MODE=standalone' >/dev/null 2>&1; then

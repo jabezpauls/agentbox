@@ -8,10 +8,17 @@ cd "$SCRIPT_DIR/.."
 [ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
 MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
 DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
-# The per-port preview hostnames are an add-on to either mode; compose them in
-# whenever a preview domain is configured, so every command sees the same stack.
-PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
-[ -n "$PREVIEW_DOMAIN" ] && DC+=(-f docker-compose.previews.yml)
+
+# Run the gate's admin command. The running gate owns its store, so the command
+# goes to it (it waits for a gate that is still starting); with the gate
+# stopped, a throwaway container edits the store directly instead.
+gate_cmd() {
+    if [ -n "$("${DC[@]}" ps --status running -q gate 2>/dev/null)" ]; then
+        "${DC[@]}" exec -T gate agentbox-gate "$@"
+    else
+        "${DC[@]}" run --rm --no-deps -T gate agentbox-gate --offline "$@"
+    fi
+}
 
 # Replace (or add) a single KEY=value line in .env, atomically and 0600. A
 # newline in the value would smuggle in a second key, so it is refused.
@@ -67,7 +74,11 @@ case "${1:-help}" in
                         *) echo "--mode must be standalone, behind-proxy or traefik" >&2; exit 1 ;;
                     esac
                     PENDING+=("AGENTBOX_MODE=$val"); shift 2 ;;
-                --preview-domain) PENDING+=("AGENTBOX_PREVIEW_DOMAIN=$val"); shift 2 ;;
+                --preview-domain)
+                    # Per-port preview hostnames were removed: the gate's
+                    # sign-in cookie is host-only and never reaches them.
+                    echo "warning: --preview-domain no longer does anything; ignoring it" >&2
+                    shift 2 ;;
                 --edge-network)   PENDING+=("AGENTBOX_EDGE_NETWORK=$val"); shift 2 ;;
                 --cert-resolver)  PENDING+=("AGENTBOX_CERT_RESOLVER=$val"); shift 2 ;;
                 --cpus)           PENDING+=("AGENTBOX_CPUS=$val"); shift 2 ;;
@@ -80,11 +91,12 @@ case "${1:-help}" in
         done
         for kv in "${PENDING[@]}"; do set_env "${kv%%=*}" "${kv#*=}"; done
         git pull --ff-only
-        # Recompute the overlays in case --mode or --preview-domain just changed.
+        # Recompute the overlay in case --mode just changed.
         MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
         OVERLAYS=(-f docker-compose.yml -f "docker-compose.${MODE}.yml")
-        PREVIEW_DOMAIN="$(grep '^AGENTBOX_PREVIEW_DOMAIN=' .env | cut -d= -f2- || true)"
-        [ -n "$PREVIEW_DOMAIN" ] && OVERLAYS+=(-f docker-compose.previews.yml)
+        # Builds the gate as well as the sandbox. On a box updating from before
+        # the gate existed, the gate's store is seeded from the password hash
+        # already in .env, so the same password signs in on the new page.
         docker compose "${OVERLAYS[@]}" build --pull
         docker compose "${OVERLAYS[@]}" up -d
         if [ "$ISOLATE" = "true" ]; then
@@ -93,17 +105,47 @@ case "${1:-help}" in
             agentbox_isolate_host "${OVERLAYS[@]}"
         fi
         ;;
-    password)
-        [ $# -ge 2 ] && NEW="$2" || NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
-        HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$NEW")"
-        # Escape '$' so Compose does not interpolate the bcrypt hash away.
-        HASH="$(printf '%s' "$HASH" | sed 's/[$]/$$/g')"
-        tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-        grep -v '^AGENTBOX_PASSWORD_HASH=' .env > "$tmp"
-        printf 'AGENTBOX_PASSWORD_HASH=%s\n' "$HASH" >> "$tmp"
-        install -m 600 "$tmp" .env
-        "${DC[@]}" up -d proxy
-        echo "new password: $NEW"
+    passwd|password)
+        # The gate's store holds the password; .env's hash only seeds a fresh
+        # store, so it is left as it is.
+        GENERATED=""
+        if [ $# -ge 2 ]; then
+            NEW="$2"
+        elif [ -t 0 ]; then
+            read -rsp "New password (blank to generate one): " NEW; echo
+            if [ -n "$NEW" ]; then
+                read -rsp "Again: " AGAIN; echo
+                [ "$NEW" = "$AGAIN" ] || { echo "the passwords did not match" >&2; exit 1; }
+            fi
+        else
+            NEW=""
+        fi
+        if [ -z "$NEW" ]; then
+            NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
+            GENERATED="true"
+        fi
+        case "$NEW" in
+            *$'\n'*|*$'\r'*) echo "a password may not contain a newline" >&2; exit 1 ;;
+        esac
+        # On stdin, never in argv, where any process listing would show it.
+        printf '%s\n' "$NEW" | gate_cmd set-password >/dev/null
+        echo "password changed; every session was signed out"
+        [ -n "$GENERATED" ] && echo "new password: $NEW"
+        ;;
+    totp)
+        case "${2:-}" in
+            reset)
+                gate_cmd totp-reset >/dev/null
+                echo "two-factor is off and every session was signed out; turn it back on from Settings after signing in"
+                ;;
+            *) echo "usage: agentbox totp reset" >&2; exit 1 ;;
+        esac
+        ;;
+    gate)
+        # The gate's other admin commands: status, unlock, revoke-all.
+        shift
+        [ $# -ge 1 ] || { echo "usage: agentbox gate <status|unlock|revoke-all>" >&2; exit 1; }
+        gate_cmd "$@"
         ;;
     backup)
         out="${2:-agentbox-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
@@ -134,10 +176,15 @@ agentbox <command>
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
   update [flags]        pull, rebuild, restart; accepts the install flags
-                        (--agents, --preview, --preview-domain, --mode,
-                        --cert-resolver, --edge-network, --cpus, --memory,
-                        --proxy-cpus, --proxy-memory, --isolate-host)
-  password [new]        rotate the login password
+                        (--agents, --preview, --mode, --cert-resolver,
+                        --edge-network, --cpus, --memory, --proxy-cpus,
+                        --proxy-memory, --isolate-host)
+  passwd [new]          set the sign-in password (prompted, or generated);
+                        signs every session out
+  totp reset            turn two-factor off, for a lost phone
+  gate status|unlock|revoke-all
+                        what the gate has; clear sign-in lockouts; end every
+                        session and revoke every device token
   backup [file]         archive the workspace and home volumes
   restore <file>        replace volumes from an archive
   destroy               remove everything, including your files

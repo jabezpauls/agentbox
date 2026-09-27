@@ -18,7 +18,6 @@ USERNAME="admin"
 PASSWORD=""
 CPUS="2"
 MEMORY="4g"
-PREVIEW_DOMAIN=""
 PREVIEW_MODE="path"
 EDGE_NETWORK="edge-prod"
 CERT_RESOLVER="letsencrypt"
@@ -51,9 +50,9 @@ Run with no options for an interactive walk-through.
   --edge-network <name> traefik: external network Traefik watches (default edge-prod)
   --cert-resolver <n>   traefik: Traefik cert resolver (default letsencrypt)
   --user <name>         Login username (default admin)
-  --password <pass>     Login password (default: generated and printed once)
-  --preview-domain <h>  Serve each port at PORT.<h> (needs a wildcard DNS record)
-  --preview <off|path>  Public preview sharing under /s/<token> (default path)
+  --password <pass>     Login password (default: generated and printed once);
+                        on an existing install, replaces the current one
+  --preview <off|path>  Kept for compatibility; public /s/ shares are off
   --agents <list>       Coding agents to build in, comma-separated (default claude,codex)
   --isolate-host        Firewall the sandbox off the host and private networks
   --cpus <n>            Sandbox CPU ceiling per service (default 2)
@@ -88,7 +87,11 @@ while [ $# -gt 0 ]; do
         --cert-resolver) flag CERT_RESOLVER "${2:-}"; shift 2 ;;
         --user)          flag USERNAME "${2:-}"; shift 2 ;;
         --password)      flag PASSWORD "${2:-}"; shift 2 ;;
-        --preview-domain) flag PREVIEW_DOMAIN "${2:-}"; shift 2 ;;
+        --preview-domain)
+            # Per-port preview hostnames were removed: the gate's sign-in
+            # cookie is host-only, so it never reaches another hostname.
+            warn "--preview-domain no longer does anything; ignoring it"
+            shift 2 ;;
         --preview)       flag PREVIEW_MODE "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
         --isolate-host)  ISOLATE_HOST="true"; shift ;;
@@ -113,23 +116,28 @@ ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
-AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_DOMAIN:PREVIEW_DOMAIN
-AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
 if [ -f "$ENV_FILE" ]; then
     for pair in $MANAGED; do
         key="${pair%%:*}"; var="${pair#*:}"
         case "$EXPLICIT" in *" $var "*) continue ;; esac
-        # A present-but-empty key is a choice (no agents, no preview domain).
+        # A present-but-empty key is a choice (no agents, no public URL).
         grep -q "^$key=" "$ENV_FILE" || continue
         printf -v "$var" '%s' "$(grep -m1 "^$key=" "$ENV_FILE" | cut -d= -f2-)"
     done
 fi
 # The public URL follows the domain whenever the domain was just given, or no
 # URL is recorded yet. It is left blank for localhost: https://localhost is
-# never a link anyone else can open.
+# never a link anyone else can open — so one an older installer recorded is
+# dropped too, rather than kept forever as a "setting".
 case "$EXPLICIT" in *" DOMAIN "*) PUBLIC_URL="" ;; esac
+case "$PUBLIC_URL" in
+    http://localhost|http://localhost[:/]*|https://localhost|https://localhost[:/]*|\
+    http://127.0.0.1|http://127.0.0.1[:/]*|https://127.0.0.1|https://127.0.0.1[:/]*)
+        PUBLIC_URL="" ;;
+esac
 
 # --- Interactive walk-through -----------------------------------------------
 # Ask the same questions the flags answer, each with its safe default already
@@ -163,8 +171,6 @@ if [ "$INTERACTIVE" = "true" ]; then
     fi
     ask "Login username" "$USERNAME" USERNAME
     ask "Coding agents to build in (comma-separated: claude,codex)" "$AGENTS" AGENTS
-    ask "Public preview sharing (off / path)" "$PREVIEW_MODE" PREVIEW_MODE
-    ask "Per-port preview domain (blank for none)" "$PREVIEW_DOMAIN" PREVIEW_DOMAIN
     ask_yn "Firewall the sandbox off the host (shared host only)?" n ISOLATE_HOST
 
     # Echo the equivalent one-liner so the choices are reproducible and auditable.
@@ -172,8 +178,7 @@ if [ "$INTERACTIVE" = "true" ]; then
     [ -n "$DOMAIN" ] && RESOLVED="$RESOLVED --domain $DOMAIN"
     [ "$MODE" = "behind-proxy" ] && RESOLVED="$RESOLVED --bind $BIND"
     [ "$MODE" = "traefik" ] && RESOLVED="$RESOLVED --edge-network $EDGE_NETWORK --cert-resolver $CERT_RESOLVER"
-    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS --preview $PREVIEW_MODE"
-    [ -n "$PREVIEW_DOMAIN" ] && RESOLVED="$RESOLVED --preview-domain $PREVIEW_DOMAIN"
+    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS"
     [ "$ISOLATE_HOST" = "true" ] && RESOLVED="$RESOLVED --isolate-host"
     printf '\n'
     log "Resolved command:"
@@ -256,7 +261,10 @@ else
         GENERATED="true"
     fi
     log "Hashing the password"
-    HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$PASSWORD")"
+    # On stdin rather than in argv, where a process listing would show it.
+    # The hash seeds the gate's store on a fresh install; the gate is told the
+    # password itself once it is up (see Launch).
+    HASH="$(printf '%s\n' "$PASSWORD" | docker run --rm -i caddy:2-alpine caddy hash-password)"
 fi
 [ -n "$HASH" ] || die "failed to generate a password hash"
 
@@ -291,7 +299,6 @@ AGENTBOX_EDGE_NETWORK=$EDGE_NETWORK
 AGENTBOX_CERT_RESOLVER=$CERT_RESOLVER
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
-AGENTBOX_PREVIEW_DOMAIN=$PREVIEW_DOMAIN
 AGENTBOX_PREVIEW_MODE=$PREVIEW_MODE
 AGENTBOX_AGENTS=$AGENTS
 AGENTBOX_PUBLIC_URL=$PUBLIC_URL
@@ -305,15 +312,23 @@ mv "$NEW_ENV" .env
 [ -n "$ENV_ONLY" ] && { log "Wrote .env (env-only run; nothing else done)"; exit 0; }
 
 # --- Launch -----------------------------------------------------------------
-# The preview overlay is an add-on, independent of the mode: it is composed in
-# only when a preview domain was configured.
 COMPOSE=(-f docker-compose.yml -f "docker-compose.$MODE.yml")
-[ -n "$PREVIEW_DOMAIN" ] && COMPOSE+=(-f docker-compose.previews.yml)
 
-log "Building the sandbox image (first run takes a few minutes)"
+log "Building the sandbox and gate images (first run takes a few minutes)"
 docker compose "${COMPOSE[@]}" build
 log "Starting"
 docker compose "${COMPOSE[@]}" up -d
+
+# The gate's store, not .env, holds the password: .env's hash only seeds a
+# store that does not exist yet. So a password chosen now — given with
+# --password, or generated — is set in the store through the gate itself, which
+# is what makes --password work on an existing install too. The command waits
+# for a gate that is still starting.
+if [ "$KEPT" != "true" ]; then
+    log "Setting the password in the gate"
+    printf '%s\n' "$PASSWORD" | docker compose "${COMPOSE[@]}" exec -T gate agentbox-gate set-password >/dev/null \
+        || die "could not set the password in the gate; see: docker compose logs gate"
+fi
 
 # --- Host isolation ---------------------------------------------------------
 # The manual firewall work, packaged. Shared with `agentbox update` so both
@@ -375,12 +390,6 @@ else
     printf '  Password  (the one you passed with --password)\n'
 fi
 printf '  Agents    %s\n' "$AGENTS"
-printf '  Sharing   %s\n' "$PREVIEW_MODE"
-printf '\n  Editor /   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
-if [ -n "$PREVIEW_DOMAIN" ]; then
-    printf '  Previews   https://PORT.%s  (needs a wildcard DNS record)\n' "$PREVIEW_DOMAIN"
-fi
-if [ "$PREVIEW_MODE" = "path" ]; then
-    printf '  Share a port from the preview panel to get a public https://%s/s/<token>/ link.\n' "$DOMAIN"
-fi
+printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
+printf '  Change the password with ./scripts/agentbox passwd; two-factor is optional (see docs/install.md).\n'
 printf '\n'
