@@ -43,10 +43,6 @@ export interface DavMap {
 
 export class BadPath extends Error {}
 
-// Characters a path segment may carry unencoded (RFC 3986 pchar), minus `;`,
-// which the gate refuses in a path.
-const PCHAR = /[A-Za-z0-9\-._~!$&'()*+,=:@]/;
-
 /** Decode `%XX` escapes to bytes; a stray `%` stays a `%`. */
 function percentDecode(s: string): Buffer {
   const out: number[] = [];
@@ -67,33 +63,33 @@ function percentDecode(s: string): Buffer {
 }
 
 /**
- * One path segment in the one spelling the gate accepts: decoded to bytes,
- * then re-encoded with every byte outside pchar escaped. `%2E` becomes `.`
- * (the gate refuses `%2e`), `;` becomes `%3B`, and a segment that names `.`,
- * `..`, or holds a slash, backslash or NUL is refused outright.
+ * One path segment, passed on exactly as the client spelled it — a filename
+ * may hold `;`, `%`, even a backslash (as `%5C`), and the gate sends
+ * everything under /api/dav to the bridge raw, whose WebDAV handler decodes
+ * each segment itself — unless it could climb out of /api/dav on the way
+ * there. Between here and the gate there may be a proxy that normalises URLs
+ * (Cloudflare decodes `%2E`, turns `\` into `/`, and removes dot segments),
+ * and this front adds the device token to whatever it forwards, so a segment
+ * that is, or decodes to, `.` or `..`, or that holds a slash, a raw backslash
+ * or NUL, is refused here.
  */
-export function canonicalSegment(seg: string): string {
-  const bytes = percentDecode(seg);
-  const text = bytes.toString("latin1");
+export function checkedSegment(seg: string): string {
+  if (seg.includes("\\")) throw new BadPath("backslash in a path");
+  const text = percentDecode(seg).toString("latin1");
   if (text === "." || text === "..") throw new BadPath("dot segment");
-  let out = "";
-  for (const b of bytes) {
-    if (b === 0x2f || b === 0x5c || b === 0) throw new BadPath("slash, backslash or NUL in a name");
-    const ch = String.fromCharCode(b);
-    out += b < 0x80 && PCHAR.test(ch) ? ch : `%${b.toString(16).toUpperCase().padStart(2, "0")}`;
-  }
-  return out;
+  if (text.includes("/") || text.includes("\0")) throw new BadPath("slash or NUL in a name");
+  return seg;
 }
 
-/** `/a//b%2Ec/` → `/a/b.c/`: every segment canonical, empty ones dropped, a trailing slash kept. */
-export function canonicalPath(rest: string): string {
+/** `/a//b/` → `/a/b/`: every segment checked, empty ones dropped, a trailing slash kept. */
+export function checkedPath(rest: string): string {
   if (rest === "") return "";
   if (!rest.startsWith("/")) throw new BadPath("not a path");
   const trailing = rest.length > 1 && rest.endsWith("/");
   const segs = rest
     .split("/")
     .filter((s) => s !== "")
-    .map(canonicalSegment);
+    .map(checkedSegment);
   return `/${segs.join("/")}${trailing && segs.length ? "/" : ""}`;
 }
 
@@ -103,7 +99,7 @@ export function toRemotePath(target: string, m: DavMap): string | null {
   const p = q === -1 ? target : target.slice(0, q);
   const qs = q === -1 ? "" : target.slice(q);
   if (!underPrefix(p, m.localPrefix)) return null;
-  return `${m.remotePrefix}${canonicalPath(p.slice(m.localPrefix.length))}${qs}`;
+  return `${m.remotePrefix}${checkedPath(p.slice(m.localPrefix.length))}${qs}`;
 }
 
 function underPrefix(p: string, prefix: string): boolean {

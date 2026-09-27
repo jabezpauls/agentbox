@@ -2,7 +2,7 @@ import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BadPath,
-  canonicalPath,
+  checkedPath,
   DavFront,
   isLocalHost,
   rewriteXmlHrefs,
@@ -36,13 +36,14 @@ describe("request paths", () => {
     for (const p of ["/", "/api/dav/", `/${SECRET}x/`, `/${SECRET.slice(0, -1)}/`, "/other"]) expect(toRemotePath(p, M), p).toBeNull();
   });
 
-  it("are respelled the one way the gate accepts, and dot segments refused", () => {
-    expect(canonicalPath("/a//b%2Ec/")).toBe("/a/b.c/");
-    expect(canonicalPath("/semi;colon")).toBe("/semi%3Bcolon");
-    expect(canonicalPath("/caf%c3%a9")).toBe("/caf%C3%A9");
-    expect(canonicalPath("/café")).toBe("/caf%C3%A9");
-    expect(canonicalPath("/100%")).toBe("/100%25");
-    for (const bad of ["/..", "/a/%2e%2e/b", "/a/%2E", "/a%2Fb", "/a%5cb", "/a%00b"]) expect(() => canonicalPath(bad), bad).toThrow(BadPath);
+  it("pass a filename's own spelling through, but nothing a proxy could climb out with", () => {
+    // Filenames may hold ; % and an encoded backslash: the bridge decodes them.
+    for (const p of ["/semi;colon", "/caf%c3%a9", "/a%5Cb", "/100%", "/%2Eenv", "/a..b"]) expect(checkedPath(p), p).toBe(p);
+    expect(checkedPath("/a//b/")).toBe("/a/b/");
+    // A normalising proxy (Cloudflare) decodes %2E, turns \ into /, and drops dot segments.
+    for (const bad of ["/..", "/a/./b", "/a/%2e%2e/b", "/a/%2E", "/a/.%2e/b", "/a%2Fb", "/a\\..\\b", "/a%00b"]) {
+      expect(() => checkedPath(bad), bad).toThrow(BadPath);
+    }
   });
 });
 
