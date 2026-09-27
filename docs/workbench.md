@@ -198,6 +198,92 @@ CSS in artifacts, though: an external stylesheet or font cannot load.
 Sessions live under `~/.agentbox/review/` on the home volume, so they survive a
 restart or an update, and `agentbox-review list` shows what is outstanding.
 
+## The bridge's API
+
+The bridge that serves the app also serves everything the app's surfaces
+read and change. The app is at `/`, its API under `/api/*`, and its sockets
+under `/ws/*`; every path the app owns (`/workbench`, `/files/…`,
+`/settings/…`) is answered with the app itself, so a deep link survives a
+reload. Inside the sandbox the same bridge is `http://127.0.0.1:7800`, which
+is what `agentbox-review` talks to.
+
+### Files
+
+`/api/files/*` serves two roots: the workspace (`/workspace`) and home
+(`/home/coder`, hidden in the app by default). Every path is absolute; a
+relative one is taken against the workspace, and `~/…` against home. Each
+path is resolved on disk and must stay inside its root: a symlink that leads
+out can be listed, renamed and trashed as a link, but nothing is ever read or
+written through it.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET list?path=&hidden=&offset=&limit=` | a directory, folders first, with size, mtime, symlink target and git status; at most 5000 entries a page, with `truncated` |
+| `GET stat?path=` | one entry |
+| `GET raw?path=&inline=` | the file; ranges supported |
+| `GET zip?path=…&path=…` | a zip of one or more paths, streamed as it is built |
+| `POST uploads {path, size, overwrite}` → `{uploadId}` | start a chunked upload |
+| `PUT uploads/:id?offset=` | one chunk of at most 50 MiB |
+| `POST uploads/:id/finish` | move the finished file into place |
+| `GET` / `DELETE uploads/:id` | progress, or cancel |
+| `POST write {path, content, overwrite?}` | a small text file (up to 1 MiB) |
+| `POST mkdir {path}` · `move {from, to, overwrite?}` · `copy {from, to, overwrite?}` | folders, renames and copies |
+| `POST trash {paths}` · `GET trash` · `POST trash/:id/restore {to?}` · `DELETE trash/:id` · `DELETE trash` | the trash |
+| `GET search?q=&path=&limit=` | file names, for the palette (`fd` when present) |
+
+Nothing is deleted outright except from the trash, and `overwrite` on a move
+or copy puts what it replaces in the trash too. The trash and upload scratch
+space live in `.agentbox/` at the top of each root, so moving something in or
+out is a rename on the same volume. Uploads nobody has touched for a day are
+swept.
+
+Everything is safe to repeat, because networks drop answers: a chunk can be
+resent at any offset up to what has arrived (a chunk further on is refused
+with the offset to resume from), finishing twice answers the same, and a
+second trash of the same path reports it as already gone.
+
+Downloads carry `Content-Security-Policy: sandbox` and `nosniff`. `inline`
+shows pictures, PDF and text in the browser; HTML and SVG are only ever shown
+as their source text, never rendered on the box's origin.
+
+Linux filenames are bytes, not text. A name that is not valid UTF-8 travels
+with each stray byte as a lone surrogate (U+DC80 + byte), so it can be listed,
+renamed, downloaded and deleted like any other; send its `path` back exactly
+as received. In a zip such names show a replacement character.
+
+### WebDAV
+
+`/api/dav/` serves the workspace over WebDAV, which is what `agentbox mount`
+puts in Finder, the GNOME file manager (`gio mount`) or `rclone`. It is the
+same files API underneath — the same confinement, and deleting sends things to
+the trash — with three differences. Symlinks inside the workspace appear as
+what they point at, and links that lead out do not appear at all. The
+`.agentbox/` folder is not part of the mount. Custom ("dead") WebDAV
+properties are not stored; clients that only read and write files never
+notice, and Windows' timestamps are applied as modification times.
+
+macOS writes `._` and `.DS_Store` files beside everything on a network volume;
+deleting those removes them for good rather than filling the trash. To stop
+Finder writing `.DS_Store` files there at all:
+`defaults write com.apple.desktopservices DSDontWriteNetworkStores true`.
+
+### System, projects and the editor
+
+- `GET /api/system` — CPU and memory against the sandbox's own limits (read
+  from its cgroup), PIDs, free space on both volumes, uptime, the fifteen
+  busiest processes, and the versions of agentbox, herdr, code-server and each
+  agent CLI on `PATH`.
+- `GET /api/projects` — a card per top-level folder of the workspace: git
+  branch, uncommitted changes, ahead/behind, last change, the panes working in
+  it and the servers it runs. `POST /api/projects {name}` makes an empty one;
+  `POST /api/projects/clone {url, name?}` clones one (https, ssh, git or
+  `user@host:path` URLs), with progress on the events socket as
+  `project.clone`.
+- `POST /api/editor/open {path, line?, column?, wait?}` opens a file in the
+  editor, at the line, and answers `{delivered}`. The editor is joined to the
+  bridge by the **agentbox connect** extension baked into the image, over
+  `/ws/editor` — a socket the bridge accepts only from inside the sandbox.
+
 ## firstmate
 
 [firstmate](https://github.com/herdrdev/firstmate) drives a fleet of agents
