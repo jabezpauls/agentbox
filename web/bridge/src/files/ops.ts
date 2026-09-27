@@ -41,11 +41,14 @@ export class FileOps {
     if (body.overwrite === true) {
       const existing = await fsp.lstat(fsPath(dest.fs)).catch(() => null);
       if (existing?.isDirectory()) throw new FilesError(409, `${dest.abs} is a directory`, "is-a-directory");
-      // Replace in one step, so a reader never sees a half-written file.
+      // Replace in one step, so a reader never sees a half-written file. This
+      // is a save, not a delete, so the old contents do not go to the trash;
+      // the file keeps its mode (a script stays executable).
       const dir = this.scratch(dest);
       await fsp.mkdir(dir, { recursive: true });
       const tmp = scratchName(dir, "write");
       await fsp.writeFile(tmp, data);
+      if (existing?.isFile()) await fsp.chmod(tmp, existing.mode & 0o7777);
       try {
         await fsp.rename(tmp, fsPath(dest.fs));
       } catch (err) {

@@ -9,6 +9,7 @@ import { describe } from "./entries.js";
 import { fsPath } from "./names.js";
 import { fsError, FilesError, type Root, type Roots } from "./roots.js";
 import { noClobberRename, removeTree } from "./tree.js";
+import type { Trash } from "./trash.js";
 
 /**
  * The largest chunk one request may carry: 50 MiB, under Cloudflare's 100 MB
@@ -46,6 +47,7 @@ export class Uploads {
 
   constructor(
     private readonly roots: Roots,
+    private readonly trash: Trash,
     private readonly opts: { maxChunk?: number; ttlMs?: number } = {},
   ) {}
 
@@ -204,9 +206,16 @@ export class Uploads {
       this.roots.assertMutable(dest);
       await this.checkDestination(dest.fs, dest.abs, rec.overwrite);
       await this.roots.ensureParent(dest);
+      const existing = await fsp.lstat(fsPath(dest.fs)).catch(() => null);
+      if (existing) {
+        // An upload that replaces a file sends the old one to the trash, as
+        // every other overwrite does, and the new one keeps its mode: an
+        // uploaded script stays executable.
+        if (existing.isFile()) await fsp.chmod(part, existing.mode & 0o7777);
+        await this.trash.put(dest.root, dest.abs, dest.fs);
+      }
       try {
-        if (rec.overwrite) await fsp.rename(part, fsPath(dest.fs));
-        else await noClobberRename(part, dest.fs);
+        await noClobberRename(part, dest.fs);
       } catch (err) {
         throw fsError(err, dest.abs);
       }

@@ -35,6 +35,16 @@ describe("write, mkdir, move, copy", () => {
     expect(read("notes/today.md")).toBe("new");
   });
 
+  it("saves over a file in place, keeping its mode", async () => {
+    fs.writeFileSync(path.join(ws, "tool.sh"), "#!/bin/sh\n");
+    fs.chmodSync(path.join(ws, "tool.sh"), 0o750);
+    const res = await post("/api/files/write", { path: "tool.sh", content: "#!/bin/sh\necho hi\n", overwrite: true });
+    expect(res.statusCode).toBe(200);
+    expect(fs.statSync(path.join(ws, "tool.sh")).mode & 0o777).toBe(0o750);
+    // A save is not a delete: nothing goes to the trash.
+    expect((await f.app.inject({ method: "GET", url: "/api/files/trash" })).json()).toEqual([]);
+  });
+
   it("refuses a write that is too large, or not text", async () => {
     expect((await post("/api/files/write", { path: "big", content: "x".repeat(1024 * 1024 + 1) })).statusCode).toBe(413);
     expect((await post("/api/files/write", { path: "x", content: 42 })).statusCode).toBe(400);
@@ -283,6 +293,23 @@ describe("chunked uploads", () => {
     await put(id, 0, "new");
     expect((await post(`/api/files/uploads/${id}/finish`, {})).statusCode).toBe(200);
     expect(read("exists.txt")).toBe("new");
+  });
+
+  it("sends the file an upload replaces to the trash, and keeps its mode", async () => {
+    fs.writeFileSync(path.join(ws, "run.sh"), "#!/bin/sh\necho old\n", { mode: 0o755 });
+    fs.chmodSync(path.join(ws, "run.sh"), 0o755);
+    const id = await start("run.sh", 5, true);
+    await put(id, 0, "echo!");
+    expect((await post(`/api/files/uploads/${id}/finish`, {})).statusCode).toBe(200);
+    expect(read("run.sh")).toBe("echo!");
+    expect(fs.statSync(path.join(ws, "run.sh")).mode & 0o777).toBe(0o755);
+    const trash = (await f.app.inject({ method: "GET", url: "/api/files/trash" })).json() as TrashItem[];
+    expect(trash).toHaveLength(1);
+    expect(trash[0]).toMatchObject({ name: "run.sh", originalPath: path.join(ws, "run.sh") });
+    // And it comes back: restored beside the new one.
+    const restored = await post(`/api/files/trash/${trash[0]!.id}/restore`, { to: "run.sh.old" });
+    expect(restored.statusCode).toBe(200);
+    expect(read("run.sh.old")).toBe("#!/bin/sh\necho old\n");
   });
 
   it("does not clobber a file that appeared while uploading", async () => {

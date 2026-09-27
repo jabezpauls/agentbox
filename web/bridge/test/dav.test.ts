@@ -208,6 +208,14 @@ describe("the WebDAV protocol, as Finder and gio use it", () => {
     expect((await dav("PUT", "/cond.txt", { body: "y", headers: { if: `([${etag}])` } })).status).toBe(204);
   });
 
+  it("saves over a file in place, keeping its mode", async () => {
+    fs.writeFileSync(path.join(ws(), "exec.sh"), "#!/bin/sh\n");
+    fs.chmodSync(path.join(ws(), "exec.sh"), 0o755);
+    expect((await dav("PUT", "/exec.sh", { body: "#!/bin/sh\necho saved\n" })).status).toBe(204);
+    expect(fs.readFileSync(path.join(ws(), "exec.sh"), "utf8")).toBe("#!/bin/sh\necho saved\n");
+    expect(fs.statSync(path.join(ws(), "exec.sh")).mode & 0o777).toBe(0o755);
+  });
+
   it("follows MKCOL and PUT's rules for parents and existing names", async () => {
     expect((await dav("MKCOL", "/m")).status).toBe(201);
     expect((await dav("MKCOL", "/m")).status).toBe(405);

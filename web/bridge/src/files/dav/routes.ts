@@ -470,6 +470,9 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
       const body = req.body as Readable | undefined;
       if (body) await pipeline(body, createWriteStream(tmp));
       else await fsp.writeFile(tmp, "");
+      // A PUT over a file is a save: it replaces in place (no trash) and the
+      // file keeps its mode, as it would saved from an editor.
+      if (st?.isFile()) await fsp.chmod(tmp, st.mode & 0o7777);
       await fsp.rename(tmp, fsPath(target));
     } catch (err) {
       await fsp.rm(tmp, { force: true });

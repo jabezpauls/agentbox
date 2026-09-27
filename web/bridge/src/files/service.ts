@@ -32,7 +32,7 @@ export class FilesService {
     this.roots = new Roots(opts.workspaceRoot, opts.homeRoot);
     this.git = new GitStatusCache(opts.gitTtlMs === undefined ? {} : { ttlMs: opts.gitTtlMs });
     this.trash = new Trash(this.roots);
-    this.uploads = new Uploads(this.roots, opts.maxChunk === undefined ? {} : { maxChunk: opts.maxChunk });
+    this.uploads = new Uploads(this.roots, this.trash, opts.maxChunk === undefined ? {} : { maxChunk: opts.maxChunk });
     this.ops = new FileOps(this.roots, this.trash);
     this.fd = opts.fd;
   }
