@@ -190,6 +190,24 @@ describe("chunked uploads", () => {
   });
 });
 
+describe("many requests", () => {
+  it("go over kept-alive sockets without leaking listeners", async () => {
+    const warnings: string[] = [];
+    const onWarning = (w: Error): void => void warnings.push(`${w.name}: ${w.message}`);
+    process.on("warning", onWarning);
+    try {
+      const { stub, api, dir } = await setup();
+      const { file, data } = localFile(dir, 300 * 1024);
+      await uploadFile({ api, file, remote: "/workspace/many.bin", overwrite: false, chunkSize: 1024 });
+      expect(stub.fs.get("/workspace/many.bin")?.data.equals(data)).toBe(true);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(warnings).toEqual([]);
+    } finally {
+      process.off("warning", onWarning);
+    }
+  });
+});
+
 describe("downloads", () => {
   it("write to a temporary file and move it into place", async () => {
     const { stub, api, dir } = await setup();
