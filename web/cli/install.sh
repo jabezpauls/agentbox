@@ -33,7 +33,9 @@ fetch() {
     elif command -v wget >/dev/null 2>&1; then
         wget -q -O "$2" "$1"
     else
-        # Node is needed anyway, and can download on its own.
+        # Node is needed anyway, and can download on its own. (The single
+        # quotes are deliberate: that is JavaScript, not the shell's.)
+        # shellcheck disable=SC2016
         node -e '
             const [url, file] = process.argv.slice(1);
             fetch(url)

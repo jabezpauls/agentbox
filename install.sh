@@ -484,4 +484,7 @@ printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|of
 [ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
 printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
 printf '  Change the password with ./scripts/agentbox passwd; two-factor is optional (see docs/install.md).\n'
+# The box serves its own CLI; this is the line to run on a laptop (docs/cli.md).
+printf '\n  The agentbox CLI, on your own machine (Node 20+):\n'
+printf '    curl -fsSL %s/cli/install | sh\n' "${PUBLIC_URL:-https://<this box>}"
 printf '\n'

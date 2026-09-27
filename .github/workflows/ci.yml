@@ -18,7 +18,7 @@ jobs:
             scripts/isolate-host.sh \
             images/workspace/entrypoint.sh \
             images/workspace/agentbox-workbench \
-            images/gate/agentbox-gate \
+            images/gate/agentbox-gate web/cli/install.sh \
             scripts/refresh-cloudflare-ips.sh \
             tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh \
             tests/dav/clients.sh
