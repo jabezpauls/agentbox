@@ -26,16 +26,16 @@ import {
  * Fastify; the dispatcher in app.ts hands over only the paths the route table
  * marks as the gate's.
  *
- * Sudo mode. The box's origin also serves what the sandbox controls — the
- * editor, the terminals, the bridge's app — so script from a compromised
+ * Fresh credentials. The box's origin also serves what the sandbox controls —
+ * the editor, the terminals, the bridge's app — so script from a compromised
  * sandbox can run with the owner's session. What would let it keep the box or
- * lock the owner out therefore asks for fresh credentials: approving a device,
- * two-factor changes, the password, and revoking device tokens. Re-entering
- * the password (and a code, with two-factor on) puts the session in sudo mode
- * for ten minutes. Any of those requests may carry the credentials itself
- * (`password`, and `code`), which are checked first — a wrong one fails the
- * request even in sudo mode — and grant sudo mode on success. Without them it
- * needs a session already in sudo mode, else `403 {error: "sudo_required"}`.
+ * lock the owner out therefore needs the password in the request itself (and
+ * a code, with two-factor on): approving a device, two-factor setup, confirm
+ * and disable, the password (`current`), and revoking any device token but
+ * the caller's own. Nothing is remembered between requests — no window, no
+ * elevated session — so having typed the password once lends a script nothing.
+ * Without the credentials: `403 {error: "password_required"}`. Every check
+ * counts against the sign-in limits.
  */
 
 const REMEMBER_SECONDS = 30 * 24 * 60 * 60;
@@ -98,7 +98,7 @@ function html(reply: FastifyReply, status: number, page: string): FastifyReply {
 /** Why proving it is the owner failed. */
 interface Refused {
   status: number;
-  error: LoginError | "sudo_required";
+  error: LoginError | "password_required";
   message: string;
   retryAfterMs: number;
 }
@@ -135,21 +135,14 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   }
 
   /**
-   * Sudo mode for this request's session, from credentials in the request or
-   * a window already open. `null` means granted.
+   * The owner's credentials, sent with this very request. `null` means proven;
+   * nothing is kept, so the next sensitive request must prove it again.
    */
-  async function sudo(req: FastifyRequest, password: string, code: string): Promise<Refused | null> {
-    const session = req.subject as Subject;
-    if (password) {
-      const refused = await proveOwner(infoOf(req.raw), password, code);
-      if (refused) return refused;
-      auth.grantSudo(session.id);
-      return null;
-    }
-    if (auth.sudoUntil(session.id) !== null) return null;
+  async function freshCredentials(req: FastifyRequest, password: string, code: string): Promise<Refused | null> {
+    if (password) return proveOwner(infoOf(req.raw), password, code);
     return {
       status: 403,
-      error: "sudo_required",
+      error: "password_required",
       message: twoFactorOn()
         ? "Confirm it is you: enter your password and a two-factor code."
         : "Confirm it is you: enter your password.",
@@ -306,7 +299,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return reply.code(204).send();
   });
 
-  // --- the current session, sudo mode, and the other sessions -----------------
+  // --- the current session, and the other sessions -----------------------------
 
   app.get("/_gate/session", { config: { auth: "any" } }, async (req) => {
     const s = req.subject as Subject;
@@ -322,17 +315,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       remember: session.remember,
       expiresAt: session.remember ? session.expiresAt : Math.min(session.expiresAt, session.lastSeenAt + IDLE_MS),
       twoFactor: twoFactorOn(),
-      sudoUntil: auth.sudoUntil(session.id),
     };
-  });
-
-  app.post("/_gate/sudo", { config: { auth: "session" } }, async (req, reply) => {
-    const b = body(req);
-    const password = str(b.password);
-    if (!password) return reply.code(400).send({ error: "bad_request", message: "Enter your password." });
-    const refused = await sudo(req, password, str(b.code).trim());
-    if (refused) return refuseJson(reply, refused);
-    return { sudoUntil: auth.sudoUntil((req.subject as Subject).id) };
   });
 
   app.get("/_gate/sessions", { config: { auth: "session" } }, async (req) => {
@@ -363,8 +346,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- password ---------------------------------------------------------------
 
-  // `current` is the password field here: when given it is checked (and grants
-  // sudo mode); a session already in sudo mode may leave it out.
+  // `current` is the password field here, and it is required.
   app.post("/_gate/password", { config: { auth: "session" } }, async (req, reply) => {
     const b = body(req);
     const info = infoOf(req.raw);
@@ -373,7 +355,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     const next = str(b.next);
     const problem = passwordProblem(next);
     if (problem) return reply.code(400).send({ error: "weak", message: `The new password is not acceptable: ${problem}.` });
-    const refused = await sudo(req, str(b.current), str(b.code).trim());
+    const refused = await freshCredentials(req, str(b.current), str(b.code).trim());
     if (refused) return refuseJson(reply, refused.error === "invalid" ? { ...refused, message: "The current password is not right." } : refused);
     store.data.password = { hash: await hashPassword(next, config.bcryptCost), updatedAt: core.now() };
     store.data.generation += 1;
@@ -387,7 +369,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   app.post("/_gate/totp/setup", { config: { auth: "session" } }, async (req, reply) => {
     const b = body(req);
-    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
     if (refused) return refuseJson(reply, refused);
     const totp = store.data.totp;
     if (totp.secret) return reply.code(409).send({ error: "already_enabled", message: "Two-factor is already on. Turn it off first to enrol a new device." });
@@ -407,9 +389,9 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       retryAfter(reply, wait);
       return reply.code(429).send({ error: "rate", message: loginMessage("rate", wait) });
     }
-    // `code` here is the new authenticator's; sudo mode comes from the window
-    // setup opened, or from `password` in this request.
-    const refused = await sudo(req, str(b.password), "");
+    // The password again, as for setup; `code` here is the new authenticator's
+    // (two-factor is not on yet, so no second factor is asked for).
+    const refused = await freshCredentials(req, str(b.password), "");
     if (refused) return refuseJson(reply, refused);
     const totp = store.data.totp;
     if (totp.secret) return reply.code(409).send({ error: "already_enabled" });
@@ -438,7 +420,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   app.delete("/_gate/totp", { config: { auth: "session" } }, async (req, reply) => {
     const info = infoOf(req.raw);
     const b = body(req);
-    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
     if (refused) return refuseJson(reply, refused);
     store.data.totp = emptyTotp();
     store.data.generation += 1;
@@ -498,18 +480,18 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       pending: rec ? { userCode: rec.userCode, name: rec.name, ip: rec.ip, createdAt: rec.createdAt } : null,
       unknownCode: code && !rec ? code.slice(0, 16) : null,
       result: null,
-      needSudo: auth.sudoUntil((req.subject as Subject).id) === null,
       twoFactor: twoFactorOn(),
       error,
     };
   }
 
-  // Approving gives a new device full access, so it needs sudo mode: the page
-  // asks for the password (and a code) in the same form. Denying does not.
+  // Approving gives a new device full access, so it needs the password (and a
+  // code) in the same request: the page asks for them in its form. Denying
+  // does not.
   app.post("/_gate/device/approve", { config: { auth: "session" } }, async (req, reply) => {
     const b = body(req);
     const code = str(b.userCode);
-    const refused = await sudo(req, str(b.password), str(b.code).trim());
+    const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
     if (refused) {
       if (isForm(req)) {
         if (refused.retryAfterMs > 0) retryAfter(reply, refused.retryAfterMs);
@@ -552,7 +534,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   /**
    * A device token may revoke itself (the CLI's logout) and nothing else;
-   * revoking any other token takes a signed-in browser in sudo mode, so a
+   * revoking any other token takes a signed-in browser and the password, so a
    * stolen token cannot lock the owner's other devices out.
    */
   const revoke = async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply, id: string) => {
@@ -561,7 +543,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       if (id !== subject.id) return reply.code(403).send({ error: "not_yours", message: "a device token can revoke only itself" });
     } else {
       const b = body(req);
-      const refused = await sudo(req, str(b.password), str(b.code).trim());
+      const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
       if (refused) return refuseJson(reply, refused);
     }
     if (!(await auth.revokeToken(id))) return reply.code(404).send({ error: "no such token" });

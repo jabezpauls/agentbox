@@ -139,8 +139,7 @@ export interface DeviceView {
   unknownCode: string | null;
   /** The outcome of a decision just made. */
   result: "approved" | "denied" | "gone" | null;
-  /** Approving needs fresh credentials: this session is not in sudo mode. */
-  needSudo: boolean;
+  /** Two-factor is on: approving asks for a code as well as the password. */
   twoFactor: boolean;
   /** Why the last attempt to approve was refused. */
   error: string | null;
@@ -163,21 +162,19 @@ export function renderDevices(v: DeviceView): string {
     const p = v.pending;
     const when = new Date(p.createdAt).toISOString().replace("T", " ").slice(0, 16);
     // Approving hands out full access, so it asks for the password (and a
-    // code) unless this session confirmed it in the last few minutes.
-    const confirm = v.needSudo
-      ? `<div class="field">
+    // code), every time.
+    const confirm = `<div class="field">
 <label class="field-label" for="password">Your password</label>
 <input class="input" id="password" name="password" type="password" autocomplete="current-password" required autofocus>
 </div>${
-          v.twoFactor
-            ? `
+      v.twoFactor
+        ? `
 <div class="field">
 <label class="field-label" for="code">Two-factor code</label>
 <input class="input" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" required>
 </div>`
-            : ""
-        }`
-      : "";
+        : ""
+    }`;
     const error = v.error ? `<p class="gate-msg is-error" role="alert">${escapeHtml(v.error)}</p>` : "";
     return shell(
       "Approve a device · agentbox",

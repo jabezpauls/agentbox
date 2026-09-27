@@ -12,8 +12,6 @@ import type { SessionRecord, Store, TokenRecord } from "./store.js";
 export const IDLE_MS = 12 * 60 * 60_000;
 /** No session outlives this, remembered or not. */
 export const ABSOLUTE_MS = 30 * 24 * 60 * 60_000;
-/** How long re-entering the password keeps a session in sudo mode. */
-export const SUDO_MS = 10 * 60_000;
 /** Bookkeeping writes (last seen, last used) at most this often per credential. */
 const TOUCH_MS = 60_000;
 const MAX_SESSIONS = 50;
@@ -59,8 +57,6 @@ export type Ended =
 
 export class Auth {
   private readonly endListeners: Array<(ended: Ended) => void> = [];
-  /** Sessions in sudo mode, until when. In memory: a restart asks again. */
-  private readonly sudo = new Map<string, number>();
 
   constructor(
     private readonly store: Store,
@@ -77,10 +73,6 @@ export class Auth {
 
   private announce(ended: Ended): void {
     if ("ids" in ended && ended.ids.length === 0) return;
-    if (ended.kind === "session") {
-      if ("ids" in ended) for (const id of ended.ids) this.sudo.delete(id);
-      else for (const id of [...this.sudo.keys()]) if (id !== ended.allBut) this.sudo.delete(id);
-    }
     for (const listener of this.endListeners) listener(ended);
   }
 
@@ -200,26 +192,6 @@ export class Auth {
     this.announce({ kind: "session", allBut: keep ?? null });
     await this.store.save();
     return before - this.store.data.sessions.length;
-  }
-
-  // --- sudo mode ---------------------------------------------------------------
-
-  /** Put a session in sudo mode for the next ten minutes; returns until when. */
-  grantSudo(sessionId: string): number {
-    const until = this.now() + SUDO_MS;
-    this.sudo.set(sessionId, until);
-    return until;
-  }
-
-  /** Until when a session is in sudo mode, or `null`. */
-  sudoUntil(sessionId: string): number | null {
-    const until = this.sudo.get(sessionId);
-    if (until === undefined) return null;
-    if (until <= this.now()) {
-      this.sudo.delete(sessionId);
-      return null;
-    }
-    return until;
   }
 
   // --- device tokens -----------------------------------------------------------

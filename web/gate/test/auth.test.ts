@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ABSOLUTE_MS, Auth, IDLE_MS, SUDO_MS, type Ended } from "../src/auth.js";
+import { ABSOLUTE_MS, Auth, IDLE_MS, type Ended } from "../src/auth.js";
 import { Store } from "../src/store.js";
 
 let dir: string;
@@ -75,31 +75,5 @@ describe("ending credentials", () => {
     expect(auth.listSessions().map((x) => x.id)).toEqual([s.id]);
     clock.t += 2_000;
     expect(auth.listSessions()).toEqual([]);
-  });
-});
-
-describe("sudo mode", () => {
-  it("lasts ten minutes, and ends with its session", async () => {
-    const { clock, auth, session } = await setup();
-    const s = await session();
-    expect(auth.sudoUntil(s.id)).toBeNull();
-    const until = auth.grantSudo(s.id);
-    expect(until).toBe(clock.t + SUDO_MS);
-    clock.t += SUDO_MS - 1;
-    expect(auth.sudoUntil(s.id)).toBe(until);
-    clock.t += 1;
-    expect(auth.sudoUntil(s.id)).toBeNull();
-
-    auth.grantSudo(s.id);
-    await auth.endSession(s.id);
-    expect(auth.sudoUntil(s.id)).toBeNull();
-
-    const kept = await session();
-    const other = await session();
-    auth.grantSudo(kept.id);
-    auth.grantSudo(other.id);
-    await auth.endSessions(kept.id);
-    expect(auth.sudoUntil(kept.id)).not.toBeNull();
-    expect(auth.sudoUntil(other.id)).toBeNull();
   });
 });

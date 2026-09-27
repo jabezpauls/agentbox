@@ -52,11 +52,11 @@ test("repeated failures pause sign-in, and say for how long — even for the rig
 test("with two-factor on, sign-in asks for the code and accepts it", async ({ page }) => {
   await asClient(page, "203.0.113.12");
   await signIn(page);
-  // Enrolling is a sensitive change: it takes the password again (sudo mode).
+  // Enrolling is a sensitive change: it takes the password again, in the request.
   const setup = await gateApi(page, "POST", "/_gate/totp/setup", { password: PASSWORD });
   expect(setup.status).toBe(200);
   const secret = setup.body.secret as string;
-  const confirm = await gateApi(page, "POST", "/_gate/totp/confirm", { code: totp(secret) });
+  const confirm = await gateApi(page, "POST", "/_gate/totp/confirm", { code: totp(secret), password: PASSWORD });
   expect(confirm.status).toBe(200);
   const recoveryCodes = confirm.body.recoveryCodes as string[];
 
@@ -152,7 +152,7 @@ test("approving a CLI login on /settings/devices asks for the password, then han
   await expect(page.getByRole("heading", { name: "Allow “e2e laptop” full access?" })).toBeVisible();
   await expect(page.getByText(userCode)).toBeVisible();
 
-  // Approving is a sudo action: the page asks for the password again.
+  // Approving hands out full access: the page asks for the password again.
   await page.getByLabel("Your password").fill(PASSWORD);
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByRole("heading", { name: "Device approved" })).toBeVisible();

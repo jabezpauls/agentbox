@@ -239,17 +239,18 @@ describe("two-factor", () => {
     const mine = await login(h);
     const other = await login(h);
 
-    // Enrolling needs sudo mode: the password again.
+    // Enrolling needs the password again, in the request.
     const unconfirmed = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) });
     expect(unconfirmed.status).toBe(403);
-    expect(unconfirmed.json()).toMatchObject({ error: "sudo_required" });
+    expect(unconfirmed.json()).toMatchObject({ error: "password_required" });
     const setup = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } });
     expect(setup.status).toBe(200);
     const { secret, otpauthUrl, qrSvg } = setup.json<{ secret: string; otpauthUrl: string; qrSvg: string }>();
     expect(otpauthUrl).toContain(`secret=${secret}`);
     expect(qrSvg).toMatch(/^<svg/);
 
-    const confirm = (code: string) => request(h!.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h!, { cookie: mine }), body: { code } });
+    const confirm = (code: string) =>
+      request(h!.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h!, { cookie: mine }), body: { code, password: PASSWORD } });
     expect((await confirm("000000")).status).toBe(400);
     const step = stepAt(c.now());
     const confirmed = await confirm(hotp(secret, step));
@@ -283,7 +284,11 @@ describe("two-factor", () => {
 
     const info = await request(h.base, "GET", "/_gate/session", { headers: { cookie: mine } });
     expect(info.json()).toMatchObject({ twoFactor: true });
-    const again = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }) });
+    // Enrolling again, credentials and all, is refused while it is on.
+    const again = await request(h.base, "POST", "/_gate/totp/setup", {
+      headers: sameOrigin(h, { cookie: mine }),
+      body: { password: PASSWORD, code: hotp(secret, stepAt(c.now())) },
+    });
     expect(again.status).toBe(409);
   });
 
@@ -293,12 +298,15 @@ describe("two-factor", () => {
     const mine = await login(h);
     const setup = await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } });
     const { secret } = setup.json<{ secret: string }>();
-    await request(h.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h, { cookie: mine }), body: { code: hotp(secret, stepAt(c.now())) } });
-    // Past the sudo window setup opened, and a step on for a fresh code.
+    await request(h.base, "POST", "/_gate/totp/confirm", {
+      headers: sameOrigin(h, { cookie: mine }),
+      body: { code: hotp(secret, stepAt(c.now())), password: PASSWORD },
+    });
+    // A step on, for a fresh code.
     c.advance(11 * 60_000);
 
     const off = (body: object) => request(h!.base, "DELETE", "/_gate/totp", { headers: sameOrigin(h!, { cookie: mine }), body });
-    expect((await off({})).json()).toMatchObject({ error: "sudo_required", twoFactor: true });
+    expect((await off({})).json()).toMatchObject({ error: "password_required", twoFactor: true });
     expect((await off({ password: "wrong" })).status).toBe(401);
     expect((await off({ password: PASSWORD })).json()).toMatchObject({ error: "code_required" });
     expect(h.gate.core.store.data.totp.secret).not.toBeNull();
@@ -315,7 +323,10 @@ describe("two-factor", () => {
     const { secret } = (
       await request(h.base, "POST", "/_gate/totp/setup", { headers: sameOrigin(h, { cookie: mine }), body: { password: PASSWORD } })
     ).json<{ secret: string }>();
-    await request(h.base, "POST", "/_gate/totp/confirm", { headers: sameOrigin(h, { cookie: mine }), body: { code: hotp(secret, stepAt(c.now())) } });
+    await request(h.base, "POST", "/_gate/totp/confirm", {
+      headers: sameOrigin(h, { cookie: mine }),
+      body: { code: hotp(secret, stepAt(c.now())), password: PASSWORD },
+    });
     const res = await request(h.base, "POST", "/_gate/login", {
       headers: sameOrigin(h, { "content-type": "application/x-www-form-urlencoded" }),
       body: `username=${USER}&password=${encodeURIComponent(PASSWORD)}`,

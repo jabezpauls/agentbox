@@ -45,11 +45,11 @@ describe("the device login", () => {
     const pending = await request(h.base, "GET", `/_gate/device/pending?code=${s.userCode.toLowerCase().replace("-", "")}`, { headers: { cookie } });
     expect(pending.json()).toMatchObject({ userCode: s.userCode, name: "jabe-laptop", ip: "127.0.0.1" });
 
-    // Approving hands out full access: it needs sudo mode, here from the
-    // password in the same request.
+    // Approving hands out full access: it needs the password in the same
+    // request.
     const unconfirmed = await request(h.base, "POST", "/_gate/device/approve", { headers: sameOrigin(h, { cookie }), body: { userCode: s.userCode } });
     expect(unconfirmed.status).toBe(403);
-    expect(unconfirmed.json()).toMatchObject({ error: "sudo_required" });
+    expect(unconfirmed.json()).toMatchObject({ error: "password_required" });
     const approve = await request(h.base, "POST", "/_gate/device/approve", {
       headers: sameOrigin(h, { cookie }),
       body: { userCode: s.userCode, password: PASSWORD },
@@ -223,7 +223,7 @@ describe("the approval page", () => {
     expect(page.body).toContain("Allow “build &#60;server&#62;” full access?");
     expect(page.body).toContain(s.userCode);
 
-    // The form asks for the password: approving needs sudo mode.
+    // The form asks for the password: approving needs it, every time.
     expect(page.body).toContain('name="password"');
     const wrong = await request(h.base, "POST", "/_gate/device/approve", {
       headers: sameOrigin(h, { cookie, "content-type": "application/x-www-form-urlencoded" }),
@@ -256,7 +256,7 @@ describe("device tokens", () => {
     const a = await h.gate.core.auth.createToken("a");
     const b = await h.gate.core.auth.createToken("b");
     const cookie = await login(h);
-    // The owner, in sudo mode.
+    // The owner, with the password in the request.
     const unconfirmed = await request(h.base, "DELETE", `/_gate/tokens/${a.record.id}`, { headers: sameOrigin(h, { cookie }) });
     expect(unconfirmed.status).toBe(403);
     const del = await request(h.base, "DELETE", `/_gate/tokens/${a.record.id}`, { headers: sameOrigin(h, { cookie }), body: { password: PASSWORD } });
