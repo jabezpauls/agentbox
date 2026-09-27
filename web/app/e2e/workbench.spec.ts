@@ -54,8 +54,16 @@ function review(...args: string[]): Promise<{ code: number; stdout: string }> {
 // tests would mean creating a workspace four times for no extra coverage.
 test.describe.configure({ mode: "serial" });
 
-// Everything is behind the gate: sign in through the real page first.
-test.beforeEach(async ({ page }) => signIn(page));
+// Everything is behind the gate: sign in through the real page first. Each
+// test signs in as a client of its own (the harness trusts loopback as the
+// proxy, see e2e/gate.ts): the gate allows five password checks a minute per
+// address, and the whole suite signs in more often than that.
+let client = 0;
+test.beforeEach(async ({ page }) => {
+  client += 1;
+  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${100 + client}` });
+  await signIn(page);
+});
 
 test("the Workbench drives herdr end to end", async ({ page }) => {
   await page.goto("/");
