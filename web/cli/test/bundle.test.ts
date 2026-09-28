@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { bundleVersion, selfInstall } from "../src/commands/update.js";
+import { bundleVersion, MAX_BUNDLE, selfInstall } from "../src/commands/update.js";
 import { ConfigStore } from "../src/config.js";
 import { EXIT } from "../src/errors.js";
 import { filesStub, put, read } from "./files-stub.js";
@@ -148,6 +148,62 @@ describe("files edit, run for real", () => {
       expect(read(stub, "/workspace/note.txt")).toBe("hello\nedited\n");
     } finally {
       await stub.close();
+    }
+  });
+});
+
+describe("update's limits", () => {
+  it("refuses a download larger than any build, and a box on plain http elsewhere", async () => {
+    const box = await stubServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/javascript", "content-length": String(MAX_BUNDLE + 1) });
+      res.end();
+    });
+    const installed = path.join(tmpDir(), "agentbox.mjs");
+    fs.copyFileSync(bundle, installed);
+    const argv1 = process.argv[1];
+    process.argv[1] = installed;
+    try {
+      const big = await runCli(["update"], { configDir: signedIn(box.url) });
+      expect(big.code).toBe(EXIT.FAILURE);
+      expect(big.stderr).toMatch(/larger than any CLI build/);
+      const far = await runCli(["update"], { configDir: signedIn("http://box.example.invalid") });
+      expect(far.code).toBe(EXIT.FAILURE);
+      expect(far.stderr).toMatch(/plain http.*--insecure-http/);
+      const told = await runCli(["update", "--insecure-http"], { configDir: signedIn("http://box.example.invalid") });
+      expect(told.code).toBe(EXIT.UNREACHABLE);
+      expect(fs.readFileSync(installed).equals(fs.readFileSync(bundle))).toBe(true);
+    } finally {
+      process.argv[1] = argv1 as string;
+      await box.close();
+    }
+  });
+
+  it("stops reading a download that grows past the limit without saying its size", async () => {
+    const box = await stubServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/javascript" });
+      const chunk = Buffer.alloc(1024 * 1024, 0x61);
+      let sent = 0;
+      const pump = (): void => {
+        while (sent <= MAX_BUNDLE) {
+          sent += chunk.length;
+          if (!res.write(chunk)) return void res.once("drain", pump);
+        }
+        res.end();
+      };
+      res.write("#!/usr/bin/env node\n// agentbox-cli 9.9.9\n");
+      pump();
+    });
+    const installed = path.join(tmpDir(), "agentbox.mjs");
+    fs.copyFileSync(bundle, installed);
+    const argv1 = process.argv[1];
+    process.argv[1] = installed;
+    try {
+      const r = await runCli(["update"], { configDir: signedIn(box.url) });
+      expect(r.code).toBe(EXIT.FAILURE);
+      expect(r.stderr).toMatch(/larger than any CLI build/);
+    } finally {
+      process.argv[1] = argv1 as string;
+      await box.close();
     }
   });
 });
