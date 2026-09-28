@@ -19,6 +19,41 @@ if [ -d /usr/local/share/agentbox/skills ]; then
     cp -r /usr/local/share/agentbox/skills/. /home/coder/.claude/skills/ || true
 fi
 
+# Codex reads standing instructions from ~/.codex/AGENTS.md, on the home
+# volume, which the person may edit too. agentbox's part is a marked block,
+# replaced on every start so an image update ships new instructions, and
+# everything outside the markers is kept as it was. (Claude Code reads the same
+# text from /etc/claude-code/CLAUDE.md, baked into the image.)
+agents=/usr/local/share/agentbox/agents.md
+if [ -f "$agents" ]; then
+    mkdir -p /home/coder/.codex
+    target=/home/coder/.codex/AGENTS.md
+    begin='<!-- agentbox:begin (managed by agentbox; edits inside are replaced on restart) -->'
+    end='<!-- agentbox:end -->'
+    # Whatever was there, less any earlier copy of the block and the blank
+    # lines that led into it.
+    theirs=""
+    if [ -f "$target" ]; then
+        theirs="$(awk -v e="$end" '
+            index($0, "<!-- agentbox:begin") == 1 { skip = 1; next }
+            skip { if ($0 == e) skip = 0; next }
+            { print }
+        ' "$target" | sed '/./,$!d')"
+    fi
+    if tmp="$(mktemp "$target.XXXXXX")"; then
+        if {
+            printf '%s\n' "$begin"
+            cat "$agents"
+            printf '%s\n' "$end"
+            [ -z "$theirs" ] || printf '\n%s\n' "$theirs"
+        } >"$tmp"; then
+            mv "$tmp" "$target"
+        else
+            rm -f "$tmp"
+        fi
+    fi
+fi
+
 # The editor extension that joins code-server to the app lives on the home
 # volume like any extension, so an image update would never reach a volume
 # that already has an older copy. Reinstall it when the image's build stamp

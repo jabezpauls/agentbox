@@ -23,17 +23,35 @@ If you set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env`, the agents pick
 them up automatically. Otherwise sign in interactively the first time you run
 one; the credentials persist in the `agentbox_home` volume.
 
+Agents are told how this box works every time they start: that "preview"
+means the Preview panel, how to put an app there, and that only you can make
+one public.
+
 ## Other entry points
 
 - `/vscode/` — this editor
-- `/workbench` — the Workbench: every agent at once, with live terminals and
-  previews of the servers they start
+- `/workbench` — the Workbench: every agent at once, with live terminals, and
+  the Preview and Review panels beside them
 - `/terminal` — the same herdr session as a full-screen TUI
 - `/shell` — a full-screen plain bash shell
 - `/monitor` — live CPU, memory and process usage for the sandbox
 
-Start a dev server in any pane and it appears in the Workbench's preview
-panel — `python3 -m http.server 3000`, `npm run dev`, anything that listens.
+## Seeing what you build
+
+Ask an agent to put something in your preview, or do it yourself from any
+pane:
+
+```bash
+agentbox-preview start -- npm run dev
+```
+
+The dev server runs in a terminal tab you can watch, and it opens in the
+**Preview** panel of every tab you have open, with live reload. Each app has
+its own address on your box, `/a/<id>/`, which only you can open — until you
+press **Share** and choose "anyone with the link" (or a passcode) and for how
+long; **Stop sharing** makes it private again. A server you started some
+other way shows up in the panel under *Also listening*; choose it to make it
+an app.
 
 ## Showing you something
 

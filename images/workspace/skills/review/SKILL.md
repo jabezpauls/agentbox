@@ -73,3 +73,7 @@ own colours explicitly.
 
 Do not use it for a one-line answer, for something the person asked to see in
 the terminal, or as a way to avoid saying something plainly.
+
+A review page is a document. A running web app — a dev server, a prototype,
+anything with live reload — goes in their Preview instead: see the `preview`
+skill (`agentbox-preview start -- npm run dev`).

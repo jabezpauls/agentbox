@@ -1,0 +1,456 @@
+#!/usr/bin/env node
+// agentbox-preview — put a web app in the owner's Preview.
+//
+// An app is a server in the sandbox with one URL, /a/<id>/ on the box. `start`
+// registers one (always private: only the owner can share it), runs its
+// command in a herdr tab the owner can watch — beside the agent that asked,
+// when it can tell which — waits until it answers, and shows it in the
+// Preview of every tab the owner has open.
+//
+// Deliberately dependency-free plain Node, like agentbox-review: it talks to
+// the bridge at http://127.0.0.1:7800 inside the sandbox.
+//
+//   agentbox-preview start [--name n] [--port p] [--cwd d] [--pin] [--timeout s] [--no-open] -- <command…>
+//   agentbox-preview open <port|id> [--path /x] [--name n]
+//   agentbox-preview static <dir> [--name n] [--port p] [--pin]
+//   agentbox-preview list [--json]
+//   agentbox-preview url <port|id>
+//   agentbox-preview stop <port|id>
+//
+// Exit codes: 0 ready (or success), 1 usage/transport error, 2 no such app,
+// 5 the server never came up (the last lines of its output are printed).
+
+import { readFileSync, statSync, createReadStream, realpathSync } from "node:fs";
+import http from "node:http";
+import net from "node:net";
+import path from "node:path";
+
+const BASE = (process.env.AGENTBOX_PREVIEW_URL || "http://127.0.0.1:7800").replace(/\/+$/, "");
+const DEFAULT_TIMEOUT_S = 120;
+
+const USAGE = `agentbox-preview — show a web app in the owner's Preview
+
+  agentbox-preview start [options] -- <command…>   register an app, run it in a herdr tab, show it
+      --name <n>       what to call it (default: the folder's name)
+      --port <p>       the port it serves on (default: a free one, passed as PORT)
+      --cwd <dir>      where to run it (default: here)
+      --pin            start it again whenever the box starts (staging)
+      --timeout <s>    how long to wait for it to answer (default ${DEFAULT_TIMEOUT_S})
+      --no-open        register and start it, but leave the Preview alone
+  agentbox-preview open <port|id> [--path /x]    show a running server (making it an app if need be)
+  agentbox-preview static <dir> [--name n] [--port p] [--pin]   serve a folder as an app
+  agentbox-preview list [--json]                 every app, and whether it is serving
+  agentbox-preview url <port|id>                 print an app's URL
+  agentbox-preview stop <port|id>                stop its server and remove the app
+
+The command runs with PORT, HOST=127.0.0.1 and AGENTBOX_BASE_PATH=/a/<id>/ set.
+A Vite command gets --base /a/<id>/ --port <p> --strictPort --host 127.0.0.1
+added, so it runs under its own URL natively. Other servers should listen on
+$PORT at 127.0.0.1 (or 0.0.0.0); the box fixes root paths in their pages.
+
+Apps are private: only the owner can share one, from the Preview panel. Do not
+use external hosting or claude.ai Artifacts to show a web app instead.
+
+Exit codes: 0 ready, 1 error, 2 no such app, 5 the server never came up.
+The bridge is found at AGENTBOX_PREVIEW_URL (default ${BASE}).`;
+
+class Fail extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function die(err) {
+  const code = err instanceof Fail ? err.code : 1;
+  process.stderr.write(`agentbox-preview: ${err.message}\n`);
+  process.exit(code);
+}
+
+async function call(method, urlPath, body) {
+  let res;
+  try {
+    res = await fetch(`${BASE}${urlPath}`, {
+      method,
+      headers: body === undefined ? { accept: "application/json" } : { accept: "application/json", "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new Fail(`cannot reach the bridge at ${BASE} (${err.cause?.code ?? err.message})`);
+  }
+  const text = await res.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+  if (res.status === 404) throw new Fail(parsed?.message ?? parsed?.error ?? "no such app", 2);
+  if (!res.ok) throw new Fail(parsed?.message ?? parsed?.error ?? `${urlPath} → ${res.status}`);
+  return parsed;
+}
+
+/** Pull `--flag value` pairs and boolean flags out of the argument list, leaving the positionals. */
+function options(argv, valued, flags = []) {
+  const out = {};
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (valued.includes(arg)) {
+      const value = argv[++i];
+      if (value === undefined) throw new Fail(`${arg} needs a value`);
+      out[arg.replace(/^--/, "")] = value;
+    } else if (flags.includes(arg)) {
+      out[arg.replace(/^--/, "")] = true;
+    } else if (arg.startsWith("--") && arg !== "--") {
+      throw new Fail(`unknown option: ${arg} (try --help)`);
+    } else {
+      rest.push(arg);
+    }
+  }
+  return { opts: out, rest };
+}
+
+function portArg(raw) {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Fail(`not a port: ${raw}`);
+  return port;
+}
+
+/** A port nothing is listening on, from the kernel. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** One argument as a POSIX shell word. */
+function shellWord(arg) {
+  if (arg !== "" && /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+const RUNNERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+
+/**
+ * Whether a command runs Vite, and so takes its base path and port as flags:
+ * `vite …`, `npx vite …`, or a package script (`npm run dev`, `pnpm dev`)
+ * whose text runs `vite`.
+ */
+function detectVite(argv, cwd) {
+  const [first = "", second = ""] = argv;
+  const bin = path.basename(first);
+  if (bin === "vite") return "direct";
+  if ((bin === "npx" || bin === "bunx" || (bin === "pnpm" && second === "exec") || (bin === "pnpm" && second === "dlx")) && argv.includes("vite")) {
+    return "direct";
+  }
+  if (!RUNNERS.has(bin)) return null;
+  // npm run <script> / npm start / pnpm <script> / yarn <script>
+  let script = null;
+  if (second === "run" || second === "run-script") script = argv[2] ?? null;
+  else if (second === "start" || second === "dev") script = second;
+  else if (bin !== "npm" && second && !second.startsWith("-")) script = second;
+  if (!script) return null;
+  let scripts = {};
+  try {
+    scripts = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf8")).scripts ?? {};
+  } catch {
+    return null;
+  }
+  const text = scripts[script];
+  if (typeof text !== "string" || !/(^|[\s&;|(])vite(\s|$)/.test(text)) return null;
+  // `vite build` serves nothing; `vite`, `vite dev`, `vite serve`, `vite preview` do.
+  if (/(^|[\s&;|(])vite\s+build\b/.test(text)) return null;
+  return bin === "npm" ? "npm-script" : "script";
+}
+
+/** The command line to run, with Vite's flags added where it is Vite. */
+function buildCommand(argv, cwd, port, id) {
+  const vite = detectVite(argv, cwd);
+  if (!vite) return { command: argv.map(shellWord).join(" "), vite: false };
+  const extra = ["--base", `/a/${id}/`, "--port", String(port), "--strictPort", "--host", "127.0.0.1"];
+  // npm hands a script its own arguments only after a `--`.
+  const words = vite === "npm-script" && !argv.includes("--") ? [...argv, "--", ...extra] : [...argv, ...extra];
+  return { command: words.map(shellWord).join(" "), vite: true };
+}
+
+/** Resolve an app from an id or a port. */
+async function findApp(arg) {
+  const apps = await call("GET", "/api/apps");
+  if (/^\d+$/.test(arg)) {
+    const port = portArg(arg);
+    return { apps, app: apps.find((a) => a.port === port) ?? null, port };
+  }
+  return { apps, app: apps.find((a) => a.id === arg) ?? null, port: null };
+}
+
+async function publicOrigin() {
+  try {
+    const health = await call("GET", "/api/health");
+    return health.publicUrl ?? "";
+  } catch {
+    return "";
+  }
+}
+
+async function link(app) {
+  return `${await publicOrigin()}/a/${app.id}/`;
+}
+
+/** Does anything answer HTTP on the port yet? Any status counts: the app is up. */
+function answers(port) {
+  return new Promise((resolve) => {
+    const req = http.request({ host: "127.0.0.1", port, method: "GET", path: "/", timeout: 3000 }, (res) => {
+      res.resume();
+      resolve(true);
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
+async function waitUp(port, timeoutS) {
+  const deadline = Date.now() + timeoutS * 1000;
+  while (Date.now() < deadline) {
+    if (await answers(port)) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+/** Who is asking, for the toast: the agent in this pane, as the bridge can tell. */
+function openBody(extra = {}) {
+  const body = { ...extra };
+  if (process.env.HERDR_PANE_ID) body.paneId = process.env.HERDR_PANE_ID;
+  if (process.env.AGENTBOX_PREVIEW_BY) body.by = process.env.AGENTBOX_PREVIEW_BY;
+  return body;
+}
+
+async function launch(app, opts) {
+  const started = await call("POST", `/api/apps/${app.id}/restart`, { workspaceId: process.env.HERDR_WORKSPACE_ID });
+  process.stderr.write(`starting ${app.name} on port ${app.port} (herdr pane ${started.paneId})\n`);
+  if (!(await waitUp(app.port, opts.timeout))) {
+    let tail = "";
+    try {
+      tail = (await call("GET", `/api/apps/${app.id}/output?paneId=${encodeURIComponent(started.paneId)}&lines=40`)).text;
+    } catch {
+      // the pane is gone too
+    }
+    process.stderr.write(`${app.name} did not answer on port ${app.port} within ${opts.timeout}s. Its last output:\n${tail.trimEnd()}\n`);
+    process.stderr.write(`The app is registered as ${app.id}; fix the command and run agentbox-preview start again, or agentbox-preview stop ${app.id}.\n`);
+    process.exit(5);
+  }
+  if (opts.open) await call("POST", `/api/apps/${app.id}/open`, openBody());
+  process.stdout.write(`${await link(app)}\n`);
+  process.stdout.write(`id: ${app.id}  port: ${app.port}${opts.open ? "  (showing in the owner's Preview)" : ""}\n`);
+}
+
+async function cmdStart(argv) {
+  const dash = argv.indexOf("--");
+  const own = dash === -1 ? argv : argv.slice(0, dash);
+  const command = dash === -1 ? [] : argv.slice(dash + 1);
+  const { opts, rest } = options(own, ["--name", "--port", "--cwd", "--timeout"], ["--pin", "--no-open"]);
+  if (rest.length || command.length === 0) throw new Fail("usage: agentbox-preview start [options] -- <command…>");
+  const cwd = path.resolve(opts.cwd ?? process.cwd());
+  try {
+    if (!statSync(cwd).isDirectory()) throw new Error();
+  } catch {
+    throw new Fail(`not a folder: ${cwd}`);
+  }
+  const timeout = opts.timeout === undefined ? DEFAULT_TIMEOUT_S : Number(opts.timeout);
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new Fail("--timeout must be seconds");
+  const port = opts.port === undefined ? await freePort() : portArg(opts.port);
+  if (await answers(port)) throw new Fail(`something is already serving on port ${port}; use agentbox-preview open ${port}`);
+
+  // The same app again, when this folder and port already have one: a
+  // restarted dev server keeps its URL (and whatever the owner shared).
+  const apps = await call("GET", "/api/apps");
+  let app = apps.find((a) => a.port === port && (a.cwd === cwd || !a.command));
+  const name = opts.name ?? app?.name ?? path.basename(cwd);
+  if (!app) app = await call("POST", "/api/apps", { port, name, cwd, pinned: opts.pin === true });
+  const built = buildCommand(command, cwd, port, app.id);
+  app = await call("PATCH", `/api/apps/${app.id}`, {
+    name,
+    cwd,
+    command: built.command,
+    keepPrefix: built.vite,
+    ...(opts.pin ? { pinned: true } : {}),
+  });
+  await launch(app, { timeout, open: opts["no-open"] !== true });
+}
+
+async function cmdOpen(argv) {
+  const { opts, rest } = options(argv, ["--path", "--name"]);
+  const arg = rest[0];
+  if (!arg) throw new Fail("usage: agentbox-preview open <port|id> [--path /x]");
+  let { app, port } = await findApp(arg);
+  if (!app) {
+    if (port === null) throw new Fail(`no app ${arg}`, 2);
+    if (!(await answers(port))) throw new Fail(`nothing is serving on port ${port}; start it with agentbox-preview start -- <command>`);
+    app = await call("POST", "/api/apps", { port, name: opts.name ?? `port ${port}`, cwd: process.cwd() });
+  }
+  const pathArg = opts.path ? (opts.path.startsWith("/") ? opts.path : `/${opts.path}`) : undefined;
+  await call("POST", `/api/apps/${app.id}/open`, openBody(pathArg ? { path: pathArg } : {}));
+  process.stdout.write(`${await link(app)}\n`);
+  process.stdout.write(`id: ${app.id}  port: ${app.port}  (showing in the owner's Preview)\n`);
+}
+
+async function cmdStatic(argv) {
+  const { opts, rest } = options(argv, ["--name", "--port", "--timeout"], ["--pin", "--no-open"]);
+  const dir = rest[0];
+  if (!dir) throw new Fail("usage: agentbox-preview static <dir> [--name n] [--port p] [--pin]");
+  const root = path.resolve(dir);
+  try {
+    if (!statSync(root).isDirectory()) throw new Error();
+  } catch {
+    throw new Fail(`not a folder: ${root}`);
+  }
+  const self = realpathSync(process.argv[1]);
+  const passOn = [];
+  if (opts.name) passOn.push("--name", opts.name);
+  else passOn.push("--name", path.basename(root));
+  if (opts.port) passOn.push("--port", opts.port);
+  if (opts.timeout) passOn.push("--timeout", opts.timeout);
+  if (opts.pin) passOn.push("--pin");
+  if (opts["no-open"]) passOn.push("--no-open");
+  await cmdStart([...passOn, "--cwd", root, "--", self, "serve-static", root]);
+}
+
+const TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".map": "application/json",
+  ".pdf": "application/pdf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+};
+
+/**
+ * The built-in static server `static` runs: a folder on $PORT at 127.0.0.1,
+ * `index.html` for a directory, nothing outside the folder (by path and by
+ * symlink).
+ */
+function serveStatic(argv) {
+  const root = realpathSync(path.resolve(argv[0] ?? "."));
+  const port = portArg(process.env.PORT ?? "");
+  const server = http.createServer((req, res) => {
+    const fail = (status, text) => {
+      res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+      res.end(`${text}\n`);
+    };
+    if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "method not allowed");
+    let rel;
+    try {
+      rel = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname);
+    } catch {
+      return fail(400, "bad path");
+    }
+    let file = path.join(root, path.normalize(rel));
+    try {
+      file = realpathSync(file);
+      if (file !== root && !file.startsWith(root + path.sep)) return fail(404, "not found");
+      if (statSync(file).isDirectory()) {
+        if (!rel.endsWith("/")) {
+          res.writeHead(301, { location: `${rel}/` });
+          return res.end();
+        }
+        file = realpathSync(path.join(file, "index.html"));
+        if (!file.startsWith(root + path.sep)) return fail(404, "not found");
+      }
+      const stat = statSync(file);
+      res.writeHead(200, {
+        "content-type": TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+        "content-length": String(stat.size),
+        "cache-control": "no-cache",
+      });
+      if (req.method === "HEAD") return res.end();
+      createReadStream(file).pipe(res);
+    } catch {
+      return fail(404, "not found");
+    }
+  });
+  server.listen(port, process.env.HOST || "127.0.0.1", () => {
+    process.stdout.write(`serving ${root} on http://127.0.0.1:${port}\n`);
+  });
+}
+
+async function cmdList(argv) {
+  const { opts } = options(argv, [], ["--json"]);
+  const apps = await call("GET", "/api/apps");
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(apps, null, 2)}\n`);
+    return;
+  }
+  if (apps.length === 0) {
+    process.stdout.write("no apps — agentbox-preview start -- <command>\n");
+    return;
+  }
+  for (const a of apps) {
+    const state = a.live?.listening ? "serving" : "stopped";
+    const shared = a.visibility.mode === "private" ? "private" : a.visibility.mode === "link" ? "public" : "passcode";
+    process.stdout.write(`${a.id}  :${a.port}  ${state.padEnd(7)}  ${shared.padEnd(8)}  ${a.name}${a.pinned ? "  (pinned)" : ""}\n`);
+  }
+}
+
+async function cmdUrl(argv) {
+  const arg = argv[0];
+  if (!arg) throw new Fail("usage: agentbox-preview url <port|id>");
+  const { app } = await findApp(arg);
+  if (!app) throw new Fail(`no app ${arg}`, 2);
+  process.stdout.write(`${await link(app)}\n`);
+}
+
+async function cmdStop(argv) {
+  const arg = argv[0];
+  if (!arg) throw new Fail("usage: agentbox-preview stop <port|id>");
+  const { app } = await findApp(arg);
+  if (!app) throw new Fail(`no app ${arg}`, 2);
+  const res = await call("POST", `/api/apps/${app.id}/stop`, { remove: true });
+  process.stdout.write(`${res.stopped ? "stopped" : "nothing was serving"}; removed ${app.name} (${app.id})\n`);
+}
+
+const [command, ...argv] = process.argv.slice(2);
+
+if (!command || command === "--help" || command === "-h" || command === "help") {
+  process.stdout.write(`${USAGE}\n`);
+  process.exit(command ? 0 : 1);
+}
+
+if (command === "serve-static") {
+  try {
+    serveStatic(argv);
+  } catch (err) {
+    die(err);
+  }
+} else {
+  const commands = { start: cmdStart, open: cmdOpen, static: cmdStatic, list: cmdList, url: cmdUrl, stop: cmdStop };
+  const run = commands[command];
+  if (!run) die(new Fail(`unknown command: ${command} (try --help)`));
+  run(argv).catch(die);
+}

@@ -30,6 +30,9 @@ export function registerApiRoutes(
     homeRoot: config.homeRoot,
     // Whether the Preview panel offers Share: the gate decides, this repeats it.
     sharing: deps.sharing?.() ?? false,
+    // The origin people browse to, when configured: agentbox-preview prints
+    // an app's link on it.
+    publicUrl: config.publicUrl,
   }));
 
   app.get("/api/session", () => hub.snapshot());

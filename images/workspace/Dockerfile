@@ -131,6 +131,15 @@ RUN set -eu; \
         [ -n "$a" ] && install_agent "$a"; \
     done; true
 
+# What every agent is told about the box, always: Claude Code reads its managed
+# (policy) memory from /etc/claude-code/CLAUDE.md on Linux — the path its own
+# binary names for the Managed memory type — so it ships with the image and
+# changes with it; the entrypoint writes the same text as a managed block into
+# Codex's ~/.codex/AGENTS.md.
+COPY images/workspace/agents.md /etc/claude-code/CLAUDE.md
+COPY images/workspace/agents.md /usr/local/share/agentbox/agents.md
+RUN chmod 0644 /etc/claude-code/CLAUDE.md /usr/local/share/agentbox/agents.md
+
 # Keep user-installed npm binaries on PATH for login shells too.
 RUN printf '%s\n' \
         'export NPM_CONFIG_PREFIX=/home/coder/.npm-global' \
@@ -167,10 +176,11 @@ COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
 
 COPY --chown=1000:1000 images/workspace/agentbox-workbench /usr/local/bin/agentbox-workbench
 COPY --chown=1000:1000 images/workspace/agentbox-review /usr/local/bin/agentbox-review
+COPY --chown=1000:1000 images/workspace/agentbox-preview /usr/local/bin/agentbox-preview
 COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 
-# The Review skill, so an agent discovers the loop without being told. /home is
+# The Review and Preview skills, so an agent discovers each loop without being told. /home is
 # a volume at runtime and would shadow anything installed into it, so it is
 # staged here and the entrypoint copies it into place on every start.
 COPY --chown=1000:1000 images/workspace/skills /usr/local/share/agentbox/skills
