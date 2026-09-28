@@ -331,7 +331,8 @@ describe("the sign-in page", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
-    expect(res.headers["content-security-policy"]).toContain("frame-ancestors 'self'");
+    // Never framed, even same-origin: sandbox-served pages share the origin.
+    expect(res.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     expect(res.body).toContain('name="next" value="/vscode/"');
     expect(res.body).toContain('action="/_gate/login"');
   });

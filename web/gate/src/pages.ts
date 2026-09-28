@@ -15,7 +15,11 @@ export const PAGE_CSP = [
   "font-src 'self'",
   "connect-src 'self'",
   "form-action 'self'",
-  "frame-ancestors 'self'",
+  // Never framed, not even by this origin: the app and code-server are served
+  // from the sandbox, and a compromised sandbox framing the sign-in or device
+  // page could overlay it, or watch what is typed by clickjacking. The app
+  // sends a lost session to /login at the top level.
+  "frame-ancestors 'none'",
   "base-uri 'none'",
 ].join("; ");
 

@@ -370,6 +370,18 @@ lookalike prompt and read a password typed into it while it runs. With
 internet egress it can also publish itself through a tunnel of its own; that
 was always true (see "Egress filtering").
 
+That includes the app's Settings screens. The forms that change the password,
+turn two-factor on or off and revoke device tokens are part of the app, which
+the bridge serves from inside the sandbox: a compromised sandbox could read
+what you type there (the current password, a new one, a code). The gate's own
+pages — `/login` and the device-approval page — are served by the gate and
+can never be framed, not even by the box's own origin. **If you suspect the
+sandbox, do not type the password into the app at all: change it on the host
+with `./scripts/agentbox passwd`**, which never touches the sandbox, and end
+every session and token with `./scripts/agentbox gate revoke-all`. When you
+sign in again, open `/login` in a fresh tab you typed the address into, not
+one the app opened.
+
 What the gate guarantees regardless:
 
 - nothing reaches the sandbox without a session or a device token;
