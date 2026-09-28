@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { summarise, UploadQueue, type TransportError, type UploadTransport } from "./upload-queue.ts";
+import { humane, summarise, UploadQueue, type TransportError, type UploadTransport } from "./upload-queue.ts";
 
 /** A server in memory: sessions, received bytes, files that exist. */
 class FakeServer implements UploadTransport {
@@ -112,7 +112,7 @@ describe("UploadQueue", () => {
     const q = new UploadQueue(server, { ...quick, retries: 2 });
     q.add([{ file: blob(5), dest: "/w/a" }]);
     await settle(q);
-    expect(q.items[0]).toMatchObject({ state: "error", error: "network" });
+    expect(q.items[0]).toMatchObject({ state: "error", error: "The connection dropped." });
     q.retry(q.items[0]!.id);
     server.failPuts.clear();
     await settle(q);
@@ -181,6 +181,74 @@ describe("UploadQueue", () => {
     expect(q.items[0]!.state).toBe("cancelled");
     expect(server.cancelled).toEqual(["up1"]);
     expect(server.puts).toBe(0);
+  });
+
+  it("keeps a late answer from a cancelled run away from the retry that replaced it", async () => {
+    const server = new FakeServer();
+    const put = server.put.bind(server);
+    let hold: (() => void) | null = null;
+    let first = true;
+    server.put = async (...args) => {
+      if (first) {
+        first = false;
+        // The first chunk's answer is slow: it arrives after cancel and retry.
+        await new Promise<void>((r) => (hold = r));
+      }
+      return put(...args);
+    };
+    const q = new UploadQueue(server, quick);
+    q.add([{ file: blob(20), dest: "/w/raced" }]);
+    await new Promise((r) => setTimeout(r, 0));
+    const id = q.items[0]!.id;
+    q.cancel(id);
+    q.retry(id);
+    await settle(q);
+    // The retry ran on a session of its own and finished.
+    expect(q.items[0]).toMatchObject({ state: "done", sent: 20 });
+    expect(server.cancelled).toEqual(["up1"]);
+    // Now the old run's answer arrives: it must change nothing.
+    hold!();
+    await settle(q);
+    expect(q.items[0]).toMatchObject({ state: "done", sent: 20 });
+    expect(server.files.get("/w/raced")).toBe(20);
+  });
+
+  it("asks again when finishing's answer was lost, since finishing twice is harmless", async () => {
+    const server = new FakeServer();
+    const finish = server.finish.bind(server);
+    let lost = 1;
+    server.finish = async (id) => {
+      await finish(id);
+      if (lost-- > 0) throw err(0, undefined, "network");
+    };
+    const q = new UploadQueue(server, quick);
+    q.add([{ file: blob(5), dest: "/w/landed" }]);
+    await settle(q);
+    expect(q.items[0]!.state).toBe("done");
+  });
+
+  it("lets failed files be dismissed, together or one at a time", async () => {
+    const server = new FakeServer();
+    for (let i = 1; i < 50; i++) server.failPuts.add(i);
+    const q = new UploadQueue(server, { ...quick, retries: 0 });
+    q.add([
+      { file: blob(5), dest: "/w/a" },
+      { file: blob(5), dest: "/w/b" },
+      { file: blob(0), dest: "/w/c" },
+    ]);
+    await settle(q);
+    expect(q.items.map((i) => i.state).sort()).toEqual(["done", "error", "error"]);
+    q.remove(q.items.find((i) => i.state === "error")!.id);
+    expect(q.items).toHaveLength(2);
+    q.clearFinished();
+    expect(q.items).toHaveLength(0);
+  });
+
+  it("says what went wrong without the box's paths", () => {
+    expect(humane({ status: 409, code: "is-a-directory", message: "/workspace/secret/x is a directory" })).toBe("A folder already has this name.");
+    expect(humane({ status: 507, code: "no-space", message: "not enough space left on the volume" })).toBe("Not enough space left on the box.");
+    expect(humane({ status: 400, message: "/tmp/workbench/whatever is odd" })).not.toContain("/");
+    expect(humane({ status: 0, message: "x" })).toBe("The connection dropped.");
   });
 
   it("makes empty folders from a dropped tree", async () => {

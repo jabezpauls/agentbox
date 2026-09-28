@@ -56,10 +56,16 @@ function Row({ item }: { item: UploadItem }) {
           <RotateCw size={13} />
         </button>
       )}
-      {live && (
+      {live ? (
         <button className="icon-btn is-sm" aria-label={`Cancel ${item.name}`} title="Cancel" onClick={() => uploads.cancel(item.id)}>
           <X size={13} />
         </button>
+      ) : (
+        item.state !== "conflict" && (
+          <button className="icon-btn is-sm up-remove" aria-label={`Remove ${item.name} from the list`} title="Remove from the list" onClick={() => uploads.remove(item.id)}>
+            <X size={13} />
+          </button>
+        )
       )}
     </li>
   );
@@ -115,9 +121,13 @@ export function UploadPanel() {
           </button>
         )}
       </header>
-      <div className="progress uploads-total" role="progressbar" aria-label="All uploads" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-        <span className="progress-fill" style={{ width: `${pct}%` }} />
-      </div>
+      {busy ? (
+        <div className="progress uploads-total" role="progressbar" aria-label="All uploads" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <span className="progress-fill" style={{ width: `${pct}%` }} />
+        </div>
+      ) : (
+        <div className={`uploads-rule${s.errors ? " is-error" : ""}`} aria-hidden="true" />
+      )}
       {!collapsed && (
         <>
           {s.conflicts > 1 && (

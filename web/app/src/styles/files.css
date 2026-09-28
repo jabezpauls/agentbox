@@ -890,6 +890,21 @@
   flex: none;
   margin: 0 var(--sp-4) var(--sp-2);
 }
+/* Once nothing is moving, a rule in the outcome's colour replaces the bar:
+   a full blue bar over failed files would say the opposite of what happened. */
+.uploads-rule {
+  flex: none;
+  height: 2px;
+  margin: 0 var(--sp-4) var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--success);
+}
+.uploads-rule.is-error {
+  background: var(--danger);
+}
+.up-row.is-error {
+  background: var(--danger-soft);
+}
 .uploads-conflicts {
   display: flex;
   align-items: center;
@@ -955,6 +970,12 @@
 .up-row > .icon-btn {
   grid-column: 2;
   grid-row: 1;
+}
+.up-row > .icon-btn + .icon-btn {
+  grid-column: 3;
+}
+.up-row:has(.icon-btn + .icon-btn) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 .uploads.is-collapsed .uploads-total {
   margin-bottom: var(--sp-3);

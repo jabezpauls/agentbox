@@ -79,6 +79,14 @@ interface Job {
   /** Numbered-name attempt, for Keep both; 1 until it is chosen. */
   rename: number;
   abort: AbortController | null;
+  /**
+   * Which run of this file is current. Cancelling or retrying starts a new
+   * one; a run that wakes from an await to find it is no longer current
+   * touches nothing — above all not a newer run's session.
+   */
+  run: number;
+  /** The session is gone on the box; a retry starts a new one. */
+  lost: boolean;
 }
 
 const DEFAULT_CHUNK = 8 * 1024 * 1024;
@@ -147,6 +155,8 @@ export class UploadQueue {
         original: basename(dest),
         rename: 1,
         abort: null,
+        run: 0,
+        lost: false,
       });
     }
     this.emit();
@@ -165,29 +175,32 @@ export class UploadQueue {
       if (!job) return;
       this.running++;
       this.update(job, { state: "uploading", error: undefined });
-      void this.run(job).finally(() => {
+      const token = ++job.run;
+      void this.run(job, token).finally(() => {
         this.running--;
         this.pump();
       });
     }
   }
 
-  private async run(job: Job): Promise<void> {
+  /** True while `token` is the file's current run and it has not been cancelled. */
+  private live(job: Job, token: number): boolean {
+    return job.run === token && job.item.state !== "cancelled";
+  }
+
+  private async run(job: Job, token: number): Promise<void> {
     try {
       if (!job.uploadId) {
+        let id: string;
         try {
-          job.uploadId = (await this.transport.start(job.item.dest, job.item.size, job.overwrite)).uploadId;
-          // Cancelled while the session was being made: it is not wanted.
-          if (this.cancelled(job)) {
-            void this.transport.cancel(job.uploadId).catch(() => {});
-            return;
-          }
+          id = (await this.transport.start(job.item.dest, job.item.size, job.overwrite)).uploadId;
         } catch (err) {
+          if (!this.live(job, token)) return;
           if (isTransportError(err) && err.status === 409 && err.code === "exists") {
             if (job.rename > 1) {
               // Keep both: that number is taken too; try the next.
               job.rename++;
-              if (job.rename > 50) this.update(job, { state: "error", error: "No free name was found." });
+              if (job.rename > 50) this.update(job, { state: "error", error: "No free name was found for it." });
               else this.rename(job, job.rename, "queued");
               return;
             }
@@ -196,17 +209,43 @@ export class UploadQueue {
           }
           throw err;
         }
+        // Cancelled (or retried) while the session was being made: this
+        // session is not wanted by anyone.
+        if (!this.live(job, token)) {
+          void this.transport.cancel(id).catch(() => {});
+          return;
+        }
+        job.uploadId = id;
+        job.lost = false;
       }
-      await this.send(job);
-      if (this.cancelled(job)) return;
+      if (!(await this.send(job, token))) return;
       this.update(job, { state: "finishing" });
-      await this.transport.finish(job.uploadId);
-      this.update(job, { state: "done", sent: job.item.size });
+      if (!(await this.finish(job, token))) return;
+      this.update(job, { state: "done", sent: job.item.size, error: undefined });
       for (const fn of this.completeListeners) fn(job.item);
     } catch (err) {
-      if (this.cancelled(job)) return;
-      const message = isTransportError(err) ? err.message : err instanceof Error ? err.message : String(err);
-      this.update(job, { state: "error", error: message });
+      if (!this.live(job, token)) return;
+      if (isTransportError(err) && err.status === 404) job.lost = true;
+      this.update(job, { state: "error", error: humane(err) });
+    }
+  }
+
+  /**
+   * Move the finished file into place. Finishing is idempotent on the box, so
+   * an answer lost on the way back is asked for again rather than failing a
+   * file that has in fact landed.
+   */
+  private async finish(job: Job, token: number): Promise<boolean> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.transport.finish(job.uploadId!);
+        return this.live(job, token);
+      } catch (err) {
+        if (!this.live(job, token)) return false;
+        if (!retryable(err) || attempt > this.retries) throw err;
+        await this.sleep(this.backoff(attempt));
+        if (!this.live(job, token)) return false;
+      }
     }
   }
 
@@ -215,15 +254,14 @@ export class UploadQueue {
     this.update(job, { name, dest: join(dirname(job.item.dest), name), ...(state ? { state } : {}) });
   }
 
-  private cancelled(job: Job): boolean {
-    return job.item.state === "cancelled";
-  }
 
-  private async send(job: Job): Promise<void> {
+
+  /** Send the rest of the file. False when the run stopped being current. */
+  private async send(job: Job, token: number): Promise<boolean> {
     let offset = job.item.sent;
     let failures = 0;
     while (offset < job.item.size) {
-      if (this.cancelled(job)) return;
+      if (!this.live(job, token)) return false;
       const end = Math.min(job.item.size, offset + this.chunk);
       const abort = new AbortController();
       job.abort = abort;
@@ -233,44 +271,48 @@ export class UploadQueue {
           job.uploadId!,
           offset,
           job.file.slice(offset, end),
-          (loaded) => this.update(job, { sent: Math.min(job.item.size, base + loaded) }),
+          (loaded) => this.live(job, token) && this.update(job, { sent: Math.min(job.item.size, base + loaded) }),
           abort.signal,
         );
+        if (!this.live(job, token)) return false;
         offset = res.received;
         failures = 0;
-        this.update(job, { sent: offset });
+        this.update(job, { sent: offset, error: undefined });
       } catch (err) {
-        if (this.cancelled(job)) return;
+        if (!this.live(job, token)) return false;
         if (isTransportError(err) && err.status === 409 && err.code?.startsWith("offset:")) {
           // The server has a different amount than we thought: resume there.
           offset = Number(err.code.slice("offset:".length));
           this.update(job, { sent: offset });
           continue;
         }
-        const retryable = !isTransportError(err) || err.status === 0 || err.status >= 500 || err.status === 429;
         failures++;
-        if (!retryable || failures > this.retries) throw err;
+        if (!retryable(err) || failures > this.retries) throw err;
         this.update(job, { error: "Connection interrupted. Retrying…" });
         await this.sleep(this.backoff(failures));
-        if (this.cancelled(job)) return;
+        if (!this.live(job, token)) return false;
         try {
           offset = (await this.transport.status(job.uploadId!)).received;
         } catch {
           // Keep our own idea of the offset; the next put corrects it if wrong.
         }
+        if (!this.live(job, token)) return false;
         this.update(job, { sent: offset, error: undefined });
       } finally {
-        job.abort = null;
+        if (job.abort === abort) job.abort = null;
       }
     }
+    return this.live(job, token);
   }
 
   cancel(id: string): void {
     const job = this.jobs.find((j) => j.item.id === id);
-    if (!job || job.item.state === "done" || job.item.state === "cancelled") return;
+    if (!job || job.item.state === "done" || job.item.state === "cancelled" || job.item.state === "skipped") return;
+    job.run++;
     this.update(job, { state: "cancelled", error: undefined });
     job.abort?.abort();
     if (job.uploadId) void this.transport.cancel(job.uploadId).catch(() => {});
+    job.uploadId = null;
   }
 
   cancelAll(): void {
@@ -280,9 +322,10 @@ export class UploadQueue {
   retry(id: string): void {
     const job = this.jobs.find((j) => j.item.id === id);
     if (!job || (job.item.state !== "error" && job.item.state !== "cancelled")) return;
-    // A cancelled session is gone on the server; start a new one.
-    if (job.item.state === "cancelled") {
+    // A cancelled or lost session is gone on the box; start a new one.
+    if (job.item.state === "cancelled" || job.lost || !job.uploadId) {
       job.uploadId = null;
+      job.lost = false;
       job.item = { ...job.item, sent: 0 };
     }
     this.update(job, { state: "queued", error: undefined });
@@ -310,11 +353,42 @@ export class UploadQueue {
     for (const j of this.jobs.filter((x) => x.item.state === "conflict")) this.resolve(j.item.id, choice);
   }
 
-  /** Drop finished, skipped and cancelled files from the list. */
+  /** Drop everything that is over — landed, skipped, cancelled or failed — from the list. */
   clearFinished(): void {
-    this.jobs = this.jobs.filter((j) => !["done", "skipped", "cancelled"].includes(j.item.state));
+    this.jobs = this.jobs.filter((j) => !["done", "skipped", "cancelled", "error"].includes(j.item.state));
     this.emit();
   }
+
+  /** Take one file off the list, stopping it first if it is still going. */
+  remove(id: string): void {
+    this.cancel(id);
+    this.jobs = this.jobs.filter((j) => j.item.id !== id);
+    this.emit();
+  }
+}
+
+/** Worth trying again: the network, or the box having a moment. */
+function retryable(err: unknown): boolean {
+  return !isTransportError(err) || err.status === 0 || err.status >= 500 || err.status === 429;
+}
+
+/**
+ * What went wrong, in words, for the uploads panel. Never the box's own
+ * sentence, which names absolute paths on the box.
+ */
+export function humane(err: unknown): string {
+  if (!isTransportError(err)) return "Something went wrong on the way.";
+  const code = err.code ?? "";
+  if (err.status === 0) return "The connection dropped.";
+  if (code === "no-space" || err.status === 507) return "Not enough space left on the box.";
+  if (code === "is-a-directory") return "A folder already has this name.";
+  if (code === "too-large" || err.status === 413) return "A piece was larger than the box accepts.";
+  if (code === "exists") return "Something already has this name.";
+  if (code === "read-only" || err.status === 403) return "The box does not allow writing there.";
+  if (err.status === 404) return "The upload was lost on the box. Retry to start it again.";
+  if (err.status === 429) return "The box is busy. Try again in a moment.";
+  if (err.status >= 500) return "The box ran into a problem. Try again in a moment.";
+  return "The box refused this file.";
 }
 
 export interface UploadSummary {
