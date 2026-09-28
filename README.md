@@ -37,7 +37,9 @@ credentials from everything it passes on. See
 `/workbench` is a browser client for [herdr](https://github.com/herdrdev/herdr),
 the agent multiplexer in the image. It shows every agent across every
 workspace at once, each in a live terminal, with the web apps they build
-previewable beside them and the same `Ctrl+B` keymap the TUI uses. herdr owns
+running in a Preview panel beside them — ask an agent to "put it in my
+preview" — and the same `Ctrl+B` keymap the TUI uses. Each app has its own
+address on the box, private until you share it. herdr owns
 the session, so closing the tab detaches instead of killing, and `/terminal`
 is the same session seen from a keyboard.
 

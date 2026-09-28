@@ -25,7 +25,7 @@ prints the resolved command before it runs anything.
 | `--edge-network <name>` | `edge-prod` | traefik: the external network your Traefik already watches. |
 | `--cert-resolver <name>` | `letsencrypt` | traefik: the Traefik certificate resolver for this host. |
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
-| `--preview <off\|path>` | `path` | Kept so older commands still run. Public `/s/<token>` shares are off; see [Signing in](#signing-in). |
+| `--sharing <on\|off>` | `on` | Whether you may share an app from the Preview panel (anyone with the link, or a passcode, for as long as you choose). `off` keeps every app private. `--preview path\|off`, its old name, still works. See [sharing apps](workbench.md#sharing-an-app). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
 | `--real-ip-header <name>` | none | behind-proxy/traefik: a header your own proxy writes the visitor's address into and overwrites on every request (e.g. `X-Real-IP`), read before `X-Forwarded-For`. Rarely needed; see [behind-proxy](#if-something-already-serves-ports-80-and-443). |
 | `--agents <list>` | `claude,codex` | Which coding agents to build into the image, comma-separated (`claude`, `codex`). `herdr` is always installed. |
@@ -172,10 +172,12 @@ every device token at once — a lost laptop, say:
 ./scripts/agentbox gate revoke-all
 ```
 
-**Public sharing is off.** The old `/s/<token>` share links and per-port preview
-hostnames were decided inside the sandbox, which must not decide who gets in,
-so they no longer open without a session. Sharing returns as app sharing
-decided by the gate.
+**Sharing apps.** Every app has its own address, `/a/<id>/`, open to you
+alone until you share it from the Preview panel: to anyone with the link, or
+with a passcode, until a time you choose or until you stop. Who may open an app
+is decided by the gate, outside the sandbox, so an agent cannot make one public;
+`--sharing off` turns sharing off for the box. See [apps](workbench.md#apps)
+and [the security model](security.md#apps).
 
 ## If something already serves ports 80 and 443
 
@@ -267,8 +269,10 @@ and the proxy stops authenticating. What changes for you:
   they are ignored, and never reach the sandbox.
 - The editor moved from `/` to `/vscode/`.
 - Public `/s/<token>` links stop opening, and per-port preview hostnames are
-  gone. `AGENTBOX_PREVIEW_DOMAIN` can be deleted from `.env`; the wildcard DNS
-  record and any route for it on a fronting proxy can go too.
+  gone: apps (`/a/<id>/`) replace both, and are shared from the Preview panel.
+  `AGENTBOX_PREVIEW_DOMAIN` can be deleted from `.env`; the wildcard DNS
+  record and any route for it on a fronting proxy can go too. The old
+  `AGENTBOX_PREVIEW_MODE` becomes `AGENTBOX_SHARING` on the next update.
 - Whose address sign-in limits count is now worked out by Caddy (see
   [behind-proxy](#if-something-already-serves-ports-80-and-443) and
   [traefik mode](#traefik-mode)), and the new `AGENTBOX_CLOUDFLARE` setting

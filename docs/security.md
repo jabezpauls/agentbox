@@ -24,13 +24,17 @@ over the host.
 - The other sandbox services. `terminal`, `shell`, `monitor` and `workbench`
   share the `code` container's network and PID namespaces, so
   `localhost` and the process table are common to all of them. This is
-  deliberate: a dev server an agent starts in one pane is previewable from the
-  others. The shared namespaces belong to sandbox containers only; nothing
-  about the host boundary changes.
-- The gate's listener, on the internal network, exactly as an anonymous visitor
-  would: the sign-in page, rate-limited sign-in, and nothing else. It is keyed
-  on its own address there and cannot claim another, and it cannot read or
-  write the gate's store. It cannot reach the proxy at all.
+  deliberate: a dev server an agent starts in one pane is reachable as an app
+  from the others. The shared namespaces belong to sandbox containers only;
+  nothing about the host boundary changes.
+- The gate's public listener (:7900), on the internal network, exactly as an
+  anonymous visitor would: the sign-in page, rate-limited sign-in, a shared
+  app, and nothing else. It is keyed on its own address there and cannot
+  claim another, and it cannot read or write the gate's store. It cannot
+  reach the proxy at all.
+- The gate's app API (:7901), which is the sandbox's side of the app
+  registry: it can register, change and remove apps — always private, never on
+  one of agentbox's own ports — and nothing else (see "Apps" below).
 
 ## The front door
 
@@ -66,10 +70,12 @@ proxy.
   spelling is both routed and forwarded: `/ws/%65ditor` is `/ws/editor` to
   every layer. Then, on that path: `/login` and the gate's own `/_gate/*` API,
   exactly `/cli/install` and `/cli/agentbox.mjs` (the CLI, below) and the
-  device-approval page stay in the gate; `/vscode/*` goes to code-server with
-  the prefix stripped; `/terminal`, `/shell` and `/monitor` go to their ttyd
-  services unchanged; everything else goes to the bridge unchanged.
-- **One exemption, for filenames.** A WebDAV client names files in the path,
+  device-approval page stay in the gate; `/a/<id>/…` is an app, decided by the
+  app policy (below) and served from the bridge's data plane; `/vscode/*` goes
+  to code-server with the prefix stripped; `/terminal`, `/shell` and
+  `/monitor` go to their ttyd services unchanged; everything else goes to the
+  bridge unchanged.
+- **Two exemptions, for names that are not the box's.** A WebDAV client names files in the path,
   and a filename may hold `;`, a backslash or `%5c`. So under `/api/dav/` the
   gate judges only that exact prefix: the rest of the path is not held to the
   check above, and the request goes to the bridge, raw and unchanged, and
@@ -78,7 +84,13 @@ proxy.
   ttyd service; the bridge's WebDAV handler then judges each segment itself
   and confines every name to the workspace. Anything that merely resembles the
   prefix (`/api/davx`, `//api/dav/`, `/api%2fdav/`) is judged whole, and the
-  mount is behind sign-in like everything else.
+  mount is behind sign-in like everything else. Likewise an app's own URLs
+  under `/a/<id>/` (an app may use `%2F` or `;` in its paths): only that
+  prefix, with a well-formed id, is judged, and the rest goes to the data
+  plane — which takes the port from the gate's record and hands the rest of
+  the path to that port on the sandbox's loopback, so no spelling of it can
+  reach another service. Where a browser is sent back to after signing in is
+  held to the strict form, with neither exemption.
 - **The editor channel stays inside.** `/ws/editor` is how the editor extension
   in the sandbox hears "Open in editor"; the gate answers `404` for it and for
   anything under it, under any spelling, signed in or not, so only the
@@ -88,8 +100,9 @@ proxy.
 - **Nothing without a session or a device token.** A page load without one is
   sent to `/login?next=<where it was going>`; any other request gets `401`. The
   only routes open without one are the sign-in page and its assets, sign-in
-  itself, the two calls a device login makes (below) and the CLI download. A
-  request from the sandbox to the gate is treated as any anonymous client.
+  itself, the two calls a device login makes (below), the CLI download, and
+  an app the owner has shared (below). A request from the sandbox to the gate
+  is treated as any anonymous client.
 - **No service workers outside the editor.** A worker controls every page in
   its scope, for as long as it stays registered — one registered by a page the
   sandbox serves could answer `/login` with a lookalike. The gate refuses
@@ -212,12 +225,117 @@ proxy.
   and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing
   but their own files (`default-src 'none'`). HSTS stays with whatever
   terminates TLS.
+- **Tunnels.** `GET /_gate/tunnel?target=tcp:<port>|herdr` is a WebSocket of
+  raw bytes that `agentbox forward` and `agentbox herdr` ride. It takes a
+  device token and nothing else — a page on another site can never attach
+  one, so a browser's cookie never opens a tunnel — and reaches any port on
+  the sandbox's loopback, agentbox's own included (the token holder is the
+  owner), or herdr's socket, through the bridge's data plane. Revoking the
+  token cuts every tunnel it opened.
 - **The host's escape hatches** (`passwd`, `totp reset`, `gate unlock`,
   `gate revoke-all`) reach the running gate through a Unix socket in the gate
   container's private `/tmp`, so only a process already inside that container
   — `docker compose exec` from the host — can use them. With the gate stopped
   they edit the store directly, and refuse while any gate holds its lease on
   the volume.
+
+### Apps
+
+An app is a server in the sandbox with one URL, `/a/<id>/` on the box (the id
+is 128 random bits). The registry is the gate's, in its own store: the
+sandbox registers, changes and removes apps on the gate's :7901 listener —
+which the proxy never forwards to, and which refuses the proxy's own address —
+and every app it registers is private. Who may open an app is changed only on
+the gate's public side (`/_gate/apps/<id>/visibility`), by the owner's session
+or device token. That takes no password in the request, unlike the account
+changes above: a sandbox with internet access can publish itself through a
+tunnel of its own anyway, so a password here would guard nothing that is not
+already open, and sharing is an everyday action. What the gate guarantees is
+that nothing is public unless the owner said so, that agentbox's own services
+never are (8080, 7681–7683, 7800, 7801, 7900, 7901 and any the operator adds
+in `AGENTBOX_INFRA_PORTS` are refused as apps when registered, changed and
+served), and that app content never runs with the box's origin. The
+installer's `--sharing off` makes every app private and refuses to share any.
+
+**Who opens an app**, in order: a valid **app grant** for that app; a session
+or device token (a page load then mints a grant); anyone, when the owner
+shared it with the link and it has not expired; anyone with the passcode,
+when shared with one — the gate's own passcode page, checked against a bcrypt
+hash under the sign-in limits, and never forwarded to the app. Anything else:
+a page load is sent to sign in, and any other request gets `404` — what an
+unknown id gets, so a private app and a missing one look alike; those refusals
+cost from a per-address budget of 60 a minute, so ids cannot be enumerated.
+
+**The app grant** is cookie `__Secure-agentbox-app`: `Path=/a/<id>/;
+HttpOnly; Secure; SameSite=None`, an HMAC-signed `{app, subject, expiry}`
+under a key in the gate's store. The subject is the session, token or
+passcode it was minted from, and a grant is good only while that is: ending
+the session, revoking the token, or changing or removing the passcode voids
+it. `SameSite=None` because an app's page has an opaque origin, so every
+request it makes is cross-site; the cookie's path confines it to one app, and
+it opens nothing else — not the control plane, not another app.
+
+**The font exemption.** `@font-face` loads are CORS requests that carry no
+cookie, so a private app's own fonts would never carry its grant. A `GET` for
+a `.woff2`, `.woff`, `.ttf` or `.otf` path of an existing app is let through
+without one only when what the app answers is a font; anything else is a
+`404`. The most a leaked private id yields is a font file.
+
+**The app policy**, on every `/a/` exchange:
+
+- *Opaque origin, always.* Every response carries `Content-Security-Policy:
+  sandbox allow-scripts allow-forms allow-popups allow-modals
+  allow-downloads`, added beside any policy the app sets; the Preview panel's
+  frame has the same `sandbox` attribute, without `allow-same-origin`. The
+  page gets no access to the box's origin — its cookies, storage, API or
+  terminals — in the panel or opened full screen, and what the owner sees is
+  what a visitor sees.
+- *Credentials stay out.* The gate's cookies, `Authorization` and the
+  passcode never reach the app; the app's own cookies do.
+- *The app's cookies are its own.* `Set-Cookie` loses any `Domain`, has its
+  `Path` put under `/a/<id>`, and is forced `SameSite=None; Secure`, so an
+  app's own sign-in works in the panel and when shared, and its cookies reach
+  nothing else. A `Set-Cookie` for one of the gate's cookie names is dropped.
+- *Nothing that outlives the page.* `Service-Worker-Allowed`,
+  `Clear-Site-Data` and `Strict-Transport-Security` are dropped; a worker's
+  script is refused anyway, and an opaque origin cannot register one.
+- *CORS for its own origin alone.* A request with `Origin: null` — the app's
+  own page — is answered as credentialed CORS (`Access-Control-Allow-Origin:
+  null`, `-Credentials: true`), and the gate answers its preflights itself;
+  nothing is granted to any other origin. A state-changing request, or a
+  WebSocket, that names another site as its origin is refused (`403`): the
+  grant is `SameSite=None`, and another site's form must not ride it.
+- *Redirects stay inside.* A root-relative `Location`, or one naming the app's
+  own loopback address, is put under `/a/<id>/`.
+- *Every exchange is tracked by what let it in.* Making an app private (stop
+  sharing, or its link expiring — swept every 30 seconds, and judged on every
+  request besides), changing its passcode, or removing it cuts every
+  connection, stream and WebSocket that was let in as the public or by the
+  passcode; ending a session or revoking a token cuts what it opened.
+
+**Path fixes.** For an app written for `/`, the gate edits HTML and CSS as
+they pass (root paths prefixed, an import map, a small runtime shim, module
+scripts asked for with credentials) — see [the Workbench](workbench.md#apps).
+The shim runs inside the app's own opaque page, so it grants the page nothing
+it could not do itself. It is off per app (`compat: off`) for apps that do
+not want it.
+
+**The data plane.** The bridge listens twice: :7800, the app and its API, and
+:7801, apps and tunnels only, which the gate alone reaches (as `code:7801`
+across the internal network; the proxy is not on that network). The gate
+sends only `/a/<id>/` requests there, as `/app/<port>/…` with the port from
+its own record, and wraps every answer in the app policy — so "app content
+never reaches the box's origin unsandboxed" is a fact of routing, not of path
+matching. The data plane makes each request look local to the app (`Host`,
+`Origin`, `Referer` name `127.0.0.1:<port>`) and reaches only the sandbox's
+loopback, never one of agentbox's own ports for an app: nothing through it is
+anything a process in the sandbox could not reach already.
+
+`tests/proxy/gate-bypass.sh` proves the registry's limits, the private app's
+404, the grant's scope, the stop-sharing cut-off, the proxy's lack of reach to
+:7901 and the data plane, and the tunnel's token rule against the real gate
+image; the fidelity suite (`npm run fidelity -w app`) proves the policy in
+Chromium, Firefox and WebKit with real apps.
 
 ### What a compromised sandbox can still do
 
@@ -236,17 +354,41 @@ What the gate guarantees regardless:
   ever sent into the sandbox;
 - no persistent takeover: no service worker outside the editor, so nothing the
   sandbox serves outlives the tab or answers for the gate's pages;
-- app content runs without the box's origin in the preview panel (a sandboxed
-  frame). Opened full screen, a path preview does run on the box's origin — the
-  panel warns and asks first — until the app model, which serves every app
-  under an opaque origin, replaces path previews;
+- no app is public unless the owner made it so, from outside the sandbox, and
+  none of agentbox's own services is ever an app;
+- app content never runs with the box's origin: every app is an opaque origin,
+  in the Preview panel and full screen;
 - the changes that would keep the box or lock you out — a new device, the
   password, two-factor, revoking tokens — need the password again (and a code,
   with two-factor on), not just the session.
 
 `tests/proxy/gate-bypass.sh` runs the real Caddyfiles and the real gate image,
 wired as compose wires them, against stand-ins for every sandbox port, a real
-Traefik and a stand-in Cloudflare edge, and proves the first three.
+Traefik and a stand-in Cloudflare edge, and proves the first four.
+
+Residuals, stated plainly:
+
+- **A sandbox with egress can publish itself**, through a tunnel service of
+  its own (ngrok, cloudflared). agentbox's own front door never does it
+  without the owner; blocking the rest is egress filtering (below).
+- **`SameSite=None` grants.** The grant must be `SameSite=None` to reach an
+  app's own opaque page, so another site can make a request to
+  `/a/<id>/` that carries it. It is scoped to that one app's path and opens
+  nothing else; the gate refuses a state-changing request or a WebSocket that
+  names another site as its origin; and the other site cannot read what comes
+  back (CORS is answered for `null` only). A plain navigation or an image
+  load from another site does reach the app with the owner's grant, as a link
+  to any site that uses cookies does.
+- **A browser that blocks `SameSite=None` cookies for opaque documents** would
+  lose a private app's grant for the page's own requests, the full-screen tab
+  above all; public apps need no grant. The fidelity suite finds Chromium,
+  Firefox and WebKit all sending it (in the panel and full screen); a browser
+  set to block third-party cookies may not.
+- **Apps are not isolated from each other by origin.** Every app is its own
+  opaque origin in the browser, but they share the box's host name, so an
+  app's server-set cookies are kept apart by path (`/a/<id>/`), not by
+  origin. Apps are the owner's own code; use `agentbox forward` for an app
+  that needs an origin of its own.
 
 ## The Workbench's own surface
 
@@ -256,34 +398,15 @@ Traefik and a stand-in Cloudflare edge, and proves the first three.
 - **The RPC forwarder is an allowlist, not a passthrough.** The browser can
   call the herdr methods the app needs and nothing else; anything outside the
   list is refused before it reaches herdr.
-- **Previews only reach loopback.** `/preview/<port>/` proxies to
-  `127.0.0.1:<port>` inside the sandbox, with the port validated as a number in
-  range. It cannot be pointed at another host, and it reaches nothing the
-  sandbox could not already reach.
-- **A path preview is sandboxed in the panel.** Served under the Workbench's
-  own origin, an agent-written page could otherwise script the app, read its
-  storage and call its API as you, so the preview *iframe* deliberately omits
-  `allow-same-origin`. That protection is the iframe's: opening the same
-  preview full screen makes it a top-level document, where no sandbox applies
-  and the page really does share the Workbench's origin. The ↗ button therefore
-  warns and asks first.
-- **Previews are not handed your login.** The gate has already removed its own
-  cookies and `Authorization` from every request; the bridge's preview proxy
-  strips `Cookie` and `Authorization` again from everything it forwards to a
-  port an agent opened.
-- **Public shares are off.** The old `/s/<token>/` links were served without a
-  login on the strength of a record the bridge kept — inside the sandbox, where
-  an agent could have minted one for any port. That breaks the first rule, so
-  the gate admits no one without a session, and the bridge runs with sharing
-  off. Per-port preview hostnames are gone as well: the session cookie is
-  host-only and never reaches another hostname. Sharing returns as app sharing
-  decided by the gate.
+- **Apps are not served here.** The control plane serves no app content at
+  all: the old `/preview/<port>/` proxy on the box's origin and the old
+  `/s/<token>/` share links (whose records lived inside the sandbox) are gone.
+  Apps live on the data plane, under the gate's app policy (above). The
+  bridge's `/api/apps` passes the sandbox's side of the registry through, with
+  what is live in the sandbox; it cannot change who may open an app.
 - **The bridge still guards its own paths.** It refuses (400) the same
-  ambiguous path forms the gate does, in any path it routes (checking only the
-  routing prefix of a preview, so an app's own encoded URLs still reach it, and
-  of the WebDAV mount, whose handler judges each name itself), and
-  `Service-Worker-Allowed` is stripped from every proxied response, so a
-  previewed page cannot register a worker over the Workbench.
+  ambiguous path forms the gate does, in any path it routes (only the prefix
+  of the WebDAV mount, whose handler judges each name itself).
 - **WebSocket upgrades are origin-checked, twice.** The same-origin policy does
   not cover websocket handshakes, so a page in another tab could otherwise open
   `/ws/events` or `/ws/terminal` on your session cookie.

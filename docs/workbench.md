@@ -9,7 +9,7 @@ root — `/workbench/…`, including old review links — redirect there.
 The editor at `/vscode/` is where you read and write code. The TUI at `/terminal` is
 where you drive agents from a keyboard on a small screen. The Workbench is the
 surface in between: several agents across several workspaces, all visible at
-once, each in a live terminal, with the web apps they build previewable beside
+once, each in a live terminal, with the web apps they build running beside
 them. herdr owns the session — the panes, the layouts, the agent processes —
 so closing the tab detaches rather than kills, and the TUI and the Workbench
 are two views of one session rather than two sessions.
@@ -40,8 +40,8 @@ is.
   `Enter` sends, `Shift+Enter` starts a new line, and `Escape` puts focus back
   in the terminal.
 - **Inspector** — a column on the right with two panels: **Preview** for the
-  ports something is listening on, and **Review** for the pages agents publish
-  for you to comment on.
+  apps running in the box, and **Review** for the pages agents publish for you
+  to comment on.
 
 ## Working with agents
 
@@ -89,67 +89,146 @@ field takes precedence.
 | `prefix+Ctrl+B` | send a literal `Ctrl+B` to the program in the pane |
 | `prefix+?` | show this keymap |
 
-## Previews
+## Apps
 
-The bridge watches which TCP ports are listening inside the sandbox and lists
-them in the Preview panel, hiding agentbox's own services behind a toggle. Pick
-one and it loads in the panel, with device widths and an editable path.
+An **app** is a server running in the sandbox — a dev server, usually — with
+one address on your box: `/a/<id>/`, where the id is 26 random characters. The
+**Preview** panel shows your apps; the same address opens full screen in a tab
+of its own, and it is the address you share.
 
-Before it mounts the frame the panel probes the port and shows a calm state —
-checking, or "nothing is serving on port N yet" with a Retry — so the common
-case of a dev server that has not finished starting is a message rather than a
-flash of an error page. If a page load does reach a port where nothing is
-answering — refused, or silent for 90 seconds before starting a response — the
-bridge returns its own branded page with a Retry instead of letting Cloudflare
-or the browser render a raw 502. A script's request gets a plain `502` it can
-handle, and anything the app itself sends, error statuses included, comes
-through untouched, so a framework's error overlay or a deliberate `503` still
-shows. Once a response has started there is no timeout, so server-sent events
-and long downloads are left alone.
+### Putting an app in Preview
 
-The bridge proxies `/preview/<port>/…` to `127.0.0.1:<port>` inside the
-sandbox. Because that is the Workbench's own origin, the iframe is sandboxed
-*without* `allow-same-origin`: an agent-written dev server must not be able to
-script the Workbench, read its storage or call its API as you. Four things
-follow.
+Agents do it for you: ask one to "put it in my preview", and it runs
 
-The previewed page has no `localStorage` and no same-origin requests of its
-own — that much is the sandbox, and it applies inside the panel only.
+```bash
+agentbox-preview start -- npm run dev
+```
 
-Inside the panel it loads its page but not its stylesheets, scripts or images.
-A sandboxed frame's requests count as cross-site, and the sign-in cookie is
-deliberately not sent on cross-site requests, so the gate refuses them. Open the
-preview full screen (below) to see the whole app.
+which registers the app, runs the dev server in a terminal tab beside the
+agent (so you can watch it and stop it), waits until it answers, and switches
+the Preview panel of every tab you have open to it, with a note saying who
+opened it. Editing a file updates the page (live reload works). Agents are
+told about this every time they start, and never to show you a web app any
+other way. From a pane of your own the same command works, and:
 
-It has no cookies either, and that is not the sandbox: the bridge strips
-`Cookie` (and `Authorization`) from everything it forwards, so your sign-in for
-the box is never handed to a port an agent opened. That holds in the
-full-screen window too, so a previewed app with its own cookie login will not
-work through a path preview at all.
+```bash
+agentbox-preview open 3000                # a server that is already running
+agentbox-preview static ./dist            # a folder, served for you
+agentbox-preview list                     # every app, serving or not
+agentbox-preview stop <id>                # stop its server, remove the app
+agentbox-preview start --pin -- npm run preview   # restarted whenever the box starts
+```
 
-Its websockets are refused as well: a sandboxed document has no origin of its
-own — it sends `Origin: null` — and the bridge accepts an upgrade only from its
-own origin, so live reload does not connect in this mode. Page loads and
-reloads are unaffected.
+The command runs with `PORT`, `HOST=127.0.0.1` and `AGENTBOX_BASE_PATH` set;
+for Vite, `agentbox-preview` adds `--base /a/<id>/ --port <p> --strictPort
+--host 127.0.0.1` itself. A server you start some other way shows up in the
+panel under **Also listening**; choosing it makes it an app. A `localhost`
+link printed in a terminal does the same. Exit codes: 0 ready, 1 error, 5 the
+server never answered (its last output is printed).
 
-Apps that build absolute URLs from the origin, or that are mounted at the root,
-may also need to be told they are behind a prefix — Vite's `base`, Next's
-`basePath`, JupyterLab's `--ServerApp.base_url`, and similar.
+A **pinned** app with a command is started again, in a tab of an **Apps**
+workspace, whenever the box starts; with a link that does not expire, that is
+a staging site.
 
-Full-screen (the ↗ button) opens the preview as a page of its own. It asks
-first: a top-level window has no sandbox attribute, so the agent's page would
-get the Workbench's own origin — its storage, its API and its terminals.
+### The panel
 
-Per-port preview hostnames (`PORT.<preview-domain>`) were removed: the sign-in
-cookie is host-only, so it never reaches another hostname.
+A picker of your apps (with a light for "serving") and of what else is
+listening; a path bar within the app; reload; full screen; phone, tablet and
+desktop widths; **Share**; and an info popover with the path-fixes switch and
+the command that opens the app on your own machine (`agentbox forward
+<port>`). Before it shows an app the panel checks it, so a server that is not
+up yet is a calm "nothing is serving on port N yet", with Retry (and Start,
+for an app with a command). If a page load does reach a port where nothing is
+answering, the box returns its own page with Retry rather than a raw 502; a
+script's request gets a `502` it can handle, and anything the app itself
+sends, error statuses included, comes through untouched.
 
-### Sharing a preview
+### Every app is sandboxed
 
-Public sharing is off. The old `/s/<token>/` links opened without a sign-in on
-the strength of a record the bridge kept inside the sandbox, where an agent
-could have written one; the gate, which decides who gets in, admits no one
-without a session. The Share action is hidden, and sharing returns as app
-sharing decided by the gate. See [the security model](security.md#the-front-door).
+Every app runs with an **opaque origin**: the box serves every `/a/` response
+under a `sandbox` Content-Security-Policy, and the panel's frame carries the
+same sandbox. So the page an agent wrote cannot touch the box — its cookies,
+storage, API or terminals — whether it is in the panel or open full screen,
+and what you see in the panel is exactly what someone you share it with sees.
+
+That costs an app a few things, which the panel's info popover lists too:
+
+- no service workers and no IndexedDB;
+- `localStorage`, `sessionStorage` and cookies set from script work, but are
+  kept in memory and reset on reload;
+- an app that writes its own absolute address (`http://localhost:5173/…`)
+  into its pages will not find itself.
+
+Cookies the app's server sets work: the box keeps them to the app's own path,
+so an app with its own sign-in works in the panel and when shared. For
+anything that needs full fidelity — service workers, a real origin — run
+`agentbox forward <port>` on your own machine (see [the CLI](cli.md)) and open
+`http://localhost:<port>`.
+
+### Apps written for `/`
+
+A dev server started plainly, like `npm run dev`, believes it runs at the root
+of `localhost`: it writes `/src/main.tsx` and `/@vite/client` into its pages
+and opens its live-reload socket at `/`. The box fixes that on the way
+through — **path fixes**, on by default for every app:
+
+1. in HTML, root paths in `src`, `href`, `action`, `formaction`, `poster` and
+   `srcset` are put under `/a/<id>/`, and module scripts are loaded with
+   credentials, so they carry the app's access;
+2. an import map sends root-absolute module imports (`import "/@vite/client"`)
+   under the app;
+3. a small script, first in every page, does the same for what the page does
+   at runtime — `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`,
+   workers, history, and URLs set on elements — and gives the page in-memory
+   storage where its opaque origin has none;
+4. in CSS, `url(/…)` is put under the app.
+
+Pages are requested uncompressed for this and nothing else is touched:
+scripts, images and streams pass through as the app sent them. If a page
+still names something the box could not reach — it brings its own import map,
+or has an absolute `localhost` address written in — the panel says "This app
+assumes it runs at `/`" with the base path to copy. Starting the app with its
+base path set is always the surer way; the `preview` skill has the recipe for
+Vite, Next, Astro, SvelteKit and Create React App. Turn the fixes off (the
+info popover's **Path fixes**) for an app that already runs under its base
+path.
+
+### Sharing an app
+
+Only you can share an app — agents cannot, whatever they try. Press **Share**,
+choose **anyone with the link** or **link and a passcode**, and for how long
+(an hour, a day, a week, a month, or until you stop), and the app's address is
+copied: the same address you were looking at, now open to whoever has it. A
+shared app keeps a banner in the panel while it is shared. A visitor with the
+passcode page sees your app's name and a passcode field, nothing else.
+
+**Stop sharing** makes the app private again at once, and cuts off anyone
+still connected — their page, its streams and its live-reload socket. A link
+that expires does the same within 30 seconds (and opens for nobody from the
+moment it expires). A new passcode shuts out everyone who used the old one.
+
+The operator can turn sharing off for the whole box (`install.sh --sharing
+off`, or `./scripts/agentbox update --sharing off`): the Share button goes, and
+anything shared is private again.
+
+agentbox's own services are never apps: the editor, the terminals and the
+bridge (ports 8080, 7681–7683, 7800, 7801) and the box's front door (7900,
+7901) are refused, whoever asks.
+
+### What proves it
+
+`npm run fidelity -w app` runs the fidelity suite: the real gate and bridge
+behind TLS, with a checked-in create-vite React-TS app started both by
+`agentbox-preview` and plainly with `npm run dev`, and two small apps (browser
+storage; a cookie sign-in with a live event stream), in Chromium, Firefox and
+WebKit. Each app must render in the panel and full screen, load its images,
+reload live with its state kept, work shared with a visitor who is not signed
+in, and cut that visitor off when sharing stops; the passcode page and an
+expiring link are checked too. Install the fixture's dependencies once with
+`npm run fidelity:deps -w app` (they are kept). On a host without Firefox's or
+WebKit's system libraries, `web/app/fidelity/in-docker.sh` runs the suite in
+the official Playwright image that matches the repository's
+`@playwright/test`.
 
 ## Review
 
@@ -191,7 +270,7 @@ The page an agent writes is not trusted. It is served with
 origin — no cookies, no storage, no same-origin access to the Workbench — and
 the iframe repeats that with a `sandbox` attribute of its own. The only thing
 crossing the boundary is the anchor you picked. This is why full screen (the ↗
-button) needs no warning here, unlike a preview: the header travels with the
+button) is just as safe as the panel, as it is for apps: the header travels with the
 response, so the page is just as sandboxed in a tab of its own. Inline your
 CSS in artifacts, though: an external stylesheet or font cannot load.
 
@@ -295,6 +374,39 @@ such a name still goes to the trash). To stop Finder writing `.DS_Store` files
 there at all:
 `defaults write com.apple.desktopservices DSDontWriteNetworkStores true`.
 
+### Apps
+
+`/api/apps` is the app model for the panel and for `agentbox-preview`. The
+records live in the box's front door (the gate), outside the sandbox; the
+bridge passes the sandbox's side of them through, each with what is live:
+whether anything answers on its port, the process and its folder, and the
+herdr pane it runs in.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /api/apps` · `GET /api/apps/:id` | every app, or one, as `AppView` (`web/shared`) |
+| `POST /api/apps {port, name?, cwd?, command?, pinned?, keepPrefix?}` | register an app; always private |
+| `PATCH /api/apps/:id {name?, port?, cwd?, command?, pinned?, keepPrefix?, compat?}` | change one; never who may open it |
+| `DELETE /api/apps/:id` | remove it |
+| `POST /api/apps/:id/open {by?, paneId?, path?}` | every open tab shows it in Preview (`app.open` on the events socket) |
+| `POST /api/apps/:id/restart {workspaceId?}` | run its command in a herdr tab (the workspace given, else **Apps**) |
+| `POST /api/apps/:id/stop {remove?}` | stop what serves it, and remove it if asked |
+| `GET /api/apps/:id/output?paneId=` | the last lines of the pane it runs in |
+
+The events socket also carries `apps.changed` whenever any app changes —
+shared or stopped from any tab, expired, renamed by an agent. Who may open an
+app is set only on the gate, by you: `PUT /_gate/apps/:id/visibility {mode:
+"private"|"link"|"passcode", expiresIn: seconds|null, passcode?}`, and
+`DELETE` to stop sharing.
+
+The bridge serves apps on a second listener of its own, `:7801` — the **data
+plane** — which only the gate talks to: `/app/<port>/…` for apps, and
+`/tunnel/tcp/<port>` and `/tunnel/herdr` for the CLI's tunnels
+(`/_gate/tunnel?target=tcp:<port>|herdr` on the box, a WebSocket of raw bytes
+that takes a device token). It makes each request look local to the app, so a
+dev server's own host and origin checks pass, and reaches a server on either
+loopback, `127.0.0.1` or `::1`.
+
 ### System, projects and the editor
 
 - `GET /api/system` — how the sandbox is doing, in two views. The sandbox is
@@ -354,10 +466,18 @@ offers a Reconnect button.
 **A pane is blank.** The pane exists but the program in it has drawn nothing
 yet. Click it and press a key.
 
-**The port is not listed.** The Workbench only lists ports bound inside the
-sandbox. A server bound to `127.0.0.1` is fine — that is the common case — but
-one started on the host is invisible, by design. Ports belonging to agentbox's
-own services are hidden behind *Show system*.
+**The port is not listed.** The Preview panel only lists ports bound inside
+the sandbox. A server bound to `127.0.0.1` (or `localhost`, or `0.0.0.0`) is
+fine — that is the common case — but one started on the host is invisible, by
+design. A server started outside the workspace folder counts as a system port
+and is listed only with *System ports* ticked. agentbox's own services are
+never apps.
+
+**An app loads but looks broken.** It probably assumes it runs at `/`. The
+panel says so when it can tell; start the app with its base path set
+(`agentbox-preview start` does it for Vite), or see the `preview` skill for
+your framework. `agentbox forward <port>` on your own machine shows it at full
+fidelity.
 
 **The page went back to sign in.** The session ended: 12 hours unused (unless
 "Remember this device" was ticked), a password or two-factor change, or a
