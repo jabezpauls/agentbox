@@ -118,8 +118,11 @@ This is the point of the project, so it is enforced rather than asserted:
 - **No host bind mounts in the sandbox.** `/workspace` is a named volume; `/`,
   `/home` and `/etc` are not visible. The proxy — a separate container, not the
   sandbox — mounts only its own configuration files, read-only.
-- **No privileges.** Every process runs as UID 1000 with all capabilities
-  dropped and `no-new-privileges` set.
+- **No privileges.** Every sandbox process runs as UID 1000 with all
+  capabilities dropped and `no-new-privileges` set. The gate runs as UID
+  10001, likewise with no capabilities and a read-only filesystem. The proxy
+  (Caddy's image) runs as root in its own container, with a read-only
+  filesystem, no capability but binding ports 80/443, and `no-new-privileges`.
 - **Bounded.** CPU, memory and PID ceilings stop a runaway agent from taking
   the host down with it.
 - **One door, outside.** Only the proxy publishes a port, and everything it

@@ -183,7 +183,10 @@ start_caddy() {
     file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
     docker rm -f "$CADDY" >/dev/null 2>&1 || true
     # standalone's site address is the domain; point it at a plain listener.
+    # Confined as compose confines it: read-only, one capability, no gaining more.
     docker create --name "$CADDY" --network "$NET_FRONT" --network-alias proxy -p 127.0.0.1::8080 \
+        --read-only --tmpfs /tmp --tmpfs /data --tmpfs /config --cap-drop ALL --cap-add NET_BIND_SERVICE \
+        --security-opt no-new-privileges \
         -v "$file:/etc/caddy/Caddyfile:ro" -v "$TRUST:/etc/caddy/trust:ro" \
         -e AGENTBOX_DOMAIN=":8080" -e AGENTBOX_TRUST="$2" -e AGENTBOX_REAL_IP_HEADER= \
         "$CADDY_IMAGE" >/dev/null

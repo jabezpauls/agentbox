@@ -41,4 +41,9 @@ code_cmd = svc["code"].get("command") or []
 check("--disable-workspace-trust" in code_cmd, "the editor opens folders trusted")
 check("--auth=none" in code_cmd, "the editor leaves sign-in to the gate")
 check("--disable-proxy" in code_cmd, "the editor serves no port proxy")
+proxy = svc["proxy"]
+check(proxy.get("read_only") is True, "the proxy's filesystem is read-only")
+check(proxy.get("cap_drop") == ["ALL"] and proxy.get("cap_add", []) == ["NET_BIND_SERVICE"],
+      "the proxy holds no capability but binding low ports (has %s)" % proxy.get("cap_add"))
+check("no-new-privileges:true" in (proxy.get("security_opt") or []), "the proxy cannot gain privileges")
 sys.exit(1 if failed else 0)

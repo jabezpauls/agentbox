@@ -216,6 +216,17 @@ services:
     restart: unless-stopped
     depends_on:
       - gate
+    # Caddy's image runs it as root, so it is held to what it needs: no
+    # capabilities but binding :80/:443 (the image's caddy binary carries that
+    # one as a file capability and will not start without it, in any mode), a
+    # read-only filesystem but its own two volumes, and no way to gain more.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
     cpus: ${AGENTBOX_PROXY_CPUS:-1}
