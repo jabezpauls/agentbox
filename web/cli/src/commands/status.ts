@@ -139,15 +139,17 @@ export const status = command({
       if (list === null) row("apps", "not available on this box yet");
       else if (list.length === 0) row("apps", "none");
       else {
-        const shared = list.filter((a) => a.visibility?.mode && a.visibility.mode !== "private").length;
+        const isShared = (a: AppSummary): boolean =>
+          Boolean(a.visibility?.mode && a.visibility.mode !== "private" && (a.visibility.expiresAt == null || a.visibility.expiresAt > ctx.now()));
+        const shared = list.filter(isShared).length;
         row("apps", `${list.length}${shared ? ` (${shared} shared)` : ""}`);
         const lines = table(
           ["NAME", "PORT", "STATE", "SHARING"],
           list.map((a) => [
             safeText(String(a.name ?? a.id)),
             safeText(String(a.port ?? "-")),
-            a.listening === false ? "not up" : a.listening ? "up" : "-",
-            safeText(String(a.visibility?.mode ?? "private")),
+            a.live?.listening ? "up" : "not up",
+            isShared(a) ? safeText(String(a.visibility?.mode)) : "private",
           ]),
         );
         for (const l of lines.trimEnd().split("\n")) ctx.out(`           ${l}\n`);

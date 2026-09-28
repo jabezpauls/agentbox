@@ -11,7 +11,8 @@ export interface AppSummary {
   id: string;
   name?: string;
   port?: number;
-  listening?: boolean;
+  /** What the box sees serving it right now. */
+  live?: { listening?: boolean };
   pinned?: boolean;
   visibility?: { mode?: string; expiresAt?: number | null };
 }

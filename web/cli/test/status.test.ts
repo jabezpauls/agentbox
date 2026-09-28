@@ -94,7 +94,18 @@ describe("the status command", () => {
         case "/api/apps":
           return opts.apps === undefined
             ? json(res, 404, { error: "not found" })
-            : json(res, 200, Array.from({ length: opts.apps }, (_, i) => ({ id: `app${i}`, name: `app-${i}`, port: 5170 + i, listening: true, visibility: { mode: i === 0 ? "link" : "private" } })));
+            : json(
+                res,
+                200,
+                Array.from({ length: opts.apps }, (_, i) => ({
+                  id: `app${i}`,
+                  name: `app-${i}`,
+                  port: 5170 + i,
+                  // As the box's /api/apps has it: live state under `live`.
+                  live: { listening: i === 0, pid: null, process: null, cwd: null, paneId: null, tabId: null, workspaceId: null },
+                  visibility: { mode: i === 0 ? "link" : i === 2 ? "passcode" : "private", expiresAt: i === 2 ? 1 : null },
+                })),
+              );
       }
       json(res, 404, {});
     });
@@ -102,13 +113,17 @@ describe("the status command", () => {
   }
 
   it("reports version, agents, apps and system", async () => {
-    const r = await runCli(["status"], { configDir: await statusBox({ apps: 2 }) });
+    const r = await runCli(["status"], { configDir: await statusBox({ apps: 3 }) });
     expect(r.code, r.stderr).toBe(0);
     expect(r.stdout).toContain(`agentbox ${VERSION} · signed in as owner`);
     expect(r.stdout).toMatch(/herdr\s+connected, 0\.9\.1/);
     expect(r.stdout).toMatch(/agents\s+3 — 1 blocked, 2 working/);
     expect(r.stdout).toMatch(/codex\s+blocked\s+other\s+\/workspace\/other\/x/);
-    expect(r.stdout).toMatch(/apps\s+2 \(1 shared\)/);
+    // Whether each is up, and a share that has run out counted as private.
+    expect(r.stdout).toMatch(/apps\s+3 \(1 shared\)/);
+    expect(r.stdout).toMatch(/app-0\s+5170\s+up\s+link/);
+    expect(r.stdout).toMatch(/app-1\s+5171\s+not up\s+private/);
+    expect(r.stdout).toMatch(/app-2\s+5172\s+not up\s+private/);
     expect(r.stdout).toMatch(/system\s+CPU 0\.4 of 4 cores/);
   });
 
