@@ -61,6 +61,11 @@ import { QuickLook } from "./QuickLook.tsx";
 import { TrashView } from "./TrashView.tsx";
 import { PAGE, useListing } from "./useListing.ts";
 
+/** Loaded entries past which a folder is no longer re-read on the beat. */
+const LIVE_LIMIT = 5 * PAGE;
+/** Matches enough to fill the list, so a filter stops reading further pages. */
+const FILTER_FILL = 50;
+
 function readFlag(key: string, fallback: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
@@ -233,10 +238,18 @@ export function FilesSurface() {
   // What is in the folder changes under us (agents write files); read it
   // again every few seconds while Files is showing. A partial folder is left
   // alone — re-reading thousands of entries on a timer is not worth it.
-  // The beat re-reads what is loaded, a page at a time; a folder only partly
-  // loaded, or loaded past a few pages, is left alone (its own actions still
-  // refresh it) rather than re-read in full every few seconds.
-  usePolling(() => (listing.truncated || listing.entries.length > 5 * PAGE ? undefined : refresh()), 4000, !trash);
+  // The beat re-reads what is loaded, a page at a time. Past a few pages it
+  // stops, rather than re-read thousands of entries every few seconds — its
+  // own actions still refresh it — and the status line says so.
+  const livePaused = listing.entries.length > LIVE_LIMIT;
+
+  // A filter looks through what is loaded; while it has found too little to
+  // fill the list — nothing to scroll, so nothing would ask for more — the
+  // next page is read, until the folder ends or the matches fill the view.
+  useEffect(() => {
+    if (filter.trim() && listing.truncated && listing.status === "ready" && entries.length < FILTER_FILL) void loadMore();
+  }, [filter, listing.truncated, listing.status, listing.entries.length, entries.length, loadMore]);
+  usePolling(() => (livePaused ? undefined : refresh()), 4000, !trash);
   usePolling(loadTrash, trash ? 5000 : 30_000);
 
   useEffect(() => {
@@ -689,6 +702,7 @@ export function FilesSurface() {
                     ? `${entries.length} of ${plural(listing.total, "item")}`
                     : plural(listing.total, "item")}
                 {!filter && listing.truncated && ` · showing ${listing.entries.length.toLocaleString()}, scroll for more`}
+                {livePaused && ` · not refreshing live past ${LIVE_LIMIT.toLocaleString()} items`}
               </span>
               {narrow && (
                 <button className="linklike files-status-trash" onClick={() => navigate({ surface: "files", path: "", trash: true })}>

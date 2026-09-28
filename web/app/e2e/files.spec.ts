@@ -245,6 +245,21 @@ test("a filter over a big folder says it only looks through what is loaded", asy
   fs.rmSync(big, { recursive: true, force: true });
 });
 
+test("a folder loaded past 5,000 items says it is no longer refreshed live", async ({ page }) => {
+  const huge = path.join(project, "huge");
+  fs.mkdirSync(huge, { recursive: true });
+  for (let i = 0; i < 5100; i++) fs.writeFileSync(path.join(huge, `h${String(i).padStart(4, "0")}.txt`), "");
+  await page.goto(filesRoute(huge));
+  await expect(row(page, "h0000.txt")).toBeVisible();
+  const status = page.locator('section.surface[data-surface="files"] .files-status');
+  await expect(status).not.toContainText("not refreshing live");
+  // A filter that matches nothing reads every page.
+  await page.getByPlaceholder(/Filter/).fill("nothing-matches");
+  await expect(status).toContainText("of 5,100 items", { timeout: 20_000 });
+  await expect(status).toContainText("not refreshing live past 5,000 items");
+  fs.rmSync(huge, { recursive: true, force: true });
+});
+
 test("menus work from the keyboard: Shift+F10, the context-menu key and the ⋯ button", async ({ page }) => {
   await page.goto(filesRoute(project));
   await row(page, "notes.txt").click();
