@@ -303,6 +303,31 @@
   padding: 6px var(--sp-2) 2px;
 }
 
+/* --- palette additions ------------------------------------------------------ */
+
+.palette-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.palette-text .palette-label {
+  flex: none;
+}
+.palette-sub {
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-keys {
+  flex: none;
+  min-width: 0;
+  height: 20px;
+  font-size: var(--fs-micro);
+}
+
 /* --- pages ------------------------------------------------------------------ */
 
 .page {

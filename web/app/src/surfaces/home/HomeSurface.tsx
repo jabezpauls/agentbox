@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppWindow, ArrowRight, CheckCircle2, ExternalLink, FolderPlus, GitBranch, Plus } from "lucide-react";
 import { useApp } from "../../store/app.ts";
 import { useApps, type AppView } from "../../apps/model.ts";
@@ -70,6 +70,13 @@ export function HomeSurface() {
   const appsSupported = useApps((s) => s.supported);
   const system = useSystem((s) => s.info);
   const [newProject, setNewProject] = useState<null | "clone" | "empty">(null);
+
+  // "New project" from the palette lands here.
+  useEffect(() => {
+    const onNew = () => setNewProject("clone");
+    window.addEventListener("agentbox:new-project", onNew);
+    return () => window.removeEventListener("agentbox:new-project", onNew);
+  }, []);
 
   usePolling(() => useProjects.getState().refresh(), 10_000);
   usePolling(() => useSystem.getState().refresh(), 5_000);
