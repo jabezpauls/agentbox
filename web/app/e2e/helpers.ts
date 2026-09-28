@@ -51,7 +51,8 @@ export async function runCommand(page: Page, command: string): Promise<void> {
 
 /** Open the command palette and run the entry whose label matches. */
 export async function runFromPalette(page: Page, label: string): Promise<void> {
-  await page.keyboard.press("Control+k");
+  // The chord: Ctrl+K is left to a terminal being typed into.
+  await page.keyboard.press("Control+Alt+k");
   const input = page.getByLabel("Command palette query");
   await expect(input).toBeFocused();
   await input.fill(label);

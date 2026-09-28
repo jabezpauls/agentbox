@@ -74,7 +74,7 @@ export function handleShellKey(e: KeyboardEvent): boolean {
     e.preventDefault();
     return true;
   }
-  if (isPaletteKey(e)) {
+  if (isPaletteKey(e, isTextEntry(e.target))) {
     e.preventDefault();
     openPalette();
     return true;

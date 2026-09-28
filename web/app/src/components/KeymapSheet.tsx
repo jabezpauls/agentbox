@@ -64,7 +64,7 @@ export function KeymapSheet() {
   const mac = isMacPlatform();
   const mod = mac ? "⌘" : "Ctrl+";
   const everywhere: Row[] = [
-    { keys: [paletteLabel(mac)], label: "Search everything (not in the editor)" },
+    { keys: [paletteLabel(mac)], label: mac ? "Search everything (not in the editor)" : "Search everything (not in the editor, a field or a terminal)" },
     { keys: [chordLabel("k", mac)], label: "Search everything, from anywhere" },
     ...SURFACES.map((s) => ({ keys: [chordLabel(s.key, mac)], label: s.id === "settings" ? "Settings" : `Go to ${s.label}` })),
     { keys: [chordLabel("d", mac)], label: "Open or close the dock" },
@@ -126,6 +126,25 @@ export function KeymapSheet() {
               />
             ))}
           </div>
+          <h3 className="keymap-part">Where the keys collide</h3>
+          <ul className="keymap-notes">
+            {mac && (
+              <li>
+                With VoiceOver on, ⌃⌥ is VoiceOver's own modifier and it takes those keys first. Use {paletteLabel(mac)}, the rail and the{" "}
+                <kbd className="kbd">G</kbd> sequences instead.
+              </li>
+            )}
+            {!mac && (
+              <li>
+                {paletteLabel(mac)} is left to a text field or terminal being typed into (delete to the end of the line); {chordLabel("k", mac)}{" "}
+                opens search from there.
+              </li>
+            )}
+            <li>
+              In Emacs in a terminal, {chordLabel("k", mac)} and {chordLabel("d", mac)} are also C-M-k and C-M-d, and the app takes them first.
+              Type <kbd className="kbd">Esc</kbd> then <kbd className="kbd">⌃K</kbd> (or <kbd className="kbd">⌃D</kbd>) — the same commands to Emacs.
+            </li>
+          </ul>
         </div>
       </div>
     </div>

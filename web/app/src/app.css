@@ -1274,6 +1274,16 @@
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
+.keymap-notes {
+  margin: 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.5;
+}
 
 @media (max-width: 720px) {
   .keymap-grid {

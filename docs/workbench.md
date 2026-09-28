@@ -239,13 +239,19 @@ types a character (AltGr+7 is `{` on a German keyboard), the character wins.
 
 | Keys | Action |
 | --- | --- |
-| `⌘K` / `Ctrl+K` | the palette (not in the editor, where it is VS Code's) |
+| `⌘K` / `Ctrl+K` | the palette (not in the editor, where it is VS Code's; `Ctrl+K` not in a text field or terminal, where it deletes to the end of the line) |
 | `⌃⌥K` | the palette, from anywhere |
 | `⌃⌥1` … `⌃⌥6` | Home, Workbench, Editor, Files, Apps, System |
 | `⌃⌥,` | Settings |
 | `⌃⌥D` | open or close the dock |
 | `?` or `⌃⌥/` | the keymap sheet |
 | `g` then `h` `w` `e` `f` `a` `s` `,` | go to a surface, wherever nothing is being typed |
+
+Where they collide: on a Mac with VoiceOver on, `⌃⌥` is VoiceOver's own
+modifier and VoiceOver takes those keys first — use `⌘K`, the rail and the
+`g` sequences. In Emacs in a terminal, `⌃⌥K` and `⌃⌥D` are also `C-M-k` and
+`C-M-d`, and the app takes them first; `Esc` then `C-k` (or `C-d`) is the
+same command to Emacs.
 
 In Files: `↑` `↓` move (with `⇧`, select), `↵` opens, `Space` quick look,
 `⌫` or `⌘↑` goes up, `F2` renames, `Delete` or `⌘⌫` moves to the trash, `⌘A`

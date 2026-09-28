@@ -75,8 +75,12 @@ export function chordAction(e: KeyLike, mac: boolean): ShellAction | null {
 }
 
 /** ⌘K on a Mac, Ctrl+K elsewhere (and either, leniently). */
-export function isPaletteKey(e: KeyLike): boolean {
-  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K");
+export function isPaletteKey(e: KeyLike, typing = false): boolean {
+  if (e.altKey || e.shiftKey || (e.key !== "k" && e.key !== "K")) return false;
+  // Ctrl+K belongs to what is being typed into — delete to the end of the
+  // line in a field, kill-line in a shell — so there only ⌘K opens the
+  // palette (⌃⌥K works everywhere).
+  return typing ? e.metaKey && !e.ctrlKey : e.metaKey || e.ctrlKey;
 }
 
 const LETTERS: Record<string, SurfaceId> = Object.fromEntries(SURFACES.map((s) => [s.letter, s.id]));

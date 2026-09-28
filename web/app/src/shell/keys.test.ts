@@ -51,6 +51,11 @@ describe("isPaletteKey", () => {
     expect(isPaletteKey(key({ key: "k", code: "KeyK" }))).toBe(false);
     expect(isPaletteKey(key({ key: "k", code: "KeyK", ctrlKey: true, altKey: true }))).toBe(false);
   });
+
+  it("leaves Ctrl+K to a field or a terminal being typed into", () => {
+    expect(isPaletteKey(key({ key: "k", code: "KeyK", ctrlKey: true }), true)).toBe(false);
+    expect(isPaletteKey(key({ key: "k", code: "KeyK", metaKey: true }), true)).toBe(true);
+  });
 });
 
 describe("GoSequence", () => {

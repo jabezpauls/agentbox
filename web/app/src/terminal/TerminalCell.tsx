@@ -17,6 +17,7 @@ import { TerminalSocket, type ConnState } from "./stream.ts";
 import { terminalTheme } from "./themes.ts";
 import { registerTerminal } from "./registry.ts";
 import { handleChord } from "../shell/actions.ts";
+import { isPaletteKey } from "../shell/keys.ts";
 
 interface Props {
   paneId: string;
@@ -123,8 +124,9 @@ export function TerminalCell({ paneId, resolved }: Props) {
           e.stopPropagation();
           return false;
         }
-        // ⌘/Ctrl+K opens the command palette even while a terminal is focused.
-        if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // ⌘K opens the command palette even while a terminal is focused;
+        // Ctrl+K is the shell's own (kill-line) and goes through.
+        if (isPaletteKey(e, true)) {
           e.preventDefault();
           useApp.getState().setUi({ palette: { mode: "all" } });
           return false;
