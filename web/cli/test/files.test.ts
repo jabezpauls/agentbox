@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { localName } from "../src/commands/files.js";
+import { editorCommand, localName, shellQuote, splitCommand } from "../src/commands/files.js";
+import { Progress } from "../src/progress.js";
 import { EXIT } from "../src/errors.js";
-import { filesStub, put, read, type FilesStub } from "./files-stub.js";
-import { runCli, signedIn, tmpDir } from "./helpers.js";
+import { filesStub, link, put, read, type FilesStub } from "./files-stub.js";
+import { capture, runCli, signedIn, tmpDir } from "./helpers.js";
 
 const stubs: FilesStub[] = [];
 afterEach(async () => {
@@ -203,6 +204,22 @@ describe("files edit", () => {
     expect(stub.writes).toEqual([{ path: "/workspace/new.txt", overwrite: false }]);
   });
 
+  it.runIf(process.platform !== "win32")("edits what a link points at, and leaves the link a link", async () => {
+    const { stub, cli } = await box();
+    put(stub, "/workspace/real", null);
+    put(stub, "/workspace/real/conf.txt", "port=1\n");
+    link(stub, "/workspace/conf.txt", "real/conf.txt");
+    link(stub, "/workspace/out.txt", "/etc/passwd");
+    const r = await cli(["files", "edit", "conf.txt"], { EDITOR: editor(`sed -i.bak 's/port=1/port=2/' "$1"`) });
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/is a link: editing \/workspace\/real\/conf\.txt/);
+    expect(read(stub, "/workspace/real/conf.txt")).toBe("port=2\n");
+    expect(stub.fs.get("/workspace/conf.txt")?.type).toBe("symlink");
+    const out = await cli(["files", "edit", "out.txt"], { EDITOR: "true" });
+    expect(out.code).toBe(EXIT.FAILURE);
+    expect(out.stderr).toMatch(/a link to something outside the workspace, or nothing; edit what it points at/);
+  });
+
   it.runIf(process.platform !== "win32")("refuses to overwrite a file that changed on the box meanwhile", async () => {
     const { stub, cli } = await box();
     put(stub, "/workspace/conf.txt", "v1\n");
@@ -218,6 +235,8 @@ describe("files edit", () => {
     const r = await run;
     expect(r.code).toBe(EXIT.FAILURE);
     expect(r.stderr).toMatch(/changed on the box while you were editing/);
+    // The command to save it anyway, quoted to paste as it stands.
+    expect(r.stderr).toMatch(/agentbox files put --force '\/[^']+\/conf\.txt' '\/workspace\/conf\.txt'/);
     expect(read(stub, "/workspace/conf.txt")).toBe("theirs, longer\n");
   });
 });
@@ -229,5 +248,113 @@ describe("local names", () => {
     expect(localName("con:x?.txt", "win32")).toBe("con_x_.txt");
     expect(localName("trailing. ", "win32")).toBe("trailing_");
     expect(localName("normal.txt", "win32")).toBe("normal.txt");
+  });
+
+  it("never name a Windows device", () => {
+    for (const n of ["CON", "con.txt", "NUL", "nul.tar.gz", "Aux", "PRN.md", "COM1", "lpt9.log", "COM¹"]) {
+      expect(localName(n, "win32"), n).toBe(`_${n}`);
+    }
+    for (const n of ["console.txt", "nullable", "com10", "CON"]) {
+      if (n === "CON") expect(localName(n, "linux")).toBe("CON");
+      else expect(localName(n, "win32"), n).toBe(n);
+    }
+  });
+});
+
+describe("put -r and symbolic links", () => {
+  it.runIf(process.platform !== "win32")("never follows a link out of the folder unless -L, and says what it skipped", async () => {
+    const { stub, cli } = await box();
+    const home = tmpDir();
+    fs.writeFileSync(path.join(home, "secret.txt"), "TOP-SECRET-LOCAL-KEY\n");
+    fs.mkdirSync(path.join(home, "outside-dir"));
+    fs.writeFileSync(path.join(home, "outside-dir", "x.txt"), "x");
+    const proj = path.join(home, "proj");
+    fs.mkdirSync(path.join(proj, "sub"), { recursive: true });
+    fs.writeFileSync(path.join(proj, "README"), "readme\n");
+    fs.writeFileSync(path.join(proj, "sub", "inner.txt"), "inner\n");
+    // The reviewer's repro: an innocent-looking link to a file outside.
+    fs.symlinkSync(path.join(home, "secret.txt"), path.join(proj, "innocent.txt"));
+    fs.symlinkSync(path.join(home, "outside-dir"), path.join(proj, "outlink"));
+    fs.symlinkSync("sub/inner.txt", path.join(proj, "inside-file"));
+    fs.symlinkSync("sub", path.join(proj, "inside-dir"));
+    fs.symlinkSync("..", path.join(proj, "sub", "up"));
+    fs.symlinkSync("nowhere", path.join(proj, "dangling"));
+
+    const r = await cli(["files", "put", "-r", proj]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(read(stub, "/workspace/proj/README")).toBe("readme\n");
+    expect(read(stub, "/workspace/proj/inside-file")).toBe("inner\n");
+    expect(stub.fs.has("/workspace/proj/innocent.txt")).toBe(false);
+    expect(stub.fs.has("/workspace/proj/outlink")).toBe(false);
+    expect(stub.fs.has("/workspace/proj/inside-dir")).toBe(false);
+    for (const b of stub.uploads.values()) expect(b.data.toString()).not.toContain("TOP-SECRET");
+    expect(r.stderr).toMatch(/skipped .*innocent\.txt: a link out of .*add -L/);
+    expect(r.stderr).toMatch(/skipped .*outlink: a link out of/);
+    expect(r.stderr).toMatch(/skipped .*inside-dir: a link to a folder; add -L/);
+    expect(r.stderr).toMatch(/skipped .*dangling: a link to nothing/);
+
+    const followed = await cli(["files", "put", "-r", "-L", "--force", proj, "copy"]);
+    expect(followed.code, followed.stderr).toBe(0);
+    expect(read(stub, "/workspace/copy/innocent.txt")).toBe("TOP-SECRET-LOCAL-KEY\n");
+    expect(read(stub, "/workspace/copy/outlink/x.txt")).toBe("x");
+    expect(read(stub, "/workspace/copy/inside-dir/inner.txt")).toBe("inner\n");
+    // A link back up is followed once around, not for ever.
+    expect(followed.stderr).toMatch(/skipped .*up: it leads back to a folder above it/);
+  });
+});
+
+describe("safety of what reaches the terminal", () => {
+  it("escapes names from the box in the progress line, and copes with a 0-column terminal", () => {
+    const err = capture({ isTTY: true, columns: 0 });
+    const p = new Progress(err, "dl/\x1b]0;PWNED\x07\x1b[31mred", 10, true, () => 0);
+    p.update(5);
+    p.finish();
+    const text = err.text();
+    expect(text).not.toContain("\x1b]0;");
+    expect(text).toContain("\\x1b]0;PWNED\\x07");
+    for (const cols of [0, 1, 5, 19]) {
+      const s = capture({ isTTY: true, columns: cols });
+      new Progress(s, "a-rather-long-label-for-a-narrow-terminal.bin", 1000, true, () => 0).finish();
+      expect(s.text().replace(/\r\x1b\[2K/, "").trimEnd().length, String(cols)).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("escapes what the box says about a file, and survives a nonsense mtime", async () => {
+    const { stub, cli } = await box();
+    stub.fs.set("/workspace/odd", { type: "file", data: Buffer.from("x"), mtime: Number.NaN });
+    const r = await cli(["files", "stat", "odd"]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/modified {2}-/);
+  });
+
+  it("gets into a missing local folder with a plain error, not a stack trace", async () => {
+    const { stub, cli } = await box();
+    put(stub, "/workspace/a.txt", "a");
+    const r = await cli(["files", "get", "a.txt", path.join(tmpDir(), "no", "such", "a.txt")]);
+    expect(r.code).toBe(EXIT.NOT_FOUND);
+    expect(r.stderr).toMatch(/no such folder here/);
+    expect(r.stderr).not.toMatch(/\n\s+at /);
+  });
+});
+
+describe("the editor, on Windows", () => {
+  it("runs an .exe without a shell, and a .cmd through cmd.exe only with a plain path", () => {
+    const bin = tmpDir();
+    fs.writeFileSync(path.join(bin, "notepad.exe"), "", { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, "code.cmd"), "", { mode: 0o755 });
+    const env = { PATH: bin, PATHEXT: ".EXE;.CMD" };
+    expect(splitCommand('"C:\\Program Files\\Ed\\ed.exe" --wait -n')).toEqual(["C:\\Program Files\\Ed\\ed.exe", "--wait", "-n"]);
+    expect(editorCommand("notepad", "C:\\T\\a&b.txt", "win32", env)).toEqual({ command: path.join(bin, "notepad.exe"), args: ["C:\\T\\a&b.txt"], shell: false });
+    const code = editorCommand("code --wait", "C:\\Temp\\agentbox-edit-x\\conf.txt", "win32", env);
+    expect(code.shell).toBe(true);
+    expect(code.command).toBe(`"${path.join(bin, "code.cmd")}" "--wait" "C:\\Temp\\agentbox-edit-x\\conf.txt"`);
+    expect(() => editorCommand("code --wait", "C:\\T&calc\\conf.txt", "win32", env)).toThrow(/cmd.exe would act on/);
+    // Elsewhere: sh -c with the file as its own argument, never in the command.
+    expect(editorCommand("code --wait", "/tmp/a'b", "linux")).toEqual({ command: "/bin/sh", args: ["-c", 'code --wait "$@"', "sh", "/tmp/a'b"], shell: false });
+  });
+
+  it("quotes a path for pasting into either shell", () => {
+    expect(shellQuote("/tmp/it's here", "linux")).toBe("'/tmp/it'\\''s here'");
+    expect(shellQuote('C:\\a "b"', "win32")).toBe('"C:\\a ""b"""');
   });
 });

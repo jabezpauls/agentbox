@@ -1,11 +1,13 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bundleVersion, selfInstall } from "../src/commands/update.js";
+import { ConfigStore } from "../src/config.js";
 import { EXIT } from "../src/errors.js";
-import { json, runCli, signedIn, stubServer, tmpDir } from "./helpers.js";
+import { filesStub, put, read } from "./files-stub.js";
+import { json, runCli, signedIn, stubServer, TOKEN, tmpDir } from "./helpers.js";
 
 const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = (p: string): { version: string } => JSON.parse(fs.readFileSync(path.join(pkgDir, p), "utf8")) as { version: string };
@@ -112,6 +114,40 @@ describe("update", () => {
       }
     } finally {
       await box.close();
+    }
+  });
+});
+
+describe("files edit, run for real", () => {
+  it.runIf(process.platform !== "win32")("leaves Ctrl-C to the editor, then saves (as git does)", async () => {
+    const stub = await filesStub();
+    try {
+      put(stub, "/workspace/note.txt", "hello\n");
+      const xdg = tmpDir();
+      new ConfigStore(path.join(xdg, "agentbox")).update((d) => {
+        d.boxes.test = { url: stub.url, token: TOKEN, addedAt: 1, versionCheckedAt: Date.now() };
+        d.current = "test";
+      });
+      // The reviewer's editor: it ignores Ctrl-C itself, sends one to its
+      // whole process group (as a terminal does), and carries on — for longer
+      // than the grace an interrupted command gets before it exits.
+      const editor = path.join(tmpDir(), "ed.sh");
+      fs.writeFileSync(editor, '#!/bin/sh\ntrap "" INT\nkill -INT 0\nsleep 2\necho edited >> "$1"\nexit 0\n', { mode: 0o755 });
+      // A process group of its own, so the Ctrl-C reaches the CLI and the
+      // editor and not the test runner.
+      const child = spawn(process.execPath, [bundle, "files", "edit", "note.txt"], {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { PATH: process.env.PATH, XDG_CONFIG_HOME: xdg, EDITOR: editor, TMPDIR: tmpDir(), HOME: tmpDir() },
+      });
+      let stderr = "";
+      child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+      const code = await new Promise<number | null>((r) => child.on("exit", (c) => r(c)));
+      expect(code, stderr).toBe(0);
+      expect(stderr).toMatch(/Saved \/workspace\/note\.txt/);
+      expect(read(stub, "/workspace/note.txt")).toBe("hello\nedited\n");
+    } finally {
+      await stub.close();
     }
   });
 });

@@ -11,9 +11,11 @@ import { json, stubServer, TOKEN, type Stub } from "./helpers.js";
  */
 
 export interface Node {
-  type: "file" | "dir";
+  type: "file" | "dir" | "symlink";
   data: Buffer;
   mtime: number;
+  /** A link's text. */
+  target?: string;
 }
 
 export interface FilesStub extends Stub {
@@ -47,8 +49,14 @@ function parent(p: string): string {
   return p.slice(0, p.lastIndexOf("/")) || "/";
 }
 
-function entry(p: string, n: Node): Record<string, unknown> {
-  return { name: p.slice(p.lastIndexOf("/") + 1), path: p, type: n.type, size: n.type === "dir" ? 0 : n.data.length, mtime: n.mtime };
+function entry(p: string, n: Node, fsMap?: Map<string, Node>): Record<string, unknown> {
+  const e: Record<string, unknown> = { name: p.slice(p.lastIndexOf("/") + 1), path: p, type: n.type, size: n.type === "file" ? n.data.length : 0, mtime: n.mtime };
+  if (n.type === "symlink") {
+    e.target = n.target;
+    const to = fsMap?.get(norm(n.target?.startsWith("/") ? n.target : `${parent(p)}/${n.target}`));
+    e.targetType = to ? to.type : null;
+  }
+  return e;
 }
 
 export async function filesStub(): Promise<FilesStub> {
@@ -72,7 +80,7 @@ export async function filesStub(): Promise<FilesStub> {
     if (route === "GET /api/files/stat") {
       const p = norm(q("path"));
       const n = fs.get(p);
-      return n ? json(res, 200, entry(p, n)) : fail(res, 404, `${p} does not exist`, "not-found");
+      return n ? json(res, 200, entry(p, n, fs)) : fail(res, 404, `${p} does not exist`, "not-found");
     }
     if (route === "GET /api/files/list") {
       const p = norm(q("path"));
@@ -206,6 +214,10 @@ export async function filesStub(): Promise<FilesStub> {
 
 export function put(stub: FilesStub, p: string, content: string | Buffer | null): void {
   stub.fs.set(p, content === null ? { type: "dir", data: Buffer.alloc(0), mtime: 5 } : { type: "file", data: Buffer.from(content), mtime: 5 });
+}
+
+export function link(stub: FilesStub, p: string, target: string): void {
+  stub.fs.set(p, { type: "symlink", data: Buffer.alloc(0), mtime: 5, target });
 }
 
 export function read(stub: FilesStub, p: string): string | null {

@@ -11,6 +11,7 @@ import { formatBytes, formatTime, safeText, table } from "../format.js";
 import { Progress } from "../progress.js";
 import type { FileEntry } from "@workbench/shared";
 import { downloadFile, ResumeStore, streamTo, uploadFile } from "../transfer.js";
+import { findOnPath } from "../mount.js";
 import { command, type Command } from "./types.js";
 
 /** The most `edit` saves with a plain write; larger files go up as an upload. */
@@ -57,9 +58,24 @@ function withForceHint(err: unknown): unknown {
  */
 export function localName(name: string, platform: NodeJS.Platform = process.platform): string {
   let n = name.replace(/\//g, "_");
-  if (platform === "win32") n = n.replace(/[<>:"\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "_");
+  if (platform === "win32") {
+    n = n.replace(/[<>:"\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "_");
+    // Device names: `CON`, `nul.txt` and the like open a device, not a file.
+    if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i.test(n)) n = `_${n}`;
+  }
   if (n === "." || n === ".." || n === "") n = n.replace(/\./g, "_") || "_";
   return n;
+}
+
+/** `path` quoted for the shell the person will paste it into. */
+export function shellQuote(s: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return `"${s.replace(/"/g, '""')}"`;
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** True when `child` is `parent` or inside it (real paths). */
+function within(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`);
 }
 
 function gitMark(g: string | null | undefined): string {
@@ -131,7 +147,7 @@ const ls = command({
       return;
     }
     if (listing.entries.length === 0) {
-      ctx.err(`${listing.path} is empty\n`);
+      ctx.err(`${safeText(listing.path)} is empty\n`);
       return;
     }
     ctx.out(entryTable(listing.entries, ctx.now()));
@@ -151,9 +167,11 @@ const stat = command({
       ctx.printJson(e);
       return;
     }
-    ctx.out(`${safeText(e.path)}\n  type      ${e.type}${e.type === "symlink" ? ` -> ${safeText(e.target ?? "?")} (${e.targetType ?? "outside or broken"})` : ""}\n`);
-    ctx.out(`  size      ${e.type === "dir" ? "-" : `${formatBytes(e.size)} (${e.size} bytes)`}\n  modified  ${new Date(e.mtime).toISOString()}\n`);
-    if (e.git) ctx.out(`  git       ${e.git}\n`);
+    const t = (v: unknown): string => safeText(String(v));
+    const modified = Number.isFinite(e.mtime) ? new Date(e.mtime).toISOString() : "-";
+    ctx.out(`${t(e.path)}\n  type      ${t(e.type)}${e.type === "symlink" ? ` -> ${t(e.target ?? "?")} (${t(e.targetType ?? "outside or broken")})` : ""}\n`);
+    ctx.out(`  size      ${e.type === "dir" ? "-" : `${formatBytes(e.size)} (${t(e.size)} bytes)`}\n  modified  ${modified}\n`);
+    if (e.git) ctx.out(`  git       ${t(e.git)}\n`);
   },
 });
 
@@ -165,6 +183,8 @@ class Getter {
   ) {}
 
   async one(remote: string, local: string): Promise<void> {
+    const parent = path.dirname(path.resolve(local));
+    if (!localIsDir(parent)) throw new CliError(`${parent}: no such folder here`, EXIT.NOT_FOUND);
     const progress = new Progress(this.ctx.io.stderr, local, null);
     try {
       await downloadFile({
@@ -247,12 +267,20 @@ const put = command({
   options: [
     RECURSIVE,
     FORCE,
+    {
+      name: "follow",
+      short: "L",
+      type: "boolean",
+      description: "with -r, follow every symbolic link, also to folders and out of the folder being put",
+    },
     { name: "chunk-size", type: "string", value: "size", description: `bytes per request, up to ${MAX_CHUNK / 1024 / 1024}M (default); lower it for a proxy with a smaller limit` },
   ],
   details:
     "With one path, uploads into /workspace. The last argument is where: an existing folder, a new name,\n" +
     "or a path ending in '/' for a folder to create. Large files go up in chunks; if an upload is cut off,\n" +
-    "run the same command again and it resumes where the box left off.",
+    "run the same command again and it resumes where the box left off. With -r, a link to a file inside\n" +
+    "the folder goes up as that file; links to folders, and links leading out of the folder, are skipped\n" +
+    "(and said so) unless -L.",
   async run(ctx, p) {
     const files = await filesApi(ctx);
     const ops = p.operands;
@@ -293,18 +321,43 @@ const put = command({
       bar.finish();
     };
 
-    const putTree = async (dir: string, dest: string): Promise<void> => {
+    const follow = bool(p.options, "follow");
+    /**
+     * A folder and everything in it. Symbolic links are where a folder can
+     * reach outside itself — a link to ~/.ssh in a project folder — so one is
+     * followed only when it stays inside the folder being put (`root`, a real
+     * path) and leads to a file, unless -L says to follow them all.
+     * `ancestors` are the real folders on the way down, so a link back up
+     * cannot recurse for ever.
+     */
+    const putTree = async (dir: string, dest: string, root: string, ancestors: Set<string>): Promise<void> => {
       await files.mkdir(dest);
       const names = (await fs.promises.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
       for (const d of names) {
         const local = path.join(dir, d.name);
         const there = joinRemote(dest, d.name);
-        if (d.isDirectory()) await putTree(local, there);
-        else if (d.isFile()) await putOne(local, there);
-        else if (d.isSymbolicLink()) {
-          const st = await fs.promises.stat(local).catch(() => null);
-          if (st?.isFile()) await putOne(local, there);
-          else ctx.warn(`skipped ${local}: a link to ${st?.isDirectory() ? "a folder (put the folder itself)" : "nothing"}`);
+        if (d.isDirectory()) {
+          await putTree(local, there, root, new Set([...ancestors, await fs.promises.realpath(local)]));
+        } else if (d.isFile()) {
+          await putOne(local, there);
+        } else if (d.isSymbolicLink()) {
+          const real = await fs.promises.realpath(local).catch(() => null);
+          const st = real ? await fs.promises.stat(real).catch(() => null) : null;
+          if (!real || !st) {
+            ctx.warn(`skipped ${local}: a link to nothing`);
+          } else if (!follow && !within(real, root)) {
+            ctx.warn(`skipped ${local}: a link out of ${root} (to ${real}); add -L to follow links out of the folder`);
+          } else if (st.isFile()) {
+            await putOne(local, there);
+          } else if (st.isDirectory() && !follow) {
+            ctx.warn(`skipped ${local}: a link to a folder; add -L to follow it`);
+          } else if (st.isDirectory() && ancestors.has(real)) {
+            ctx.warn(`skipped ${local}: it leads back to a folder above it`);
+          } else if (st.isDirectory()) {
+            await putTree(local, there, root, new Set([...ancestors, real]));
+          } else {
+            ctx.warn(`skipped ${local}: not a file or folder`);
+          }
         } else ctx.warn(`skipped ${local}: not a file or folder`);
       }
     };
@@ -315,7 +368,8 @@ const put = command({
       const dest = intoDir && target ? joinRemote(target.path, path.basename(path.resolve(local))) : remote;
       if (st.isDirectory()) {
         if (!bool(p.options, "recursive")) throw new CliError(`${local} is a folder; add -r to put it and everything in it`);
-        await putTree(local, dest);
+        const root = await fs.promises.realpath(local);
+        await putTree(local, dest, root, new Set([root]));
       } else if (st.isFile()) {
         await putOne(local, dest);
       } else {
@@ -407,16 +461,51 @@ const cat = command({
 });
 
 /** Run the person's editor on `file` and wait for it; resolves with its exit code. */
-export function runEditor(editor: string, file: string, platform: NodeJS.Platform = process.platform): Promise<number> {
+/** `$EDITOR` split into words, as a shell would for plain and double-quoted words. */
+export function splitCommand(s: string): string[] {
+  const words: string[] = [];
+  const re = /"([^"]*)"|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) words.push(m[1] ?? m[2] ?? "");
+  return words;
+}
+
+/** Characters cmd.exe reads nothing into, for the one case a shell cannot be avoided. */
+const CMD_SAFE = /^[A-Za-z0-9 _.:\\()~-]+$/;
+
+/**
+ * How to start the person's editor on `file`. On Unix, as git does: `$EDITOR`
+ * may carry arguments ("code --wait"), so it goes through `sh -c` with the
+ * file as a separate argument, never pasted into the command. On Windows
+ * there is no such shell: the command is split into words and started
+ * directly — except a `.cmd` or `.bat` (VS Code's `code`), which Windows
+ * runs only through cmd.exe, and then only with a file path in which cmd.exe
+ * reads nothing.
+ */
+export function editorCommand(
+  editor: string,
+  file: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[]; shell: boolean } {
+  if (platform !== "win32") return { command: "/bin/sh", args: ["-c", `${editor} "$@"`, "sh", file], shell: false };
+  const [first = "notepad", ...rest] = splitCommand(editor);
+  const resolved = /[\\/]/.test(first) ? first : (findOnPath(first, env, "win32") ?? first);
+  if (!/\.(cmd|bat)$/i.test(resolved)) return { command: resolved, args: [...rest, file], shell: false };
+  if (!CMD_SAFE.test(file)) {
+    throw new CliError(`the temporary file's path (${file}) has characters cmd.exe would act on; set TEMP to a plain folder, or use an editor that is an .exe`);
+  }
+  const quote = (w: string): string => `"${w.replace(/"/g, "")}"`;
+  return { command: [resolved, ...rest, file].map(quote).join(" "), args: [], shell: true };
+}
+
+/** Run the person's editor on `file` and wait for it; resolves with its exit code. */
+export function runEditor(editor: string, file: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   return new Promise((resolve, reject) => {
-    // $EDITOR may carry arguments ("code --wait"), so it goes through a shell,
-    // with the file passed as a separate, quoted argument.
-    const child =
-      platform === "win32"
-        ? spawn(`${editor} "${file}"`, { stdio: "inherit", shell: true })
-        : spawn("/bin/sh", ["-c", `${editor} "$@"`, "sh", file], { stdio: "inherit" });
+    const how = editorCommand(editor, file, platform, env);
+    const child = spawn(how.command, how.args, { stdio: "inherit", shell: how.shell });
     child.once("error", (err) => reject(new CliError(`could not start the editor (${editor}): ${err.message}`)));
-    child.once("exit", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
+    child.once("exit", (code, signal) => resolve(code ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)));
   });
 }
 
@@ -432,7 +521,19 @@ const edit = command({
   async run(ctx, p) {
     const files = await filesApi(ctx);
     const target = p.operands[0] as string;
-    const before = await files.stat(target);
+    let before = await files.stat(target);
+    if (before?.type === "symlink") {
+      // Saving writes a new file in its place, which would turn the link into
+      // a copy: edit what it points at instead, and leave the link a link.
+      const link = before;
+      const text = link.target ?? "";
+      const pointed = link.targetType === "file" && text !== "" ? await files.stat(path.posix.normalize(text.startsWith("/") ? text : path.posix.join(path.posix.dirname(link.path), text))) : null;
+      if (!pointed || pointed.type !== "file") {
+        throw new CliError(`${link.path} is a link to ${link.targetType === "dir" ? "a folder" : link.targetType === "file" ? "another link" : "something outside the workspace, or nothing"}; edit what it points at`);
+      }
+      ctx.err(`${safeText(link.path)} is a link: editing ${safeText(pointed.path)}, which it points at.\n`);
+      before = pointed;
+    }
     if (before && !isFile(before)) throw new CliError(`${before.path} is not a file`);
     const remotePath = before?.path ?? target;
     let original = Buffer.alloc(0);
@@ -444,14 +545,18 @@ const edit = command({
     }
 
     // Private to this user (mkdtemp makes 0700), named like the original so
-    // the editor picks the right syntax.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentbox-edit-"));
-    const file = path.join(dir, localName(remoteBase(remotePath) || "file", ctx.platform));
+    // the editor picks the right syntax (on Windows, from plain characters
+    // only: see editorCommand).
+    const dir = fs.mkdtempSync(path.join(ctx.tempRoot(), "agentbox-edit-"));
+    let name = localName(remoteBase(remotePath) || "file", ctx.platform);
+    if (ctx.platform === "win32") name = name.replace(/[^A-Za-z0-9._-]/g, "_");
+    const file = path.join(dir, name);
     fs.writeFileSync(file, original, { mode: 0o600 });
     const cleanup = (): void => fs.rmSync(dir, { recursive: true, force: true });
 
     const editor = ctx.env.VISUAL || ctx.env.EDITOR || (ctx.platform === "win32" ? "notepad" : "vi");
-    const code = await runEditor(editor, file, ctx.platform);
+    // Ctrl-C in the editor is the editor's: this waits, then saves.
+    const code = await ctx.holdInterrupts(() => runEditor(editor, file, ctx.platform, ctx.env));
     if (code !== 0) {
       cleanup();
       throw new CliError(`the editor exited with code ${code}; nothing was saved`);
@@ -472,7 +577,7 @@ const edit = command({
       if (now && (now.mtime !== before.mtime || now.size !== before.size)) {
         throw new CliError(
           `${before.path} changed on the box while you were editing. Your version is kept in ${file}; ` +
-            `to save it over theirs: agentbox files put --force '${file}' '${before.path}'`,
+            `to save it over theirs: agentbox files put --force ${shellQuote(file, ctx.platform)} ${shellQuote(safeText(before.path), ctx.platform)}`,
         );
       }
     }
@@ -488,7 +593,7 @@ const edit = command({
       throw new CliError(`${(err as Error).message}. Your version is kept in ${file}.`, err instanceof CliError ? err.exitCode : EXIT.FAILURE);
     }
     cleanup();
-    ctx.err(`Saved ${remotePath}.\n`);
+    ctx.err(`Saved ${safeText(remotePath)}.\n`);
   },
 });
 
