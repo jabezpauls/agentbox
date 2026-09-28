@@ -14,6 +14,7 @@ INSTALL_DIR="${AGENTBOX_DIR:-$HOME/agentbox}"
 DOMAIN=""
 MODE="standalone"
 BIND="127.0.0.1:8443"
+BIND_PUBLIC="off"
 USERNAME="admin"
 PASSWORD=""
 CPUS="2"
@@ -51,7 +52,10 @@ Run with no options for an interactive walk-through.
   --mode <mode>         standalone   (owns :80/:443, gets a TLS cert)
                         behind-proxy (loopback only, your proxy fronts it)
                         traefik      (no published port; a container Traefik routes to it)
-  --bind <addr:port>    behind-proxy listen address (default 127.0.0.1:8443)
+  --bind <addr:port>    behind-proxy listen address (default 127.0.0.1:8443);
+                        loopback only unless --bind-public
+  --bind-public         Allow --bind on an address other people can reach
+                        (see docs/install.md before using it)
   --edge-network <name> traefik: external network Traefik watches (default edge-prod)
   --cert-resolver <n>   traefik: Traefik cert resolver (default letsencrypt)
   --user <name>         Login username (default admin)
@@ -97,6 +101,7 @@ while [ $# -gt 0 ]; do
         --domain)        flag DOMAIN "${2:-}"; shift 2 ;;
         --mode)          flag MODE "${2:-}"; shift 2 ;;
         --bind)          flag BIND "${2:-}"; shift 2 ;;
+        --bind-public)   flag BIND_PUBLIC on; shift ;;
         --edge-network)  flag EDGE_NETWORK "${2:-}"; shift 2 ;;
         --cert-resolver) flag CERT_RESOLVER "${2:-}"; shift 2 ;;
         --user)          flag USERNAME "${2:-}"; shift 2 ;;
@@ -138,7 +143,7 @@ done
 # manage (API keys, TZ, anything added by hand).
 ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
-MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
+MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND AGENTBOX_BIND_PUBLIC:BIND_PUBLIC
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
 AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
@@ -293,6 +298,25 @@ case "$SHARING" in
     on|off) ;;
     *) die "--sharing must be on or off" ;;
 esac
+# behind-proxy publishes plain HTTP, and its Caddy believes X-Forwarded-For
+# from any private address (it expects your proxy there). On an address
+# others can reach, anyone on a private network in front of it could name
+# their own address to the sign-in limits, and would talk to it unencrypted.
+# So loopback, unless the operator says otherwise in so many words.
+if [ "$MODE" = "behind-proxy" ]; then
+    case "$BIND" in
+        \[*\]:*) bind_host="${BIND%%]*}"; bind_host="${bind_host#[}" ;;
+        *:*)     bind_host="${BIND%:*}" ;;
+        *)       bind_host="" ;;   # a bare port: Docker listens on every address
+    esac
+    case "$bind_host" in
+        127.*|localhost|::1) ;;
+        *)
+            [ "$BIND_PUBLIC" = on ] || die "--bind $BIND is not a loopback address. behind-proxy serves plain HTTP and trusts X-Forwarded-For from every private address, so only your own proxy should reach it: bind 127.0.0.1:<port>, or pass --bind-public if a proxy on another host must connect (see docs/install.md)"
+            warn "--bind $BIND listens beyond loopback: plain HTTP, and anyone who can reach it from a private address can set the client address the sign-in limits count. Firewall it to your proxy alone."
+            ;;
+    esac
+fi
 if [ "$MODE" = "standalone" ] || [ "$MODE" = "traefik" ]; then
     [ -z "$DOMAIN" ] && die "--domain is required for $MODE mode"
 fi
@@ -400,6 +424,7 @@ cat >> "$NEW_ENV" <<ENVFILE
 AGENTBOX_DOMAIN=$DOMAIN
 AGENTBOX_MODE=$MODE
 AGENTBOX_BIND=$BIND
+AGENTBOX_BIND_PUBLIC=$BIND_PUBLIC
 AGENTBOX_EDGE_NETWORK=$EDGE_NETWORK
 AGENTBOX_CERT_RESOLVER=$CERT_RESOLVER
 AGENTBOX_USER=$USERNAME

@@ -377,5 +377,22 @@ if [ "$(upget AGENTBOX_VERSION)" = v9.9.10-dirty ]; then pass "and says when the
 if [ "$(grep -c '^AGENTBOX_VERSION=' "$UP/box/.env")" = 1 ]; then pass "and writes it once"; else fail "AGENTBOX_VERSION duplicated by update"; fi
 if [ "$(upget ANTHROPIC_API_KEY)" = sk-ant-keepme ]; then pass "leaving the rest of .env alone"; else fail "update lost a key"; fi
 
+echo "behind-proxy listens on loopback unless told otherwise in so many words"
+fresh() { rm -f "$DIR/.env"; AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --password abcdefgh1 --mode behind-proxy "$@" >/dev/null 2>"$DIR/err"; }
+for b in 127.0.0.1:8443 127.0.0.2:9000 localhost:8443 '[::1]:8443'; do
+    if fresh --bind "$b"; then pass "--bind $b is loopback"; else fail "--bind $b refused: $(cat "$DIR/err")"; fi
+done
+for b in 0.0.0.0:8443 10.0.0.5:8443 8443 '[::]:8443' 192.168.1.2:80; do
+    if fresh --bind "$b"; then fail "--bind $b accepted without --bind-public"; else pass "--bind $b refused without --bind-public"; fi
+done
+if fresh --bind 10.0.0.5:8443 --bind-public && grep -q 'warning' "$DIR/err"; then
+    pass "--bind-public allows it, with a warning"
+    expect AGENTBOX_BIND_PUBLIC on "and .env remembers it"
+    AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes >/dev/null 2>&1 \
+        && pass "so a re-run keeps working" || fail "a re-run of a --bind-public install was refused"
+else
+    fail "--bind-public: $(cat "$DIR/err")"
+fi
+
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

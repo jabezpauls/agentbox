@@ -21,7 +21,8 @@ prints the resolved command before it runs anything.
 | --- | --- | --- |
 | `--domain <host>` | — | The hostname you browse to. Required in standalone and traefik modes. |
 | `--mode <mode>` | `standalone` | `standalone` owns :80/:443 and gets its own certificate; `behind-proxy` binds loopback only; `traefik` publishes no port and lets a container Traefik route to it. |
-| `--bind <addr:port>` | `127.0.0.1:8443` | behind-proxy listen address. |
+| `--bind <addr:port>` | `127.0.0.1:8443` | behind-proxy listen address. Must be loopback unless you also pass `--bind-public`. |
+| `--bind-public` | off | Allow a `--bind` address other hosts can reach, for a proxy on another machine. It serves plain HTTP and believes `X-Forwarded-For` from any private address, so firewall it to your proxy alone. |
 | `--edge-network <name>` | `edge-prod` | traefik: the external network your Traefik already watches. |
 | `--cert-resolver <name>` | `letsencrypt` | traefik: the Traefik certificate resolver for this host. |
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
