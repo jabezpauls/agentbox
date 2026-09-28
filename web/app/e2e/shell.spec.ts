@@ -119,6 +119,34 @@ test("every surface runs under the page's content security policy without a viol
   expect(await page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
 });
 
+test("an app.open event opens the dock on that app", async ({ page }) => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<!doctype html><title>dock app</title><h1>Opened by an agent</h1>");
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    await resume(page, cookies, "/files");
+    await expect(surface(page, "files")).toBeVisible();
+    const app = await page.evaluate(async (port) => {
+      const res = await fetch("/api/apps", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ port, name: "dock-e2e" }) });
+      return (await res.json()) as { id: string };
+    }, port);
+    // What agentbox-preview does: the bridge emits app.open to every page.
+    await page.evaluate(async (id) => {
+      await fetch(`/api/apps/${id}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "claude" }) });
+    }, app.id);
+    const dock = page.getByRole("complementary", { name: "Dock" });
+    await expect(dock).toBeVisible();
+    await expect(dock.locator(`iframe[src*="/a/${app.id}/"]`)).toBeAttached();
+    await expect(dock.frameLocator("iframe").first().getByRole("heading", { name: "Opened by an agent" })).toBeVisible();
+    await page.evaluate(async (id) => void (await fetch(`/api/apps/${id}`, { method: "DELETE" })), app.id);
+  } finally {
+    server.close();
+  }
+});
+
 test("J1: a link into the app survives the sign-in on the way", async ({ page }) => {
   await signIn(page, "/settings/cli");
   await expect(surface(page, "settings")).toBeVisible();

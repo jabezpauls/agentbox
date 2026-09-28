@@ -10,7 +10,20 @@ import { signIn } from "./gate.ts";
 export async function sharedSession(browser: Browser, clientIp: string): Promise<Cookie[]> {
   const context = await browser.newContext({ extraHTTPHeaders: { "x-agentbox-client-ip": clientIp } });
   const page = await context.newPage();
-  await signIn(page);
+  // The suite spends most of the gate's sign-in budget for all clients (some
+  // specs must sign in for real); a sign-in the gate turns away as busy waits
+  // out the pause it names and goes again.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await signIn(page);
+      break;
+    } catch (err) {
+      const said = (await page.locator("[role=alert], .login-error").first().textContent().catch(() => "")) ?? "";
+      const wait = Number(/(\d+) seconds?/.exec(said)?.[1] ?? 0);
+      if (attempt >= 3 || !wait) throw err;
+      await page.waitForTimeout((wait + 1) * 1000);
+    }
+  }
   const cookies = await context.cookies();
   await context.close();
   return cookies;
