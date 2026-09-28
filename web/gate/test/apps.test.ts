@@ -113,7 +113,7 @@ describe("the owner's side (/_gate/apps)", () => {
 
   it("checks the owner's choices", async () => {
     const app = await registerApp(h, { port: 5181 });
-    for (const body of [{ mode: "public" }, { mode: "link", expiresIn: -1 }, { mode: "link", expiresIn: 10 ** 12 }, { mode: "passcode" }, { mode: "passcode", passcode: "abc" }]) {
+    for (const body of [{ mode: "public" }, { mode: "link", expiresIn: -1 }, { mode: "link", expiresIn: 10 ** 12 }, { mode: "passcode", passcode: "abc" }, { mode: "passcode", passcode: "seven77" }]) {
       expect((await share(app.id, body)).status, JSON.stringify(body)).toBe(400);
     }
     expect((await share("abcdefghijklmnopqrstuvwxyz", { mode: "link" })).status).toBe(404);
@@ -182,6 +182,29 @@ describe("who may open /a/<id>/", () => {
     expect((await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: grant } })).status).toBe(404);
   });
 
+  it("an owner's grant lasts an hour unused, and is renewed while the app is in use", async () => {
+    const app = await registerApp(h, { port: 5214 });
+    const first = grantFrom(await request(h.base, "GET", `/a/${app.id}/`, { headers: { cookie, ...NAV } })) as string;
+    clock += 20 * 60_000;
+    // Most of it left: no renewal.
+    const early = await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: first } });
+    expect(early.status).toBe(200);
+    expect(grantFrom(early)).toBeNull();
+    clock += 20 * 60_000;
+    // Past half: the app's own request brings back a fresh one.
+    const renewing = await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: first } });
+    const second = grantFrom(renewing) as string;
+    expect(second).toBeTruthy();
+    expect(renewing.headers["set-cookie"]?.[0]).toContain("Max-Age=3600");
+    clock += 40 * 60_000;
+    // The first has run out; the renewed one has not.
+    expect((await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: first } })).status).toBe(404);
+    expect((await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: second } })).status).toBe(200);
+    // Left alone for an hour, it is gone.
+    clock += 61 * 60_000;
+    expect((await request(h.base, "GET", `/a/${app.id}/x`, { headers: { cookie: second } })).status).toBe(404);
+  });
+
   it("a forged or altered grant opens nothing", async () => {
     const app = await registerApp(h, { port: 5206 });
     const grant = grantFrom(await request(h.base, "GET", `/a/${app.id}/`, { headers: { cookie, ...NAV } })) as string;
@@ -240,25 +263,41 @@ describe("who may open /a/<id>/", () => {
     expect((await request(h.base, "GET", `/a/${app.id}/api`, { headers: { cookie: grant } })).status).toBe(404);
   });
 
+  it("makes a passcode when the owner asks for one without giving it, and hands it back once", async () => {
+    const app = await registerApp(h, { port: 5215 });
+    const res = await share(app.id, { mode: "passcode", expiresIn: null });
+    expect(res.status).toBe(200);
+    const made = res.json<{ passcode: string }>().passcode;
+    expect(made).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+    // Shared again without one: the passcode is kept, and not handed back.
+    const again = await share(app.id, { mode: "passcode", expiresIn: 3600 });
+    expect(again.json()).not.toHaveProperty("passcode");
+    const unlocked = await request(h.base, "POST", `/a/${app.id}/__agentbox/unlock`, {
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "null" },
+      body: `passcode=${made}`,
+    });
+    expect(unlocked.status).toBe(303);
+  });
+
   it("takes a passcode from the app's own page, never another site's form", async () => {
     const app = await registerApp(h, { port: 5212 });
-    await share(app.id, { mode: "passcode", passcode: "letmein", expiresIn: null });
+    await share(app.id, { mode: "passcode", passcode: "letmein-now", expiresIn: null });
     const res = await request(h.base, "POST", `/a/${app.id}/__agentbox/unlock`, {
       headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://evil.example" },
-      body: "passcode=letmein",
+      body: "passcode=letmein-now",
     });
     expect(res.status).toBe(403);
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
-  it("keeps guesses at a passcode off the owner's sign-in budget, and caps them per app from everywhere", async () => {
+  it("keeps guesses at a passcode off the owner's sign-in budget, locks out the guesser, and caps them per app from everywhere", async () => {
     let tclock = Date.now();
     const t = await startHarness({ trustedProxies: ["127.0.0.1"], dataPlane: { host: "127.0.0.1", port: plane.port } }, { now: () => tclock });
     try {
       const c = await login(t);
       const created = await request(t.apps, "POST", "/apps", { body: { port: 5213 } });
       const id = created.json<{ id: string }>().id;
-      await request(t.base, "PUT", `/_gate/apps/${id}/visibility`, { headers: sameOrigin(t, { cookie: c }), body: { mode: "passcode", passcode: "right one", expiresIn: null } });
+      await request(t.base, "PUT", `/_gate/apps/${id}/visibility`, { headers: sameOrigin(t, { cookie: c }), body: { mode: "passcode", passcode: "right one!", expiresIn: null } });
       const guess = (ip: string, passcode = "wrong") =>
         request(t.base, "POST", `/a/${id}/__agentbox/unlock`, {
           headers: { "content-type": "application/x-www-form-urlencoded", origin: "null", "x-agentbox-client-ip": ip },
@@ -268,13 +307,23 @@ describe("who may open /a/<id>/", () => {
       for (let i = 0; i < 5; i++) expect((await guess("198.51.100.1")).status).toBe(401);
       expect((await guess("198.51.100.1")).status).toBe(429);
       await login(t, { ip: "198.51.100.1" });
-      // Many addresses, each within its own limit and the ceiling across all
-      // of them: thirty wrong passcodes for the app within ten minutes, and
-      // nobody gets another try for a while — the right passcode included.
-      tclock += 61_000;
-      for (let i = 0; i < 25; i++) expect((await guess(`203.0.113.${i + 1}`)).status).toBe(401);
-      tclock += 61_000;
-      const capped = await guess("203.0.113.200", "right one");
+      // It keeps at it until it is locked out; that locks out it alone, and
+      // a visitor with the passcode is let in all the same.
+      for (let n = 0; n < 5; n++) {
+        tclock += 70_000;
+        await guess("198.51.100.1");
+      }
+      expect((await guess("198.51.100.1", "right one!")).status).toBe(429);
+      expect((await guess("198.51.100.9", "right one!")).status).toBe(303);
+      // Many addresses, each within its own limits: two hundred wrong
+      // passcodes for the app within ten minutes, and nobody gets another
+      // try for a while — the right passcode included. (A fresh window first.)
+      tclock += 11 * 60_000;
+      for (let i = 0; i < 200; i++) {
+        if (i % 25 === 0) tclock += 61_000;
+        expect((await guess(`203.0.${Math.floor(i / 250)}.${(i % 250) + 1}`)).status, String(i)).toBe(401);
+      }
+      const capped = await guess("203.0.113.250", "right one!");
       expect(capped.status).toBe(429);
       expect(capped.body).toContain("Too many wrong passcodes for this app");
     } finally {
@@ -284,11 +333,11 @@ describe("who may open /a/<id>/", () => {
 
   it("sends a passcode's visitor only somewhere in the app", async () => {
     const app = await registerApp(h, { port: 5209 });
-    await share(app.id, { mode: "passcode", passcode: "letmein", expiresIn: null });
+    await share(app.id, { mode: "passcode", passcode: "letmein-now", expiresIn: null });
     for (const next of ["https://evil.example/", "//evil.example", "/vscode/", `/a/${app.id}/../../x`, "/a/abcdefghijklmnopqrstuvwxyz/"]) {
       const res = await request(h.base, "POST", `/a/${app.id}/__agentbox/unlock`, {
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: `passcode=letmein&next=${encodeURIComponent(next)}`,
+        body: `passcode=letmein-now&next=${encodeURIComponent(next)}`,
       });
       expect(res.headers.location, next).toBe(`/a/${app.id}/`);
     }

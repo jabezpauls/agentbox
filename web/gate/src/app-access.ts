@@ -176,8 +176,10 @@ export interface AppGatewayDeps {
   /** Refused `/a/` lookups, per client address. */
   probes: WindowLimiter;
   /**
-   * Wrong passcodes per app, from every address together: guesses spread over
-   * many addresses still meet this.
+   * Wrong passcodes per app, from every address together: a ceiling that
+   * guesses spread over many addresses still meet. Set well above what the
+   * per-address limits let any one guesser reach, so one guesser locks out
+   * only itself.
    */
   passcodeMisses: WindowLimiter;
   forwarded(info: RequestInfo): Forwarded;
@@ -261,12 +263,12 @@ export class AppGateway {
     return app;
   }
 
-  private admit(req: IncomingMessage, app: AppRecord): { admission: Admission; hasGrant: boolean } | null {
+  private admit(req: IncomingMessage, app: AppRecord): { admission: Admission; hasGrant: boolean; grantExpiresAt?: number } | null {
     const now = this.deps.core.now();
     for (const value of grantValues(req.headers.cookie)) {
       const g = this.deps.grants.verify(value, now);
       if (g && g.appId === app.id && this.grantSubjectValid(g.subject, app)) {
-        return { admission: { as: "grant", subject: g.subject }, hasGrant: true };
+        return { admission: { as: "grant", subject: g.subject }, hasGrant: true, grantExpiresAt: g.expiresAt };
       }
     }
     const subject = this.deps.core.authenticate(req);
@@ -336,8 +338,19 @@ export class AppGateway {
     // The owner's page load: mint the grant its own requests will carry.
     let grant: string | null = null;
     const { admission } = admitted;
+    let subject: GrantSubject | null = null;
     if (admission.as === "owner" && !admitted.hasGrant && isNavigation(req)) {
-      const subject: GrantSubject = { kind: admission.subject.kind, id: admission.subject.id };
+      subject = { kind: admission.subject.kind, id: admission.subject.id };
+    } else if (
+      // An owner's grant in use, half gone: renewed, so it lasts as long as
+      // the app is in use and no longer.
+      admission.as === "grant" &&
+      admission.subject.kind !== "passcode" &&
+      (admitted.grantExpiresAt ?? 0) - this.deps.core.now() < OWNER_GRANT_MS / 2
+    ) {
+      subject = admission.subject;
+    }
+    if (subject) {
       const value = await this.deps.grants.mint({ appId: app.id, subject, expiresAt: this.deps.core.now() + OWNER_GRANT_MS });
       grant = grantCookie(app.id, value, OWNER_GRANT_MS);
     }

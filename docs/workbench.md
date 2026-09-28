@@ -199,8 +199,14 @@ Only you can share an app — agents cannot, whatever they try. Press **Share**,
 choose **anyone with the link** or **link and a passcode**, and for how long
 (an hour, a day, a week, a month, or until you stop), and the app's address is
 copied: the same address you were looking at, now open to whoever has it. A
-shared app keeps a banner in the panel while it is shared. A visitor with the
+shared app keeps a banner in the panel while it is shared. A passcode is at
+least 8 characters; the dice button makes one (or leave it empty and the box
+makes one), and the copy button copies it to hand on. A visitor with the
 passcode page sees your app's name and a passcode field, nothing else.
+
+While you have a private app open, a site that knows its address can reach it
+as you; keep private app addresses to yourself and sign out when you are done
+(see [the security model](security.md#apps)).
 
 **Stop sharing** makes the app private again at once, and cuts off anyone
 still connected — their page, its streams and its live-reload socket. A link

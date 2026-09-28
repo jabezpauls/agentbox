@@ -31,8 +31,15 @@ export interface Grant {
   expiresAt: number;
 }
 
-/** A grant from a session or a token lasts this long, and is minted again on the next page load. */
-export const OWNER_GRANT_MS = 12 * 60 * 60_000;
+/**
+ * A grant from a session or a token lasts this long without use. The app's
+ * own requests renew it (a fresh one comes back once half of it is gone), so
+ * it lives exactly as long as the app is in use, plus this. It is short
+ * because it is what another site that knows a private app's id could ride
+ * (see docs/security.md): a grant exists only while the owner has the app
+ * open, and for an hour after.
+ */
+export const OWNER_GRANT_MS = 60 * 60_000;
 /** A passcode unlocks for this long at most (less, when the link ends first). */
 export const PASSCODE_GRANT_MS = 7 * 24 * 60 * 60_000;
 

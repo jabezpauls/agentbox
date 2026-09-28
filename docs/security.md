@@ -250,7 +250,14 @@ the gate's public side (`/_gate/apps/<id>/visibility`), by the owner's session
 or device token. That takes no password in the request, unlike the account
 changes above: a sandbox with internet access can publish itself through a
 tunnel of its own anyway, so a password here would guard nothing that is not
-already open, and sharing is an everyday action. What the gate guarantees is
+already open, and sharing is an everyday action. Be clear about what that
+means with egress restricted (see "Egress filtering"): then the sandbox has
+no tunnel of its own, and sharing an app is a way out of it — through your
+session. Script from a compromised sandbox running in a tab of yours (see
+"What a compromised sandbox can still do") can call the sharing API as you and
+publish an app, and so whatever the sandbox serves on it. The gate logs every
+change of who may open an app; if you restrict egress because you distrust
+what runs in the sandbox, run with `--sharing off`, or expect this. What the gate guarantees is
 that nothing is public unless the owner said so, that agentbox's own services
 never are (8080, 7681–7683, 7800, 7801, 7900, 7901 and any the operator adds
 in `AGENTBOX_INFRA_PORTS` are refused as apps when registered, changed and
@@ -262,11 +269,15 @@ or device token (a page load then mints a grant); anyone, when the owner
 shared it with the link and it has not expired; anyone with the passcode,
 when shared with one — the gate's own passcode page, checked against a bcrypt
 hash, taken only from that page's own form (never another site's), and never
-forwarded to the app. Guesses meet the sign-in limits per address, counted
-apart from sign-in so they can never use up the owner's, and at most 30 wrong
-passcodes for one app in ten minutes from every address together; a passcode
-is at least 4 characters, and a longer one is worth it for anything that
-matters. Anything else:
+forwarded to the app. Guesses meet the sign-in limits per guessing address —
+five a minute, then waits, and ten wrong in a row lock that address out for
+15 minutes — counted apart from sign-in, so they never use up the owner's.
+One guesser therefore locks out only itself. Above that, 200 wrong passcodes
+for one app in ten minutes, from every address together, pause that app's
+passcode page for everyone (the residual: a guesser with many addresses can
+keep a passcode page paused; switch the app to a new passcode or to the link
+alone). A passcode is at least 8 characters; the Share popover (and the API,
+asked for a passcode without one) makes one of about 60 bits. Anything else:
 a page load is sent to sign in, and any other request gets `404` — what an
 unknown id gets, so a private app and a missing one look alike; those refusals
 cost from a per-address budget of 60 a minute, so ids cannot be enumerated.
@@ -276,15 +287,22 @@ HttpOnly; Secure; SameSite=None`, an HMAC-signed `{app, subject, expiry}`
 under a key in the gate's store. The subject is the session, token or
 passcode it was minted from, and a grant is good only while that is: ending
 the session, revoking the token, or changing or removing the passcode voids
-it. `SameSite=None` because an app's page has an opaque origin, so every
-request it makes is cross-site; the cookie's path confines it to one app, and
-it opens nothing else — not the control plane, not another app.
+it. A grant from your session is minted when you open the app and lasts an
+hour unused — the app's own requests renew it — so it exists only while you
+have the app open, and for an hour after. `SameSite=None` because an app's
+page has an opaque origin, so every request it makes is cross-site; the
+cookie's path confines it to one app, and it opens nothing else — not the
+control plane, not another app. What another site can do with it is below,
+under the residuals.
 
 **The font exemption.** `@font-face` loads are CORS requests that carry no
 cookie, so a private app's own fonts would never carry its grant. A `GET` for
 a `.woff2`, `.woff`, `.ttf` or `.otf` path of an existing app is let through
-without one only when what the app answers is a font; anything else is a
-`404`. The most a leaked private id yields is a font file.
+without one — it is forwarded to the app, with no credential, as any request
+is — and the answer is passed back only when its content type is a font;
+anything else becomes a `404` before a byte of it leaves the gate. So anyone
+who knows a private app's id can make the app answer such a `GET` (the app
+sees the request), and the most they get back is a font file.
 
 **The app policy**, on every `/a/` exchange:
 
@@ -376,19 +394,42 @@ Residuals, stated plainly:
 - **A sandbox with egress can publish itself**, through a tunnel service of
   its own (ngrok, cloudflared). agentbox's own front door never does it
   without the owner; blocking the rest is egress filtering (below).
-- **`SameSite=None` grants.** The grant must be `SameSite=None` to reach an
-  app's own opaque page, so another site can make a request to
-  `/a/<id>/` that carries it. It is scoped to that one app's path and opens
-  nothing else; the gate refuses a state-changing request or a WebSocket that
-  names another site as its origin; and the other site cannot read what comes
-  back (CORS is answered for `null` only). A plain navigation or an image
-  load from another site does reach the app with the owner's grant, as a link
-  to any site that uses cookies does.
+- **Another site that knows a private app's id, while you have it open.** The
+  grant is `SameSite=None`, so your browser sends it on requests any site
+  makes to `/a/<id>/`. The app's own page is an opaque origin, and nothing a
+  browser sends tells it apart from another site's sandboxed frame: both say
+  `Origin: null` and `Sec-Fetch-Site: cross-site`, and an opaque document
+  sends no referrer at all. So a site that knows the id, visited by you while
+  you hold a grant for that app, **can read the app as you and act on it as
+  you**: a sandboxed frame of its own can `fetch` the app with credentials
+  and read the answer (the gate answers CORS for `null`, as the app's own
+  page needs), and can make state-changing requests; a form it posts from a
+  page with `no-referrer` arrives with `Origin: null`, exactly as the app's
+  own form posts do. What it cannot do: anything without the id (128 random
+  bits, never sent as a referrer by the box's pages or by an app's opaque
+  pages); anything once the grant is gone — an hour after you last used the
+  app, or at once when you sign out or your session ends; anything to
+  another app, or to the box itself (the grant opens one app's path and
+  nothing else); a state-changing request or WebSocket that names its own
+  origin (refused). `Partitioned` cookies (CHIPS), which would keep the grant
+  to the box as the top-level site, do not fit: in Chromium and Firefox the
+  app's own requests from its opaque page fall in a different partition from
+  the page load that set the grant, so the app stops working (the fidelity
+  suite shows it), and WebKit ignores the attribute. Keep private app ids to
+  yourself, sign out when you are done, and for an app that must not be
+  reachable this way, `agentbox forward` it and work on `localhost`. The
+  fidelity suite pins down both sides: another site gets nothing without the
+  grant, after sign-out, or for another app; and it does get through while
+  you have the app open (a test marked as expected to fail, in every engine).
 - **A browser that blocks `SameSite=None` cookies for opaque documents** would
   lose a private app's grant for the page's own requests, the full-screen tab
   above all; public apps need no grant. The fidelity suite finds Chromium,
   Firefox and WebKit all sending it (in the panel and full screen); a browser
   set to block third-party cookies may not.
+- **An app's own cookies** are forced `SameSite=None` for the same reason as
+  the grant, so what the previous point says of the grant holds for them too:
+  another site that knows the id reaches the app with them — a shared app's
+  visitors' cookies included.
 - **Apps are not isolated from each other by origin.** Every app is its own
   opaque origin in the browser, but they share the box's host name, so an
   app's server-set cookies are kept apart by path (`/a/<id>/`), not by
