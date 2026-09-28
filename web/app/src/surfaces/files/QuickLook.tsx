@@ -84,18 +84,28 @@ export function QuickLook({ entry, siblings, onNavigate, onClose }: Props) {
   // Markdown is rendered by a module fetched the first time it is needed.
   const [remoteImages, setRemoteImages] = useState(false);
   const [rendered, setRendered] = useState<Rendered | null>(null);
+  // The renderer's module could not be fetched (the connection dropped, or
+  // the box was updated under this page): say so, and fetch it again on ask.
+  const [renderFailed, setRenderFailed] = useState(false);
+  const [renderTry, setRenderTry] = useState(0);
   useEffect(() => setRemoteImages(false), [entry.path]);
   useEffect(() => {
     setRendered(null);
+    setRenderFailed(false);
     if (kind !== "markdown" || !text || text.binary) return;
     let live = true;
-    void loadMarkdown().then((m) => {
-      if (live) setRendered(m.renderMarkdown(text.text, entry.path, { remoteImages }));
-    });
+    loadMarkdown().then(
+      (m) => {
+        if (live) setRendered(m.renderMarkdown(text.text, entry.path, { remoteImages }));
+      },
+      () => {
+        if (live) setRenderFailed(true);
+      },
+    );
     return () => {
       live = false;
     };
-  }, [kind, text, entry.path, remoteImages]);
+  }, [kind, text, entry.path, remoteImages, renderTry]);
 
   const Icon = iconFor(entry);
   let body: React.ReactNode;
@@ -122,6 +132,21 @@ export function QuickLook({ entry, siblings, onNavigate, onClose }: Props) {
         {[70, 90, 55, 80, 40].map((w, i) => (
           <div key={i} className="skeleton" style={{ width: `${w}%`, height: 12 }} />
         ))}
+      </div>
+    );
+  } else if (text && !text.binary && kind === "markdown" && !source && renderFailed) {
+    body = (
+      <div className="empty">
+        <p className="empty-title">Couldn't show it formatted.</p>
+        <p className="empty-sub">The part of the app that formats Markdown did not load. The source is one click away.</p>
+        <div className="empty-actions">
+          <button className="btn btn-small" onClick={() => setRenderTry((n) => n + 1)}>
+            Try again
+          </button>
+          <button className="btn btn-small btn-ghost" onClick={() => setSource(true)}>
+            Show the source
+          </button>
+        </div>
       </div>
     );
   } else if (text && !text.binary && kind === "markdown" && !source) {

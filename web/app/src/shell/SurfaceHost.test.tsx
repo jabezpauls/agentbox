@@ -28,11 +28,17 @@ beforeEach(() => {
 });
 
 describe("SurfaceHost with surfaces fetched on first visit", () => {
-  it("shows a surface once its code arrives, and a Reload when it cannot", async () => {
+  it("shows a surface once its code arrives, and imports it again on Try again when it cannot", async () => {
     let arrive: (c: React.ComponentType) => void = () => {};
     const Late = lazySurface(() => new Promise<React.ComponentType>((r) => (arrive = r)));
-    const Gone = lazySurface<object>(() => Promise.reject(new TypeError("Failed to fetch dynamically imported module")));
-    render(<SurfaceHost render={{ ...renderers, files: () => <Late />, apps: () => <Gone /> }} />);
+    let attempts = 0;
+    const Flaky = lazySurface<object>(() => {
+      attempts += 1;
+      return attempts === 1 ? Promise.reject(new TypeError("Failed to fetch dynamically imported module")) : Promise.resolve(() => <p>apps are here</p>);
+    });
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+    render(<SurfaceHost render={{ ...renderers, files: () => <Late />, apps: () => <Flaky /> }} />);
 
     act(() => useRouter.getState().navigate({ surface: "files", path: "" }));
     expect(screen.getByLabelText("Loading Files")).toHaveAttribute("aria-busy", "true");
@@ -41,7 +47,12 @@ describe("SurfaceHost with surfaces fetched on first visit", () => {
 
     act(() => useRouter.getState().navigate({ surface: "apps" }));
     expect(await screen.findByText("Couldn't load this part of the app.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    expect(await screen.findByText("apps are here")).toBeInTheDocument();
+    expect(attempts).toBe(2);
+    // Without reloading the page, which would drop the uploads under way.
+    expect(reload).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 
