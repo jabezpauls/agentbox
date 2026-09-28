@@ -84,10 +84,13 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
   }, [surface]);
 
   // `/workbench?review=<key>` — the link `agentbox-review open` prints —
-  // opens the dock on that review.
+  // opens the dock on that review, once: the address then drops the key, so
+  // coming back to the Workbench later does not open it again.
   const review = route.surface === "workbench" ? route.review : undefined;
   useEffect(() => {
-    if (review) useApp.getState().setInspector({ open: true, tab: "review", reviewKey: review });
+    if (!review) return;
+    useApp.getState().setInspector({ open: true, tab: "review", reviewKey: review });
+    useRouter.getState().navigate({ surface: "workbench" }, { replace: true });
   }, [review]);
 
   // Reviews and apps in the background, so "needs you" is current on every

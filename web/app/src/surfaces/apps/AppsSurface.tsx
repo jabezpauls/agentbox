@@ -43,16 +43,12 @@ async function act(label: string, fn: () => Promise<unknown>, done?: string): Pr
   void useApps.getState().refresh();
 }
 
-/** Make an app of a port something is listening on. */
+/**
+ * Make an app of a port something is listening on — in one click, named after
+ * its process (rename it later); private until shared.
+ */
 async function makeApp(port: number, suggested?: string | null): Promise<void> {
-  const name = await promptText({
-    title: `Make an app of port ${port}`,
-    label: "Name",
-    initial: suggested ?? `port-${port}`,
-    confirmLabel: "Make app",
-    body: <p className="dialog-text">It gets its own URL and shows in Preview. It stays private until you share it.</p>,
-  });
-  if (!name) return;
+  const name = suggested && /^[\w .-]{1,40}$/.test(suggested) ? suggested : `port-${port}`;
   try {
     const app = await appsApi.create({ port, name });
     void useApps.getState().refresh();
