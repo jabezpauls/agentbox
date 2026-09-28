@@ -59,8 +59,11 @@ export function NewAgentButton({ cwd, agents, label = "Agent" }: { cwd: string; 
   );
 }
 
-export function ProjectCard({ project, agents }: { project: Project; agents: string[] }) {
+export function ProjectCard({ project, agents: launchable }: { project: Project; agents: string[] }) {
   const g = project.git;
+  // Panes running an agent get a light each; plain terminals are counted.
+  const agents = project.agents.filter((a): a is typeof a & { agent: string } => Boolean(a.agent));
+  const shells = project.agents.length - agents.length;
   const openFiles = () => navigate({ surface: "files", path: project.path });
   return (
     <article className="card project-card" aria-labelledby={`project-${project.name}`}>
@@ -83,13 +86,18 @@ export function ProjectCard({ project, agents }: { project: Project; agents: str
       <p className="card-meta">{gitLine(project)}</p>
       {(project.agents.length > 0 || project.listeners.length > 0) && (
         <div className="card-live">
-          {project.agents.slice(0, 3).map((a) => (
-            <span key={a.paneId} className="card-chip" title={`${a.agent ?? "agent"} · ${STATUS_LABELS[a.status]}`}>
+          {agents.slice(0, 3).map((a) => (
+            <span key={a.paneId} className="card-chip" title={`${a.agent} · ${STATUS_LABELS[a.status]}`}>
               <StatusBadge status={a.status} />
-              {a.agent ?? "agent"}
+              {a.agent}
             </span>
           ))}
-          {project.agents.length > 3 && <span className="card-chip is-more">+{project.agents.length - 3}</span>}
+          {agents.length > 3 && <span className="card-chip is-more">+{agents.length - 3}</span>}
+          {shells > 0 && (
+            <span className="card-chip is-more" title="Terminals open in this project">
+              {plural(shells, "terminal")}
+            </span>
+          )}
           {project.listeners.map((l) => (
             <span key={l.port} className="card-chip is-port" title={l.process ? `${l.process} on port ${l.port}` : `Port ${l.port}`}>
               :{l.port}
@@ -111,7 +119,7 @@ export function ProjectCard({ project, agents }: { project: Project; agents: str
           <SquareTerminal size={14} aria-hidden="true" />
           Terminal
         </button>
-        <NewAgentButton cwd={project.path} agents={agents} />
+        <NewAgentButton cwd={project.path} agents={launchable} />
       </div>
     </article>
   );
