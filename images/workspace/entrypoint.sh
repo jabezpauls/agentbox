@@ -25,8 +25,12 @@ fi
 # everything outside the markers is kept as it was. (Claude Code reads the same
 # text from /etc/claude-code/CLAUDE.md, baked into the image.)
 agents=/usr/local/share/agentbox/agents.md
-if [ -f "$agents" ]; then
-    mkdir -p /home/coder/.codex
+mkdir -p /home/coder/.codex 2>/dev/null || true
+if [ -f "$agents" ] && [ ! -w /home/coder/.codex ]; then
+    # A home volume seeded by an older image, which left ~/.codex owned by root.
+    echo "note: ~/.codex is not writable, so Codex is not told how the box works; fix it once on the host with:" >&2
+    echo "  docker compose exec -u 0 code chown -R 1000:1000 /home/coder/.codex" >&2
+elif [ -f "$agents" ]; then
     target=/home/coder/.codex/AGENTS.md
     begin='<!-- agentbox:begin (managed by agentbox; edits inside are replaced on restart) -->'
     end='<!-- agentbox:end -->'

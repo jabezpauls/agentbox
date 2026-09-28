@@ -147,6 +147,13 @@ RUN printf '%s\n' \
         > /etc/profile.d/agentbox.sh \
     && chmod 0644 /etc/profile.d/agentbox.sh
 
+# The installs above ran as root with HOME at /home/coder, and left npm's
+# cache and Codex's ~/.codex there owned by root. A fresh home volume is seeded
+# from this directory, so they belong to the user: a root-owned ~/.codex keeps
+# Codex from writing its own settings, and the entrypoint from writing its
+# instructions.
+RUN chown -R 1000:1000 /home/coder
+
 USER 1000:1000
 WORKDIR /workspace
 
