@@ -15,8 +15,8 @@
 //
 // It then stages a believable box — two workspaces, an agent at work and one
 // waiting, the project's dev server — signs in once per theme and
-// photographs each surface. MOCK_APPS=<json> (e2e/tools/apps-fixture.json)
-// stands in for the app API on a bridge without one.
+// photographs each surface. The project's dev server is made an app and
+// shared, as the owner would, so Home, Apps and the dock show a real one.
 import { chromium, devices } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
@@ -145,6 +145,19 @@ if (serverPane) {
   });
   await rpc(stage, "pane.rename", { pane_id: serverPane, label: "dev server" });
 }
+// The dev server as an app, shared by link for a few days.
+await stage.waitForTimeout(1500);
+const made = await stage.evaluate(async (port) => {
+  const res = await fetch("/_gate/apps", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ port, name: "goofy" }) });
+  const app = await res.json();
+  await fetch(`/_gate/apps/${app.id}/visibility`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode: "link", expiresIn: 5 * 86400 }),
+  });
+  return app.id;
+}, DEV_PORT);
+if (!made) console.warn("could not make an app of the dev server");
 await rpc(stage, "tab.create", { workspace_id: a.workspace.workspace_id, cwd: PROJECT, label: "build", focus: false });
 const b = await rpc(stage, "workspace.create", { cwd: `${WORKSPACE}/notes`, label: "docs-site", focus: false });
 await rpc(stage, "pane.send_input", { pane_id: b.root_pane.pane_id, text: "clear; printf 'Should the plan ship behind a flag? (y/n) '; sleep 86400", keys: ["Enter"] });
@@ -241,9 +254,12 @@ for (const scheme of ["light", "dark"]) {
   await shoot("palette");
   await page.keyboard.press("Escape");
 
-  // The dock beside the Workbench, previewing the project's page.
+  // The dock beside the Workbench, showing the project's app.
   await go("/workbench");
-  await page.getByRole("button", { name: "Dock" }).click();
+  await go("/apps");
+  await page.locator(".apps-list li", { hasText: "goofy" }).getByRole("button", { name: "Preview" }).first().click();
+  await go("/workbench");
+  if (!(await page.getByRole("complementary", { name: "Dock" }).isVisible())) await page.getByRole("button", { name: "Dock" }).click();
   await page
     .frameLocator(".dock iframe")
     .first()

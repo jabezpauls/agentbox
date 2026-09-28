@@ -78,7 +78,7 @@ docker run -d --rm --name "$box" --hostname agentbox --network "$net" --network-
 
 # The gate, outside the sandbox as in the stack, seeded with `coder`.
 hash="$(node --input-type=module -e "const { hashPassword } = await import('$web/gate/dist/password.js'); console.log(await hashPassword(process.argv[1], 4));" "$password")"
-docker run -d --rm --name "$gate" --network "$net" -p "127.0.0.1:$port:7900" \
+docker run -d --rm --name "$gate" --network "$net" --network-alias gate -p "127.0.0.1:$port:7900" \
   --tmpfs /data:uid=1000,gid=1000,mode=0700 -e GATE_DATA_DIR=/data -e GATE_ADMIN_SOCKET=/tmp/agentbox-gate.sock \
   -e AGENTBOX_USER=coder -e AGENTBOX_PASSWORD_HASH="$hash" -e GATE_TRUSTED_PROXIES="$gateway" \
   -v "$web/gate:/opt/gate:ro" -v "$web/node_modules:/opt/node_modules:ro" \

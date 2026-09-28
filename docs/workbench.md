@@ -739,7 +739,7 @@ never of a developer's machine:
 ```bash
 cd web && npm run build && cd app
 e2e/tools/clean-box.sh up agentbox/workspace:<tag>
-MOCK_APPS=e2e/tools/apps-fixture.json node e2e/tools/screenshots.mjs http://127.0.0.1:27950 ../../docs/images
+node e2e/tools/screenshots.mjs http://127.0.0.1:27950 ../../docs/images
 e2e/tools/clean-box.sh down
 ```
 
@@ -749,5 +749,4 @@ network, limits and disks — with this checkout's bridge, app and editor
 extension, and the gate beside it. `screenshots.mjs` checks what it is
 pointed at (the paths, the user, a process table and ports with nothing of a
 desktop in them) and refuses anything else, then stages the box and takes
-every surface in light and dark. `MOCK_APPS` stands in for the app API until
-the bridge has one.
+every surface in light and dark.
