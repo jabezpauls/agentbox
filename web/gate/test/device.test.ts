@@ -151,6 +151,19 @@ describe("the device login", () => {
     expect((await from("2001:db8:1:2::4")).status).toBe(429);
   });
 
+  it("lets one IPv6 /48 keep only ten logins waiting, however many /64s it spreads over", async () => {
+    h = await startHarness({ trustedProxies: ["127.0.0.1"] });
+    const from = (ip: string) =>
+      request(h!.base, "POST", "/_gate/device/start", { headers: { "x-agentbox-client-ip": ip }, body: { name: "x" } });
+    const statuses: number[] = [];
+    // Thirty-four /64s of one /48, three each: enough to fill the hundred.
+    for (let i = 0; i < 34; i++) for (let j = 1; j <= 3; j++) statuses.push((await from(`2001:db8:7:${i.toString(16)}::${j}`)).status);
+    expect(statuses.filter((st) => st === 200)).toHaveLength(10);
+    // Another allocation, and IPv4, are unaffected.
+    expect((await from("2001:db8:8::1")).status).toBe(200);
+    expect((await from("203.0.113.9")).status).toBe(200);
+  });
+
   it("holds at most a hundred waiting logins in all", async () => {
     h = await startHarness({ trustedProxies: ["127.0.0.1"] });
     const statuses: number[] = [];

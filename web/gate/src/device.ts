@@ -1,3 +1,4 @@
+import { networkKey } from "./client-ip.js";
 import { randomInt } from "node:crypto";
 import { digest, newId, newSecret, type Auth } from "./auth.js";
 import type { DeviceCodeRecord, Store } from "./store.js";
@@ -24,6 +25,12 @@ export const POLL_INTERVAL_S = 5;
  */
 export const MAX_PENDING_PER_CLIENT = 3;
 export const MAX_PENDING = 100;
+/**
+ * Waiting logins from one IPv6 /48, all its /64s together: without it, one
+ * allocation could hold every one of the MAX_PENDING slots, three per /64,
+ * and keep the owner's own CLI from signing in.
+ */
+export const MAX_PENDING_PER_NETWORK = 10;
 
 // No vowels, so a code never spells a word, and nothing that reads as another
 // character (0/O, 1/I).
@@ -76,6 +83,10 @@ export class DeviceFlow {
     const pending = this.store.data.deviceCodes.filter((d) => d.status === "pending");
     if (pending.filter((d) => (d.key ?? d.ip) === key).length >= MAX_PENDING_PER_CLIENT) {
       throw new TooManyPending(`${MAX_PENDING_PER_CLIENT} device logins from your address are already waiting; finish or let them expire`);
+    }
+    const network = networkKey(ip);
+    if (network !== null && pending.filter((d) => networkKey(d.ip) === network).length >= MAX_PENDING_PER_NETWORK) {
+      throw new TooManyPending("too many device logins from your network are already waiting; finish or let them expire");
     }
     if (pending.length >= MAX_PENDING) throw new TooManyPending("too many device logins are waiting; try again later");
     const t = this.now();

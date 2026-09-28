@@ -69,6 +69,20 @@ export function limitKey(ip: string): string {
     .join(":")}::/64`;
 }
 
+/**
+ * The IPv6 allocation an address belongs to: the /48 a site is commonly
+ * given, which holds 65,536 /64s. `null` for IPv4, where one address is
+ * already all a client usually has.
+ */
+export function networkKey(ip: string): string | null {
+  const groups = ipv6Groups(ip);
+  if (!groups) return null;
+  return `${groups
+    .slice(0, 3)
+    .map((g) => g.toString(16))
+    .join(":")}::/48`;
+}
+
 const REFRESH_MS = 30_000;
 const RETRY_MS = 2_000;
 
