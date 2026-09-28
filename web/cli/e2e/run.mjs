@@ -15,8 +15,10 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
+import net from "node:net";
 import path from "node:path";
-import { bundle, PASSWORD, startStack, USER, which } from "./stack.mjs";
+import { bundle, freePort, PASSWORD, startStack, USER, which } from "./stack.mjs";
 
 const argv = process.argv.slice(2);
 const keep = argv.includes("--keep");
@@ -440,6 +442,95 @@ try {
     assert(code === 0, `the container exited ${code}: ${p.text("stdout")}${p.text("stderr")}`);
     assert(/Installed agentbox/.test(p.text("stdout")) && /Signed in to .* as e2e/.test(p.text("stdout")), p.text("stdout"));
   });
+
+  // --- part two: tunnels, apps, agents, reviews, herdr -----------------------
+
+  // A dev server "in the box" (the stack runs on this machine) and its app.
+  const appServer = http.createServer((req, res) => res.end(`hello from the app ${req.url}`));
+  const appPort = await freePort();
+  await new Promise((r) => appServer.listen(appPort, "127.0.0.1", r));
+  let appId = "";
+
+  /** Run a long-lived command until `ready` shows on stdout, then `fn`, then Ctrl-C it. */
+  async function whileRunning(args, ready, fn) {
+    const p = start(args);
+    p.child.stdin.end();
+    await p.waitFor(ready);
+    try {
+      await fn(p);
+    } finally {
+      p.child.kill("SIGINT");
+      const code = await p.exit();
+      assert(code === 0, `${args.join(" ")} exited ${code}: ${p.text("stderr")}`);
+    }
+  }
+
+  await step("forward", "a port in the box at localhost here, through the real tunnel", async () => {
+    const local = await freePort();
+    await whileRunning(["forward", `${appPort}:${local}`], /http:\/\/localhost:\d+/, async () => {
+      const body = await (await fetch(`http://127.0.0.1:${local}/x?y=1`)).text();
+      assert(body === "hello from the app /x?y=1", body);
+    });
+  });
+
+  await step("apps", "ls, forward, share with a link and a passcode, unshare", async () => {
+    const made = await gate("POST", "/_gate/apps", { port: appPort, name: "e2e-app" });
+    assert(made.status === 201, `making the app: ${made.status} ${made.text}`);
+    appId = made.json().id;
+    let r = await cli(["apps", "ls", "--json"]);
+    const listed = JSON.parse(r.stdout).find((a) => a.id === appId);
+    assert(listed && listed.port === appPort && listed.url === `${stack.url}/a/${appId}/`, r.stdout);
+    const local = await freePort();
+    await whileRunning(["apps", "forward", "e2e-app", String(local)], /http:\/\/localhost:\d+/, async () => {
+      const body = await (await fetch(`http://127.0.0.1:${local}/`)).text();
+      assert(body === "hello from the app /", body);
+    });
+    const anonymous = () => fetch(`${stack.url}/a/${appId}/`, { headers: { accept: "application/json" } });
+    assert((await anonymous()).status === 404, "private app reachable before sharing");
+    r = await cli(["apps", "share", "e2e-app", "--expires", "1h"]);
+    assert(r.code === 0 && r.stdout.trim() === `${stack.url}/a/${appId}/`, `share: ${r.stdout}${r.stderr}`);
+    const shared = await anonymous();
+    assert(shared.status === 200 && (await shared.text()).startsWith("hello from the app"), `shared app: ${shared.status}`);
+    r = await cli(["apps", "share", "e2e-app", "--passcode"]);
+    assert(r.code === 0 && /passcode {2}\S{8,}/.test(r.stdout), `share --passcode: ${r.stdout}${r.stderr}`);
+    r = await cli(["apps", "unshare", "e2e-app"]);
+    assert(r.code === 0, r.stderr);
+    assert((await anonymous()).status === 404, "the app stayed public after unshare");
+  });
+
+  await step("agents", "agents ls and review ls/open", async () => {
+    let r = await cli(["agents", "ls", "--json"]);
+    assert(r.code === 0 && Array.isArray(JSON.parse(r.stdout)), `agents ls: ${r.stdout}${r.stderr}`);
+    r = await cli(["review", "ls", "--json"]);
+    assert(r.code === 0 && Array.isArray(JSON.parse(r.stdout)), `review ls: ${r.stdout}${r.stderr}`);
+    r = await cli(["review", "open", "no-such-review", "--print"]);
+    assert(r.code === 4, `review open of nothing: ${r.code}`);
+  });
+
+  await step("herdr", "herdr call and herdr socket, against the box's herdr", async () => {
+    let r = await cli(["herdr", "call", "session.snapshot"]);
+    assert(r.code === 0 && Array.isArray(JSON.parse(r.stdout).snapshot?.workspaces), `herdr call: ${r.stdout.slice(0, 300)}${r.stderr}`);
+    r = await cli(["herdr", "call", "no.such.method"]);
+    assert(r.code === 1 && /herdr:/.test(r.stderr), `herdr call of nothing: ${r.code} ${r.stderr}`);
+    const where = path.join(stack.root, "herdr-here.sock");
+    await whileRunning(["herdr", "socket", where], /herdr-here\.sock/, async () => {
+      const line = await new Promise((resolve, reject) => {
+        const c = net.connect(where, () => c.write('{"id":"e2e","method":"ping","params":{}}\n'));
+        let buf = "";
+        c.on("data", (d) => {
+          buf += d;
+          if (buf.includes("\n")) {
+            resolve(buf.split("\n")[0]);
+            c.destroy();
+          }
+        });
+        c.once("error", reject);
+      });
+      const answer = JSON.parse(line);
+      assert(answer.id === "e2e" && !answer.error, line);
+    });
+  });
+  appServer.close();
 
   // --- sign out --------------------------------------------------------------------
 

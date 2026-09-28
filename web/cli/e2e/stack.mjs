@@ -164,7 +164,7 @@ export async function startStack({ log = () => {} } = {}) {
   spawnChild("terminal", ttyd, ["--port", String(ports.terminal), "--interface", "127.0.0.1", "--base-path", "/terminal", "--check-origin", "--writable", "herdr"], sandboxEnv);
   // Started in the workspace, as a shell in the box would be.
   spawnChild("shell", ttyd, ["--port", String(ports.shell), "--interface", "127.0.0.1", "--base-path", "/shell", "--check-origin", "--writable", "bash", "-l"], sandboxEnv, workspace);
-  await Promise.all([waitForPort(ports.bridge), waitForPort(ports.terminal), waitForPort(ports.shell)]);
+  await Promise.all([waitForPort(ports.bridge), waitForPort(ports.data), waitForPort(ports.terminal), waitForPort(ports.shell)]);
 
   const { hashPassword } = await import(path.join(webDir, "gate", "dist", "password.js"));
   spawnChild("gate", process.execPath, [gateEntry], {
