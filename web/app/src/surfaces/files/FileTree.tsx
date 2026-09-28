@@ -26,7 +26,7 @@ interface Props {
   onDrop(folder: string, e: DragEvent): void;
 }
 
-type Children = { status: "loading" } | { status: "ready"; dirs: FileEntry[] } | { status: "error" };
+type Children = { status: "loading" } | { status: "ready"; dirs: FileEntry[]; more: boolean } | { status: "error" };
 
 interface Row {
   path: string;
@@ -34,6 +34,31 @@ interface Row {
   level: number;
   root?: Root;
   hasChildren: boolean;
+  /** A "more folders" row: opens this folder in the list instead. */
+  opens?: string;
+}
+
+const TREE_PAGE = 1000;
+const TREE_PAGES = 10;
+
+/**
+ * A folder's subfolders, for the tree. The API lists folders first, so
+ * pages are read until one ends in something that is not a folder — every
+ * folder is then in hand — up to ten pages; past that, `more` says there
+ * are folders the tree does not show (the list, which pages as you scroll,
+ * has them).
+ */
+export async function readFolders(path: string, hidden: boolean): Promise<{ dirs: FileEntry[]; more: boolean }> {
+  const dirs: FileEntry[] = [];
+  let offset = 0;
+  for (let i = 0; i < TREE_PAGES; i++) {
+    const page = await filesApi.list(path, { hidden, offset, limit: TREE_PAGE });
+    dirs.push(...page.entries.filter(isDirLike));
+    offset += page.entries.length;
+    const last = page.entries[page.entries.length - 1];
+    if (!page.truncated || !last || last.type !== "dir") return { dirs, more: false };
+  }
+  return { dirs, more: true };
 }
 
 /**
@@ -51,9 +76,8 @@ export function FileTree({ roots, current, trash, trashCount, version, hidden, o
   const load = useCallback(
     (path: string) => {
       setChildren((m) => (m.get(path)?.status === "ready" ? m : new Map(m).set(path, { status: "loading" })));
-      filesApi
-        .list(path, { hidden, limit: 1000 })
-        .then((l) => setChildren((m) => new Map(m).set(path, { status: "ready", dirs: l.entries.filter(isDirLike) })))
+      readFolders(path, hidden)
+        .then(({ dirs, more }) => setChildren((m) => new Map(m).set(path, { status: "ready", dirs, more })))
         .catch(() => setChildren((m) => new Map(m).set(path, { status: "error" })));
     },
     [hidden],
@@ -97,6 +121,7 @@ export function FileTree({ roots, current, trash, trashCount, version, hidden, o
         out.push({ path: d.path, name: d.name, level, hasChildren: kids?.status !== "ready" || kids.dirs.length > 0 });
         walk(d.path, level + 1);
       }
+      if (c.more) out.push({ path: `${path}\u0000more`, name: "More folders — open this one to see them all", level, hasChildren: false, opens: path });
     };
     for (const r of roots) {
       out.push({ path: r.path, name: r.label, level: 1, root: r, hasChildren: true });
@@ -128,6 +153,7 @@ export function FileTree({ roots, current, trash, trashCount, version, hidden, o
     else if (e.key === "Home") go(0);
     else if (e.key === "End") go(rows.length - 1);
     else if (e.key === "ArrowRight" && row) {
+      if (row.opens) return;
       if (!open.has(row.path)) toggle(row.path, true);
       else go(i + 1);
     } else if (e.key === "ArrowLeft" && row) {
@@ -136,7 +162,7 @@ export function FileTree({ roots, current, trash, trashCount, version, hidden, o
         const parent = rows.slice(0, i).reverse().find((r) => r.level < row.level);
         if (parent) go(rows.indexOf(parent));
       }
-    } else if ((e.key === "Enter" || e.key === " ") && row) onOpen(row.path);
+    } else if ((e.key === "Enter" || e.key === " ") && row) onOpen(row.opens ?? row.path);
     else return;
     e.preventDefault();
   };
@@ -154,6 +180,26 @@ export function FileTree({ roots, current, trash, trashCount, version, hidden, o
     <nav className="ftree" aria-label="Folders">
       <ul className="ftree-list" role="tree" aria-label="Folders" ref={ref} onKeyDown={onKeyDown}>
         {rows.map((r) => {
+          if (r.opens) {
+            const opens = r.opens;
+            return (
+              <li
+                key={r.path}
+                role="treeitem"
+                id={`tree-${encodeURIComponent(r.path)}`}
+                aria-level={r.level}
+                aria-selected={false}
+                tabIndex={r.path === tabStop ? 0 : -1}
+                className="ftree-row is-more"
+                style={{ ["--level" as string]: r.level - 1 }}
+                onFocus={() => setFocus(r.path)}
+                onClick={() => onOpen(opens)}
+              >
+                <span className="ftree-chevron is-leaf" aria-hidden="true" />
+                <span className="ftree-name">{r.name}</span>
+              </li>
+            );
+          }
           const expanded = open.has(r.path);
           const active = !trash && r.path === current;
           const Icon = r.root ? (r.root.kind === "home" ? House : Box) : expanded ? FolderOpen : Folder;

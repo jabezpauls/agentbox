@@ -17,6 +17,8 @@ export interface Listing {
   truncated: boolean;
   status: "loading" | "ready" | "error" | "missing";
   error: string | null;
+  /** The API's reason for an error (`outside`, `not-readable`…). */
+  code?: string | null;
 }
 
 const EMPTY: Listing = { dir: "", file: null, entries: [], total: 0, truncated: false, status: "loading", error: null };
@@ -99,6 +101,7 @@ export function useListing(target: string | null, hidden: boolean) {
           dir: keep ? l.dir : path,
           status: missing ? "missing" : "error",
           error: err instanceof Error ? err.message : String(err),
+          code: err instanceof HttpError ? (err.code ?? null) : null,
         }));
       }
     },

@@ -220,6 +220,31 @@ test("with the list focused, letters jump, and ? and g-sequences still reach the
   await expect(page).toHaveURL(/\/$/);
 });
 
+test("a place outside the workspace says so, with no Retry that cannot help", async ({ page }) => {
+  await page.goto("/files/etc");
+  const files = page.locator('section.surface[data-surface="files"]');
+  await expect(files.getByText("Files can't go there.")).toBeVisible();
+  await expect(files.getByRole("button", { name: "Go to the workspace" })).toBeVisible();
+  await expect(files.getByRole("button", { name: "Retry" })).toHaveCount(0);
+});
+
+test("a filter over a big folder says it only looks through what is loaded", async ({ page }) => {
+  const big = path.join(project, "big");
+  fs.mkdirSync(big, { recursive: true });
+  for (let i = 0; i < 1200; i++) fs.writeFileSync(path.join(big, `f${String(i).padStart(4, "0")}.txt`), "");
+  await page.goto(filesRoute(big));
+  await expect(row(page, "f0000.txt")).toBeVisible();
+  const files = page.locator('section.surface[data-surface="files"]');
+  // Matches among the first page: the count says what it counted.
+  await page.getByPlaceholder(/Filter/).fill("f00");
+  await expect(files.locator(".files-status")).toContainText("100 matching in the 1,000 loaded, of 1,200 items");
+  // A name past what is loaded: the list reads on until it finds it.
+  await page.getByPlaceholder(/Filter/).fill("f1150");
+  await expect(row(page, "f1150.txt")).toBeVisible();
+  await expect(files.locator(".files-status")).toContainText("1 of 1,200 items");
+  fs.rmSync(big, { recursive: true, force: true });
+});
+
 test("a folder downloads as a zip", async ({ page }) => {
   await page.goto(filesRoute(project));
   await row(page, "docs").click({ button: "right" });

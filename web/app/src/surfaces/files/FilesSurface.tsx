@@ -456,6 +456,20 @@ export function FilesSurface() {
         }
       />
     );
+  } else if (listing.status === "error" && listing.code === "outside") {
+    // Trying again would not help: Files shows only the workspace and home.
+    body = (
+      <Empty
+        icon={<FolderInput size={22} />}
+        title="Files can't go there."
+        sub={`${dir} is outside the workspace and your home folder, which are all Files shows.`}
+        action={
+          <button className="btn btn-small" onClick={() => go(roots.workspace)}>
+            Go to the workspace
+          </button>
+        }
+      />
+    );
   } else if (listing.status === "error") {
     body = <Empty title="Couldn't read this folder." sub={listing.error} action={<button className="btn btn-small" onClick={changed}>Retry</button>} />;
   } else if (listing.status === "loading" && listing.entries.length === 0) {
@@ -500,7 +514,18 @@ export function FilesSurface() {
         onEndReached={() => void loadMore()}
         label={`Files in ${basename(dir)}`}
         empty={
-          filter ? (
+          filter && listing.truncated ? (
+            <Empty
+              compact
+              title="Nothing loaded matches that."
+              sub={`The filter looks through the ${listing.entries.length.toLocaleString()} of ${plural(listing.total, "item")} loaded so far.`}
+              action={
+                <button className="btn btn-small" onClick={() => void loadMore()}>
+                  Load more
+                </button>
+              }
+            />
+          ) : filter ? (
             <Empty compact title="Nothing matches that." sub="Try a shorter part of the name." />
           ) : (
             <Empty
@@ -658,8 +683,12 @@ export function FilesSurface() {
           {!trash && listing.status === "ready" && (
             <footer className="files-status" aria-live="polite">
               <span>
-                {filter ? `${entries.length} of ${plural(listing.total, "item")}` : plural(listing.total, "item")}
-                {listing.truncated && ` · showing ${listing.entries.length.toLocaleString()}, scroll for more`}
+                {filter && listing.truncated
+                  ? `${entries.length.toLocaleString()} matching in the ${listing.entries.length.toLocaleString()} loaded, of ${plural(listing.total, "item")} · scroll for more`
+                  : filter
+                    ? `${entries.length} of ${plural(listing.total, "item")}`
+                    : plural(listing.total, "item")}
+                {!filter && listing.truncated && ` · showing ${listing.entries.length.toLocaleString()}, scroll for more`}
               </span>
               {narrow && (
                 <button className="linklike files-status-trash" onClick={() => navigate({ surface: "files", path: "", trash: true })}>

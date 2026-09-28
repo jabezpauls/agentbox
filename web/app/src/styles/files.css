@@ -1055,3 +1055,9 @@
     display: none;
   }
 }
+
+/* The tree reads ten pages of a folder; past that, a row says there is more. */
+.ftree-row.is-more .ftree-name {
+  color: var(--text-3);
+  font-style: italic;
+}
