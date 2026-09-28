@@ -39,7 +39,7 @@ export function NewProjectDialog({ initial = "clone", onClose }: { initial?: Mod
         const project = await projectsApi.create(name.trim());
         await useProjects.getState().refresh();
         toast("success", `Made ${project.name}.`, undefined, {
-          action: { label: "Open", run: () => navigate({ surface: "files", root: "workspace", rel: [project.name] }) },
+          action: { label: "Open", run: () => navigate({ surface: "files", path: project.path }) },
         });
       }
       onClose();

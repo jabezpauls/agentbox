@@ -1,5 +1,3 @@
-import type { FileRoot } from "@workbench/shared";
-
 /**
  * The app's routes. Every surface has a path of its own, so a link, a reload
  * or the back button lands exactly where it pointed:
@@ -7,8 +5,9 @@ import type { FileRoot } from "@workbench/shared";
  *   /                      Home
  *   /workbench             the Workbench (`?review=<key>` opens that review in the dock)
  *   /editor                the editor
- *   /files/<path>          Files, at a folder or a file below the workspace
- *   /files/~/<path>        … below home
+ *   /files                 Files, at the workspace
+ *   /files/<absolute path> Files, at a folder or a file: `/files/workspace/proj/src`
+ *                          is /workspace/proj/src, `/files/home/coder/.config` is in home
  *   /files?trash=1         the trash
  *   /apps, /apps/<id>      Apps, optionally with one app selected
  *   /system[/monitor]      System, or its detailed monitor
@@ -27,7 +26,8 @@ export type Route =
   | { surface: "home" }
   | { surface: "workbench"; review?: string }
   | { surface: "editor" }
-  | { surface: "files"; root: FileRoot; rel: string[]; trash?: true }
+  /** `path` is absolute; "" is the default, the workspace root. */
+  | { surface: "files"; path: string; trash?: true }
   | { surface: "apps"; appId?: string }
   | { surface: "system"; view: "overview" | "monitor" }
   | { surface: "settings"; section: SettingsSection };
@@ -120,19 +120,17 @@ function names(segments: string[]): string[] {
 }
 
 function filesRoute(parts: string[], params: URLSearchParams, search: string): Route {
-  if (params.get("trash") === "1") return { surface: "files", root: "workspace", rel: [], trash: true };
+  if (params.get("trash") === "1") return { surface: "files", path: "", trash: true };
   // The query form carries paths the path form cannot (see pathFor). It is
   // read raw, not through URLSearchParams, which would decode a stray byte
   // into a replacement character.
   const p = /[?&]p=([^&]*)/.exec(search)?.[1];
   if (p !== undefined && parts.length === 0) {
-    const segs = p.split(/%2F/i).map(decodeSegment);
-    const home = segs[0] === "~";
-    return { surface: "files", root: home ? "home" : "workspace", rel: names(home ? segs.slice(1) : segs) };
+    const segs = names(p.split(/%2F/i).map(decodeSegment));
+    return { surface: "files", path: segs.length ? `/${segs.join("/")}` : "" };
   }
-  const decoded = parts.map(decodeSegment);
-  if (decoded[0] === "~") return { surface: "files", root: "home", rel: names(decoded.slice(1)) };
-  return { surface: "files", root: "workspace", rel: names(decoded) };
+  const segs = names(parts.map(decodeSegment));
+  return { surface: "files", path: segs.length ? `/${segs.join("/")}` : "" };
 }
 
 /** The route a location names. Anything unknown is Home. */
@@ -180,13 +178,10 @@ export function pathFor(route: Route): string {
       return "/editor";
     case "files": {
       if (route.trash) return "/files?trash=1";
-      const prefix = route.root === "home" ? ["~"] : [];
-      if (route.rel.some((n) => n.includes("\\"))) {
-        const p = [route.root === "home" ? "~" : "", ...route.rel.map(encodeSegment)].join("%2F");
-        return `/files?p=${p}`;
-      }
-      const segs = [...prefix, ...route.rel.map(encodeSegment)];
-      return segs.length ? `/files/${segs.join("/")}` : "/files";
+      const segs = route.path.split("/").filter(Boolean);
+      if (segs.length === 0) return "/files";
+      if (segs.some((n) => n.includes("\\"))) return `/files?p=%2F${segs.map(encodeSegment).join("%2F")}`;
+      return `/files/${segs.map(encodeSegment).join("/")}`;
     }
     case "apps":
       return route.appId ? `/apps/${route.appId}` : "/apps";

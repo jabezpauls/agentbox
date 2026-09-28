@@ -24,7 +24,7 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 page.on("pageerror", (e) => console.error("pageerror:", e.message));
-page.on("console", (m) => m.type() === "error" && console.error("console:", m.text()));
+page.on("response", (r) => r.status() >= 400 && console.error("http:", r.status(), r.request().method(), r.url()));
 await page.goto(`${base}/login?next=${encodeURIComponent(route)}`);
 await page.getByLabel("Username").fill(process.env.E2E_USER ?? "e2e");
 await page.getByLabel("Password").fill(process.env.E2E_PASSWORD ?? "e2e-password-1");

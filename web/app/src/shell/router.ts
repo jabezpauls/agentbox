@@ -34,7 +34,7 @@ function fromLocation(): Route {
 export function defaultRoute(surface: SurfaceId): Route {
   switch (surface) {
     case "files":
-      return { surface: "files", root: "workspace", rel: [] };
+      return { surface: "files", path: "" };
     case "system":
       return { surface: "system", view: "overview" };
     case "settings":

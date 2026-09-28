@@ -22,32 +22,29 @@ describe("parseRoute", () => {
     expect(parse("/workbench?review=../../x")).toEqual({ surface: "workbench" });
   });
 
-  it("reads a files path below the workspace, or below home with ~", () => {
-    expect(parse("/files")).toEqual({ surface: "files", root: "workspace", rel: [] });
-    expect(parse("/files/")).toEqual({ surface: "files", root: "workspace", rel: [] });
-    expect(parse("/files/demo/src/a.ts")).toEqual({ surface: "files", root: "workspace", rel: ["demo", "src", "a.ts"] });
-    expect(parse("/files/~")).toEqual({ surface: "files", root: "home", rel: [] });
-    expect(parse("/files/~/.config")).toEqual({ surface: "files", root: "home", rel: [".config"] });
-    expect(parse("/files?trash=1")).toEqual({ surface: "files", root: "workspace", rel: [], trash: true });
+  it("reads a files path as the absolute path it names", () => {
+    expect(parse("/files")).toEqual({ surface: "files", path: "" });
+    expect(parse("/files/")).toEqual({ surface: "files", path: "" });
+    expect(parse("/files/workspace/proj/src/a.ts")).toEqual({ surface: "files", path: "/workspace/proj/src/a.ts" });
+    expect(parse("/files/home/coder/.config")).toEqual({ surface: "files", path: "/home/coder/.config" });
+    expect(parse("/files?trash=1")).toEqual({ surface: "files", path: "", trash: true });
   });
 
   it("decodes names with spaces, unicode and reserved characters", () => {
-    expect(parse("/files/my%20notes/caf%C3%A9%3Bv2.md")).toEqual({
+    expect(parse("/files/workspace/my%20notes/caf%C3%A9%3Bv2.md")).toEqual({
       surface: "files",
-      root: "workspace",
-      rel: ["my notes", "café;v2.md"],
+      path: "/workspace/my notes/café;v2.md",
     });
   });
 
   it("takes the query form for a path the path form cannot carry", () => {
-    expect(parse("/files?p=%2Fa%5Cb%2Fc")).toEqual({ surface: "files", root: "workspace", rel: ["a\\b", "c"] });
-    expect(parse("/files?p=~%2Fx")).toEqual({ surface: "files", root: "home", rel: ["x"] });
+    expect(parse("/files?p=%2Fworkspace%2Fa%5Cb%2Fc")).toEqual({ surface: "files", path: "/workspace/a\\b/c" });
   });
 
   it("drops dot segments rather than walking them", () => {
     // (A browser resolves them before the app sees the path; this is the raw form.)
-    expect(parseRoute("/files/a/../b/./c")).toEqual({ surface: "files", root: "workspace", rel: ["a", "b", "c"] });
-    expect(parseRoute("/files/%2E%2E/x")).toEqual({ surface: "files", root: "workspace", rel: ["x"] });
+    expect(parseRoute("/files/workspace/a/../b/./c")).toEqual({ surface: "files", path: "/workspace/a/b/c" });
+    expect(parseRoute("/files/%2E%2E/x")).toEqual({ surface: "files", path: "/x" });
   });
 
   it("reads an app id and a settings section", () => {
@@ -68,11 +65,11 @@ describe("pathFor", () => {
     [{ surface: "home" }, "/"],
     [{ surface: "workbench" }, "/workbench"],
     [{ surface: "editor" }, "/editor"],
-    [{ surface: "files", root: "workspace", rel: [] }, "/files"],
-    [{ surface: "files", root: "workspace", rel: ["demo", "a b.txt"] }, "/files/demo/a%20b.txt"],
-    [{ surface: "files", root: "home", rel: [] }, "/files/~"],
-    [{ surface: "files", root: "home", rel: [".ssh"] }, "/files/~/.ssh"],
-    [{ surface: "files", root: "workspace", rel: [], trash: true }, "/files?trash=1"],
+    [{ surface: "files", path: "" }, "/files"],
+    [{ surface: "files", path: "/workspace/demo/a b.txt" }, "/files/workspace/demo/a%20b.txt"],
+    [{ surface: "files", path: "/home/coder" }, "/files/home/coder"],
+    [{ surface: "files", path: "/home/coder/.ssh" }, "/files/home/coder/.ssh"],
+    [{ surface: "files", path: "", trash: true }, "/files?trash=1"],
     [{ surface: "apps" }, "/apps"],
     [{ surface: "apps", appId: "abc" }, "/apps/abc"],
     [{ surface: "system", view: "overview" }, "/system"],
@@ -87,7 +84,7 @@ describe("pathFor", () => {
   it("round-trips every files path through the URL", () => {
     const names = ["plain", "with space", "semi;colon", "per%cent", "ü", "a?b#c", "…", "\udcff-raw"];
     for (const name of names) {
-      const route: Route = { surface: "files", root: "workspace", rel: ["dir", name] };
+      const route: Route = { surface: "files", path: `/workspace/dir/${name}` };
       expect(parse(pathFor(route))).toEqual(route);
     }
   });
@@ -96,11 +93,11 @@ describe("pathFor", () => {
     // The gate refuses %2e, %2f, %5c, a backslash, ";" and "//" in a raw path.
     const refused = /(^|\/)\.\.?(\/|$)|%2e|%2f|%5c|\\|;|\/\//i;
     for (const name of ["a\\b", "semi;colon", ".hidden", "x..y"]) {
-      const path = pathFor({ surface: "files", root: "workspace", rel: [name] });
+      const path = pathFor({ surface: "files", path: `/workspace/${name}` });
       expect(path.split("?")[0]).not.toMatch(refused);
     }
     // A backslash cannot travel in the path at all, so that one uses the query.
-    expect(pathFor({ surface: "files", root: "workspace", rel: ["a\\b"] })).toBe("/files?p=%2Fa%5Cb");
+    expect(pathFor({ surface: "files", path: "/workspace/a\\b" })).toBe("/files?p=%2Fworkspace%2Fa%5Cb");
   });
 });
 

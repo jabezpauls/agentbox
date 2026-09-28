@@ -61,7 +61,7 @@ export function NewAgentButton({ cwd, agents, label = "Agent" }: { cwd: string; 
 
 export function ProjectCard({ project, agents }: { project: Project; agents: string[] }) {
   const g = project.git;
-  const openFiles = () => navigate({ surface: "files", root: "workspace", rel: [project.name] });
+  const openFiles = () => navigate({ surface: "files", path: project.path });
   return (
     <article className="card project-card" aria-labelledby={`project-${project.name}`}>
       <div className="card-head">

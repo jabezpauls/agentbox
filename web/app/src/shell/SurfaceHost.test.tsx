@@ -37,7 +37,7 @@ describe("SurfaceHost", () => {
 
     act(() => useRouter.getState().navigate({ surface: "home" }));
     act(() => useRouter.getState().navigate({ surface: "editor" }));
-    act(() => useRouter.getState().navigate({ surface: "files", root: "workspace", rel: [] }));
+    act(() => useRouter.getState().navigate({ surface: "files", path: "" }));
     expect(mounts).toEqual({ home: 1, editor: 1, files: 1 });
   });
 

@@ -14,10 +14,10 @@ beforeEach(() => {
 describe("router", () => {
   it("puts every navigation in the address bar and the history", () => {
     const before = window.history.length;
-    useRouter.getState().navigate({ surface: "files", root: "workspace", rel: ["demo"] });
-    expect(window.location.pathname).toBe("/files/demo");
+    useRouter.getState().navigate({ surface: "files", path: "/workspace/demo" });
+    expect(window.location.pathname).toBe("/files/workspace/demo");
     expect(window.history.length).toBe(before + 1);
-    expect(useRouter.getState().route).toEqual({ surface: "files", root: "workspace", rel: ["demo"] });
+    expect(useRouter.getState().route).toEqual({ surface: "files", path: "/workspace/demo" });
   });
 
   it("does not stack a second entry for the same place", () => {
@@ -44,10 +44,10 @@ describe("router", () => {
 
   it("returns to where a surface was left", () => {
     const r = useRouter.getState();
-    r.navigate({ surface: "files", root: "workspace", rel: ["demo", "src"] });
+    r.navigate({ surface: "files", path: "/workspace/demo/src" });
     r.navigate({ surface: "home" });
     useRouter.getState().go("files");
-    expect(useRouter.getState().route).toEqual({ surface: "files", root: "workspace", rel: ["demo", "src"] });
+    expect(useRouter.getState().route).toEqual({ surface: "files", path: "/workspace/demo/src" });
     useRouter.getState().go("settings");
     expect(useRouter.getState().route).toEqual({ surface: "settings", section: "account" });
   });

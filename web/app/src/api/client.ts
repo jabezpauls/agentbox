@@ -77,6 +77,8 @@ export interface HealthInfo {
   ok: boolean;
   herdr: { connected: boolean; version: string | null; protocol: number | null };
   workspaceRoot: string;
+  /** The files API's second root (hidden in Files unless asked for). */
+  homeRoot?: string;
   /** Whether the operator allows sharing apps; the Preview panel hides Share if not. */
   sharing: boolean;
 }
