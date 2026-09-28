@@ -530,7 +530,20 @@ export function FilesSurface() {
       ref={grid}
       onDragEnter={(e) => carriesFiles(e.dataTransfer) && setDragDepth((d) => d + 1)}
       onDragLeave={(e) => carriesFiles(e.dataTransfer) && setDragDepth((d) => Math.max(0, d - 1))}
-      onDrop={() => setDragDepth(0)}
+      // Files let go anywhere on the surface — the bar, the tree's margin,
+      // the status line — go into the folder shown, as the overlay says.
+      // A folder row, a crumb or a tree node that took the drop first wins.
+      onDragOver={(e) => {
+        if (trash || e.defaultPrevented || !carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(e) => {
+        setDragDepth(0);
+        if (trash || e.defaultPrevented || !carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        onDrop(null, e);
+      }}
     >
       <header className="files-bar">
         <nav className="crumbs files-crumbs" aria-label="Folder">

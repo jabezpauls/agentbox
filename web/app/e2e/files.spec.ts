@@ -116,6 +116,54 @@ test("a folder dropped from the desktop is uploaded with everything in it", asyn
   expect(fs.statSync(path.join(project, "site", "empty")).isDirectory()).toBe(true);
 });
 
+/** Drag a loose file over `selector` and let go; true when the page took the drop (cancelled it). */
+async function dropFileOn(page: Page, selector: string, name: string, text: string): Promise<boolean> {
+  return page.evaluate(
+    ({ selector, name, text }) => {
+      const file = new File([text], name);
+      const dataTransfer = {
+        types: ["Files"],
+        items: [{ kind: "file", webkitGetAsEntry: () => null, getAsFile: () => file }],
+        files: [file],
+        dropEffect: "none",
+        getData: () => "",
+      };
+      const target = document.querySelector(selector)!;
+      let taken = false;
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "dataTransfer", { value: dataTransfer });
+        const handled = !target.dispatchEvent(ev);
+        if (type === "drop") taken = handled;
+      }
+      return taken;
+    },
+    { selector, name, text },
+  );
+}
+
+test("a file let go anywhere on Files goes to the folder shown; elsewhere it is ignored", async ({ page }) => {
+  await page.goto(filesRoute(project));
+  await expect(row(page, "README.md")).toBeVisible();
+
+  // The bar above the list, not the list: still the folder shown.
+  expect(await dropFileOn(page, '[data-surface="files"] .files-bar', "from-the-bar.txt", "bar")).toBe(true);
+  const uploads = page.getByRole("region", { name: "Uploads" });
+  await expect(uploads).toContainText(/Uploaded/, { timeout: 20_000 });
+  await expect(row(page, "from-the-bar.txt")).toBeVisible();
+  expect(fs.readFileSync(path.join(project, "from-the-bar.txt"), "utf8")).toBe("bar");
+  await uploads.getByRole("button", { name: "Dismiss uploads" }).click();
+
+  // On Home the drop is swallowed — the browser does not open the file in
+  // place of the app — and nothing is uploaded.
+  await page.getByRole("link", { name: "Home" }).first().click();
+  await expect(page).toHaveURL(/\/$/);
+  expect(await dropFileOn(page, '[data-surface="home"]', "stray.txt", "stray")).toBe(true);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("region", { name: "Uploads" })).toHaveCount(0);
+  expect(fs.existsSync(path.join(root, "stray.txt"))).toBe(false);
+});
+
 test("files picked with Upload land in the folder shown, and a taken name asks first", async ({ page }) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "files-e2e-pick-"));
   fs.writeFileSync(path.join(dir, "picked.txt"), "picked");

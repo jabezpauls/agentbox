@@ -25,6 +25,7 @@ import { useReviews } from "./attention.ts";
 import { usePageVisible } from "./activity.tsx";
 import { BottomBar } from "./BottomBar.tsx";
 import { Dock } from "./Dock.tsx";
+import { installDropGuard } from "./drops.ts";
 import { dockOnSwitch } from "./dock.ts";
 import { Rail } from "./Rail.tsx";
 import { useRouter } from "./router.ts";
@@ -48,6 +49,9 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
   const setUi = useApp((s) => s.setUi);
   const pageVisible = usePageVisible();
   const previous = useRef<SurfaceId>(surface);
+
+  // Files dropped where nothing takes them must not replace the app.
+  useEffect(() => installDropGuard(), []);
 
   // The keyboard. Chords and ⌘K from anywhere; the Workbench's own keys
   // (⌘B, the ⌃B prefix) only while the Workbench is what you are looking at.
