@@ -28,6 +28,7 @@ import { Empty, PageHeader, Section } from "../../components/ui/Page.tsx";
 import { Menu, type MenuAnchor, type MenuEntry } from "../../components/ui/Menu.tsx";
 import { confirm, promptText } from "../../components/ui/prompts.tsx";
 import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
+import { useOutOfReach } from "../../shell/health.ts";
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { toast, toastError } from "../../shell/toast.ts";
@@ -215,6 +216,7 @@ export function AppsSurface() {
   const supported = useApps((s) => s.supported);
   const error = useApps((s) => s.error);
   const ports = useApp((s) => s.ports);
+  const lost = useOutOfReach();
   const [sharing, setSharing] = useState<AppView | null>(null);
   const [menu, setMenu] = useState<{ app: AppView; anchor: MenuAnchor } | null>(null);
   useWhenHidden(() => {
@@ -236,7 +238,8 @@ export function AppsSurface() {
           title="Apps"
           subtitle="Servers in the box, each with its own link. Private until you share them."
           actions={
-            supported !== false && (
+            supported !== false &&
+            !(error && apps === null) && (
               <button
                 className="btn btn-small"
                 onClick={async () => {
@@ -296,8 +299,10 @@ export function AppsSurface() {
           </div>
         )}
 
-        <Section title="Also listening" count={also.length} id="also">
-          {also.length === 0 ? (
+        <Section title="Also listening" count={lost ? undefined : also.length} id="also">
+          {lost ? (
+            <p className="section-note">The box is not answering, so what is listening is not known. Reconnecting…</p>
+          ) : also.length === 0 ? (
             <p className="section-note">Nothing else is listening. A server an agent starts shows up here until it is an app.</p>
           ) : (
             <ul className="app-list">

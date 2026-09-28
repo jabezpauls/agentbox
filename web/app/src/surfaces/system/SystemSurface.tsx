@@ -9,6 +9,7 @@ import { Meter } from "../../components/ui/Meter.tsx";
 import { Sparkline } from "../../components/ui/Sparkline.tsx";
 import { usePolling } from "../../shell/activity.tsx";
 import { useRouter } from "../../shell/router.ts";
+import { useOutOfReach } from "../../shell/health.ts";
 
 const POLL_MS = 2000;
 
@@ -29,6 +30,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
 function Overview({ info }: { info: SystemInfo }) {
   const history = useSystem((s) => s.history);
   const ports = useApp((s) => s.ports);
+  const lost = useOutOfReach();
   const c = info.container;
   const versions: [string, string | null][] = [
     ["agentbox", info.versions.agentbox],
@@ -71,9 +73,10 @@ function Overview({ info }: { info: SystemInfo }) {
         </div>
       </Section>
 
-      <Section title="Workbench container" id="sys-container">
+      <Section title="Terminals and agents" id="sys-container">
         <p className="section-note">
-          Its own cgroup and limits. The bridge runs here, and so do the agents the Workbench starts. The other containers have limits of their own.
+          The Workbench's terminals, and the agents in them, share one container with limits of its own: these are its use against those limits. The
+          editor and the monitor run in containers beside it, whose limits this view cannot read.
         </p>
         {c.readable ? (
           <div className="meter-row">
@@ -97,7 +100,7 @@ function Overview({ info }: { info: SystemInfo }) {
             />
           </div>
         ) : (
-          <Empty compact title="No cgroup to read here." sub="The container's limits are not visible from inside it on this host." />
+          <Empty compact title="No limits to read here." sub="This host does not show a container its own limits." />
         )}
       </Section>
 
@@ -143,8 +146,10 @@ function Overview({ info }: { info: SystemInfo }) {
         </Section>
 
         <div className="sys-side">
-          <Section title="Listening" id="sys-ports" count={ports.length}>
-            {ports.length === 0 ? (
+          <Section title="Listening" id="sys-ports" count={lost ? undefined : ports.length}>
+            {lost ? (
+              <p className="section-note">Not known while the box is not answering.</p>
+            ) : ports.length === 0 ? (
               <p className="section-note">Nothing is listening.</p>
             ) : (
               <table className="table">
@@ -222,7 +227,8 @@ function Monitor() {
 
 /**
  * System: how the box is doing. Two honest views — the whole sandbox
- * against the host, and the Workbench container against its own limits —
+ * against the host, and the terminals' and agents' container against its
+ * own limits —
  * plus disks, the busiest processes, what is listening, versions and
  * uptime. Read every two seconds while showing, and not at all otherwise.
  * "Detailed monitor" is btop.
@@ -263,10 +269,17 @@ export function SystemSurface() {
             subtitle={
               info
                 ? `agentbox ${info.versions.agentbox ?? "(version unknown)"} · up ${formatDuration(info.uptime.box ?? info.uptime.bridge)} · host with ${plural(info.host.cores, "core")} and ${formatMemory(info.host.memory)}`
-                : "Reading the box…"
+                : error
+                  ? "The box is not answering."
+                  : "Reading the box…"
             }
             actions={switcher}
           />
+          {info && error && (
+            <p className="notice is-warn" role="status">
+              These are the last numbers read. {error}
+            </p>
+          )}
           {info ? (
             <Overview info={info} />
           ) : error ? (

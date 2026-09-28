@@ -242,3 +242,15 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* The last numbers read, while the box is not answering. */
+.notice {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+.notice.is-warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}

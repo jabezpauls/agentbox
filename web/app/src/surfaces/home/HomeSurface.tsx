@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AppWindow, ArrowRight, CheckCircle2, ExternalLink, FolderPlus, GitBranch, Plus } from "lucide-react";
+import { AppWindow, ArrowRight, CheckCircle2, CloudOff, ExternalLink, FolderPlus, GitBranch, Plus } from "lucide-react";
 import { useApp } from "../../store/app.ts";
 import { useApps, type AppView } from "../../apps/model.ts";
 import { LiveBadge, VisibilityBadge } from "../../apps/badges.tsx";
@@ -14,6 +14,7 @@ import { useNeeds } from "../../shell/attention.ts";
 import { navigate } from "../../shell/router.ts";
 import { useGateSession } from "../../shell/session.ts";
 import { useRequests } from "../../shell/requests.ts";
+import { useOutOfReach } from "../../shell/health.ts";
 import { launchableAgents } from "../../workbench/launch.ts";
 import { NeedsYou } from "./NeedsYou.tsx";
 import { CloneCard, ProjectCard } from "./ProjectCard.tsx";
@@ -69,7 +70,10 @@ export function HomeSurface() {
   const dismissClone = useProjects((s) => s.dismissClone);
   const apps = useApps((s) => s.apps);
   const appsSupported = useApps((s) => s.supported);
+  const appsError = useApps((s) => s.error);
   const system = useSystem((s) => s.info);
+  const systemError = useSystem((s) => s.error);
+  const lost = useOutOfReach();
   const [newProject, setNewProject] = useState<null | "clone" | "empty">(null);
   useWhenHidden(() => setNewProject(null));
 
@@ -88,12 +92,16 @@ export function HomeSurface() {
   const running = (apps ?? []).filter((a) => a.live.listening).length;
   const agents = useMemo(() => launchableAgents(system?.versions.agents ?? [{ name: "claude" }]), [system]);
 
-  const summary = [
-    working ? `${plural(working, "agent")} working` : "No agents working",
-    appsSupported ? (running ? `${plural(running, "app")} running` : "no apps running") : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // What is running, when it can be known. Out of reach, the last word
+  // from the box is not "nothing is running".
+  const summary = lost
+    ? "The box is not answering. Reconnecting…"
+    : [
+        working ? `${plural(working, "agent")} working` : "No agents working",
+        appsSupported && apps !== null ? (running ? `${plural(running, "app")} running` : "no apps running") : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   const cloneList = Object.values(clones);
   const workspaceDisk = system?.disks.find((d) => d.label === "workspace");
@@ -117,19 +125,36 @@ export function HomeSurface() {
           }
         />
 
-        <section className={`home-hero${needs.length === 0 ? " is-clear" : ""}`} aria-labelledby="needs-title">
+        <section className={`home-hero${needs.length === 0 && !lost ? " is-clear" : ""}${lost ? " is-lost" : ""}`} aria-labelledby="needs-title">
           {needs.length > 0 ? (
             <div className="hero-figure" aria-hidden="true">
               {needs.length}
             </div>
+          ) : lost ? (
+            <span className="hero-clear" aria-hidden="true">
+              <CloudOff size={20} />
+            </span>
           ) : (
             <span className="hero-clear" aria-hidden="true">
               <CheckCircle2 size={20} />
             </span>
           )}
           <div className="hero-text">
+            {/* The figure shows the count; the heading does not say it twice
+                (a screen reader, which skips the figure, hears it here). */}
             <h2 className="section-label" id="needs-title">
-              {needs.length === 0 ? "Nothing needs you" : needs.length === 1 ? "Needs you" : `${needs.length} need you`}
+              {needs.length === 0 ? (
+                lost ? (
+                  "Out of reach"
+                ) : (
+                  "Nothing needs you"
+                )
+              ) : (
+                <>
+                  <span className="sr-only">{needs.length} </span>
+                  {needs.length === 1 ? "Needs you" : "Need you"}
+                </>
+              )}
             </h2>
             <p className="hero-sub">{summary}</p>
           </div>
@@ -186,7 +211,18 @@ export function HomeSurface() {
               </button>
             }
           >
-            {apps === null ? (
+            {apps === null && appsError ? (
+              <Empty
+                compact
+                title="Couldn't read the apps."
+                sub={appsError}
+                action={
+                  <button className="btn btn-small" onClick={() => void useApps.getState().refresh()}>
+                    Retry
+                  </button>
+                }
+              />
+            ) : apps === null ? (
               <div className="skeleton" style={{ height: 44 }} aria-hidden="true" />
             ) : apps.length === 0 ? (
               <Empty
@@ -219,6 +255,11 @@ export function HomeSurface() {
             </button>
           }
         >
+          {!system && systemError && (
+            <p className="section-note" role="status">
+              Couldn't read the system. {systemError}
+            </p>
+          )}
           <div className="meter-row">
             <Meter
               compact

@@ -327,6 +327,14 @@ p code,
   background: var(--success-soft);
   color: var(--success);
 }
+.home-hero.is-lost {
+  align-items: center;
+  margin-bottom: var(--sp-8);
+}
+.home-hero.is-lost .hero-clear {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
 .hero-text {
   display: flex;
   flex-direction: column;

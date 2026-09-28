@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { SystemInfo } from "@workbench/shared";
-import { http } from "../api/http.ts";
+import { errorText, http } from "../api/http.ts";
 
 /** One reading kept for the trend lines. */
 export interface Sample {
@@ -39,7 +39,7 @@ export const useSystem = create<SystemState>((set) => ({
         return { info, error: null, history };
       });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({ error: errorText(err, "The box did not answer.") });
     }
   },
 }));

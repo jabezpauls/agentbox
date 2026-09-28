@@ -193,9 +193,10 @@ that is public in one place.
 How the box is doing, in two honest views. **The sandbox** is every process
 the sandbox runs — the editor, the terminals, the agents and what they start,
 across its containers — summed from `/proc`, against the host's cores and
-memory. **The Workbench container** is that one container's own cgroup, against
-its own limits: it is where the bridge runs and where the agents the
-Workbench starts run, and the only container whose limits the bridge can read.
+memory. **Terminals and agents** is the one container they share — the
+Workbench's terminals and the agents in them — against its own CPU, memory and
+process limits; the editor and the monitor run in containers beside it, whose
+limits the bridge cannot read.
 Then the disks, the busiest processes, what is listening, versions and uptime.
 **Detailed monitor** (`/system/monitor`) is btop, full size.
 
@@ -607,8 +608,8 @@ loopback, `127.0.0.1` or `::1`.
 - `GET /api/system` — how the sandbox is doing, in two views. The sandbox is
   several containers (editor, terminals, monitor, Workbench) sharing one
   process table, each with its own limits, so `sandbox` sums CPU and resident
-  memory over every process, and `container` is the Workbench container's own
-  cgroup — its use and its limits, and where the agents it starts run. Also
+  memory over every process, and `container` is the cgroup of the container
+  the terminals and agents run in (the bridge's own) — its use and its limits. Also
   free space on both volumes, uptime, the fifteen busiest processes, and the
   versions of agentbox (`AGENTBOX_VERSION`, which the installer and
   `agentbox update` take from the checkout), herdr, code-server and each agent

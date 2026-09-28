@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Project, ProjectCloneEvent, ProjectCloneStart } from "@workbench/shared";
-import { http } from "../api/http.ts";
+import { errorText, http } from "../api/http.ts";
 
 /** A clone in progress (or just ended), as the events socket reports it. */
 export type Clone = ProjectCloneEvent;
@@ -39,7 +39,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
       const projects = await projectsApi.list();
       set({ projects: [...projects].sort((a, b) => b.lastChange - a.lastChange), error: null });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({ error: errorText(err, "The box did not answer.") });
     }
   },
 

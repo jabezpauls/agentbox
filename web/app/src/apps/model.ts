@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { http, HttpError } from "../api/http.ts";
+import { errorText, http, HttpError } from "../api/http.ts";
 
 /**
  * The app model, as the bridge's `/api/apps` serves it: the gate's record of
@@ -121,7 +121,7 @@ export const useApps = create<AppsState>((set) => ({
       if (apps === null) set({ apps: null, supported: false, error: null });
       else set({ apps: [...apps].sort((a, b) => a.name.localeCompare(b.name)), supported: true, error: null });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({ error: errorText(err, "The box did not answer.") });
     }
   },
 }));

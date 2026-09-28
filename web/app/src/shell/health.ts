@@ -44,6 +44,23 @@ export function loadHealth(): Promise<void> {
   return inflight;
 }
 
+/**
+ * Whether the box has stopped answering: the events socket dropped and has
+ * not come back. Surfaces say so instead of showing what they last knew as
+ * if it were current ("Nothing is listening", "No agents working").
+ */
+export const useReach = create<{ lost: boolean }>(() => ({ lost: false }));
+
+useApp.subscribe((s, prev) => {
+  if (s.status === prev.status) return;
+  if (s.status === "open") useReach.setState({ lost: false });
+  else if (s.status === "closed") useReach.setState({ lost: true });
+});
+
+export function useOutOfReach(): boolean {
+  return useReach((s) => s.lost);
+}
+
 /** For tests: forget any retry in flight. */
 export function resetHealth(): void {
   if (timer) clearTimeout(timer);
