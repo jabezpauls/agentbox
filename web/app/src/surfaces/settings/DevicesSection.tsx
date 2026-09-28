@@ -10,9 +10,14 @@ import { CredentialsDialog } from "../../settings/CredentialsDialog.tsx";
 import { gateApi, type TokenRow } from "../../settings/gate.ts";
 
 /** A device code as the CLI prints it: XXXX-XXXX. */
+/** The letters the gate draws codes from: no vowels, no digits (web/gate/src/device.ts). */
+const CODE_LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
+
+/** `bcdf ghjk`, `BCDF-GHJK` and `bcdfghjk` are the same code; anything else is none. */
 export function normaliseCode(raw: string): string | null {
-  const c = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : null;
+  const c = raw.toUpperCase().replace(/[\s-]/g, "");
+  if (c.length !== 8 || [...c].some((ch) => !CODE_LETTERS.includes(ch))) return null;
+  return `${c.slice(0, 4)}-${c.slice(4)}`;
 }
 
 function CopyLine({ text, label }: { text: string; label: string }) {
@@ -68,7 +73,7 @@ export function DevicesSection() {
   const approve = (e: React.FormEvent) => {
     e.preventDefault();
     const c = normaliseCode(code);
-    if (!c) return setCodeError("A code is eight letters and digits, like ABCD-1234.");
+    if (!c) return setCodeError("A code is eight letters, like BCDF-GHJK.");
     // The gate's own page, a full navigation: it asks for the password there.
     window.location.assign(`/settings/devices?code=${encodeURIComponent(c)}`);
   };
@@ -99,7 +104,7 @@ export function DevicesSection() {
             <span className="field-label">Code the CLI shows</span>
             <input
               className="input mono"
-              placeholder="ABCD-1234"
+              placeholder="BCDF-GHJK"
               autoCapitalize="characters"
               spellCheck={false}
               value={code}
