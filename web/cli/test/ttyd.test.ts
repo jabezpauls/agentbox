@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import { cdCommand } from "../src/commands/terminal.js";
 import { BoxClient } from "../src/http.js";
-import { DetachFilter, guardProcess, ModeTracker, runTerminal, TerminalGuard } from "../src/terminal.js";
+import { classifyCsi, DetachFilter, guardProcess, ModeTracker, runTerminal, TerminalGuard } from "../src/terminal.js";
 import {
   handshakeFrame,
   inputFrame,
@@ -178,6 +178,74 @@ describe("the detach keys", () => {
   });
 });
 
+describe("the detach keys under kitty's keyboard protocol and modifyOtherKeys", () => {
+  /** Feed the chunks in order; what went through, and whether it detached. */
+  const feed = (...chunks: string[]): { forward: string; detach: boolean } => {
+    const f = new DetachFilter();
+    let forward = "";
+    for (const c of chunks) {
+      const r = f.push(Buffer.from(c, "latin1"));
+      forward += r.forward.toString("latin1");
+      if (r.detach) return { forward, detach: true };
+    }
+    return { forward, detach: false };
+  };
+
+  it("reads each spelling of Ctrl-] and q", () => {
+    for (const [params, final] of [
+      ["93;5", "u"],
+      ["93;5:1", "u"],
+      ["93;5:2", "u"],
+      ["93:125;5", "u"],
+      ["93;69", "u"],
+      ["93;5;29", "u"],
+      ["27;5;93", "~"],
+    ]) {
+      expect(classifyCsi(params as string, final as string), `${params}${final}`).toBe("prefix");
+    }
+    for (const [params, final] of [
+      ["113", "u"],
+      ["113;1", "u"],
+      ["113;1:1", "u"],
+      ["113:81;2", "u"],
+      ["113;;113", "u"],
+      ["27;1;113", "~"],
+    ]) {
+      expect(classifyCsi(params as string, final as string), `${params}${final}`).toBe("q");
+    }
+    expect(classifyCsi("93;5:3", "u")).toBe("release");
+    expect(classifyCsi("113;1:3", "u")).toBe("release");
+    expect(classifyCsi("57442;5", "u")).toBe("modifier");
+    // Ctrl-Shift-], Alt-], Ctrl-q, and keys that are not keys at all.
+    for (const [params, final] of [["93;6", "u"], ["93;3", "u"], ["113;5", "u"], ["2", "~"], ["1;5", "A"]]) {
+      expect(classifyCsi(params as string, final as string), `${params}${final}`).toBe("other");
+    }
+  });
+
+  it("detaches on kitty's Ctrl-] press, its release, then q (as the reviewer's repro sends them)", () => {
+    expect(feed("\x1b[93;5u", "\x1b[93;5:3u", "q")).toEqual({ forward: "", detach: true });
+    expect(feed("\x1b[93;5:1u\x1b[93;5:3u\x1b[113;1:1u")).toEqual({ forward: "", detach: true });
+    expect(feed("\x1b[27;5;93~", "q")).toEqual({ forward: "", detach: true });
+    // The Ctrl key's own events, with every key reported, change nothing.
+    expect(feed("\x1b[57442;5u\x1b[93;5u", "\x1b[57442;1:3u", "\x1b[113u")).toEqual({ forward: "\x1b[57442;5u", detach: true });
+  });
+
+  it("waits for the rest of a sequence cut by the end of a read, but never holds Alt-[", () => {
+    expect(feed("x\x1b[93;", "5u", "q")).toEqual({ forward: "x", detach: true });
+    expect(feed("\x1b[9", "3;5u\x1b[113", "u")).toEqual({ forward: "", detach: true });
+    expect(feed("\x1b[")).toEqual({ forward: "\x1b[", detach: false });
+  });
+
+  it("sends what it held, as typed, when anything else follows", () => {
+    expect(feed("\x1b[93;5u", "\x1b[93;5:3u", "x")).toEqual({ forward: "\x1b[93;5u\x1b[93;5:3ux", detach: false });
+    expect(feed("\x1b[93;5u", "\x1b[65;5u")).toEqual({ forward: "\x1b[93;5u\x1b[65;5u", detach: false });
+    // Doubled: one Ctrl-] goes through.
+    expect(feed("\x1b[93;5u", "\x1b[93;5u")).toEqual({ forward: "\x1b[93;5u", detach: false });
+    // Arrow keys and the like pass untouched.
+    expect(feed("\x1b[A\x1b[1;5C\x1b[200~paste\x1b[201~")).toEqual({ forward: "\x1b[A\x1b[1;5C\x1b[200~paste\x1b[201~", detach: false });
+  });
+});
+
 describe("restoring the terminal", () => {
   it("undoes exactly the modes the program switched on", () => {
     const m = new ModeTracker();
@@ -203,6 +271,17 @@ describe("restoring the terminal", () => {
     expect(m.restoreSequence()).toBe(
       "\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[?2031l\x1b[?25h\x1b[?7h\x1b[0m",
     );
+  });
+
+  it("undoes kitty's keyboard protocol, pushed or set in place", () => {
+    const pushed = new ModeTracker();
+    pushed.observe(Buffer.from("\x1b[>7u\x1b[?1049h"));
+    expect(pushed.restoreSequence()).toBe("\x1b[?1049l\x1b[<1u\x1b[0m");
+    const set = new ModeTracker();
+    set.observe(Buffer.from("\x1b[=5;1u"));
+    expect(set.restoreSequence()).toBe("\x1b[=0;1u\x1b[0m");
+    set.observe(Buffer.from("\x1b[=0;1u"));
+    expect(set.restoreSequence()).toBe("\x1b[0m");
   });
 
   it("sees a sequence cut in two by the chunk boundary", () => {
