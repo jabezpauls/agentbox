@@ -229,6 +229,8 @@ jobs:
         # the text the entrypoint writes into Codex's AGENTS.md.
         run: |
           docker run --rm agentbox/workspace:ci grep -q agentbox-preview /etc/claude-code/CLAUDE.md
+          # The command agents are told to run is not theirs to change.
+          test "$(docker run --rm --entrypoint stat agentbox/workspace:ci -c %U:%a /usr/local/bin/agentbox-preview)" = root:755
           docker run --rm agentbox/workspace:ci bash -lc 'grep -q agentbox-preview ~/.codex/AGENTS.md && test -f ~/.claude/skills/preview/SKILL.md'
       - name: The Workbench bridge must actually run
         run: |
