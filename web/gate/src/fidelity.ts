@@ -423,7 +423,7 @@ export function shimSource(prefix: string): string {
     var set = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (name, value) {
       var n = String(name).toLowerCase();
-      if (names[n] && this instanceof HTMLElement) {
+      if (names[n] && (this instanceof HTMLElement || (typeof SVGElement !== "undefined" && this instanceof SVGElement))) {
         value = names[n] === 2 ? fixSrcset(value) : fix(String(value));
         credentials(this, value);
       }
