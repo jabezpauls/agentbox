@@ -489,11 +489,12 @@ export function shimSource(prefix: string): string {
   // <use href="/icons.svg#x">: to an opaque page a sprite in another file is
   // another origin, and browsers refuse to draw it. Fetch each sprite once,
   // put its contents in the page, and point the <use> at the copy.
-  var setAttr = Element.prototype.setAttribute;
+  // Where there is no DOM to patch, the shim still does the rest.
+  var setAttr = typeof Element !== "undefined" ? Element.prototype.setAttribute : null;
   var sprites = {};
   function useSprite(el, name, value) {
     attempt(function () {
-      if (typeof SVGUseElement === "undefined" || !(el instanceof SVGUseElement)) return;
+      if (!setAttr || typeof SVGUseElement === "undefined" || !(el instanceof SVGUseElement)) return;
       var v = String(value), hash = v.indexOf("#");
       if (hash <= 0 || !isApp(v.slice(0, hash))) return;
       var file = new URL(v.slice(0, hash), location.href).href, id = v.slice(hash + 1);
