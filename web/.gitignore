@@ -3,3 +3,5 @@ dist/
 coverage/
 playwright-report/
 test-results/
+playwright-report-fidelity/
+test-results-fidelity/

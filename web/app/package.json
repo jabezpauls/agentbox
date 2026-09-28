@@ -12,7 +12,9 @@
     "test": "vitest run",
     "lint": "eslint src",
     "typecheck": "tsc -b --noEmit",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "fidelity": "playwright test -c playwright.fidelity.config.ts",
+    "fidelity:deps": "npm ci --prefix fidelity/fixtures/vite-react --no-audit --no-fund"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

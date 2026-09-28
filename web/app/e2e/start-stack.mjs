@@ -35,7 +35,9 @@ for (const [what, p] of [["bridge build", bridgeEntry], ["gate build", gateEntry
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-e2e-"));
 const home = path.join(root, "home");
-const workspaces = path.join(root, "workspaces");
+// The workspace root, where servers count as apps rather than the host's own;
+// a suite that brings its own projects names it (the fidelity suite does).
+const workspaces = process.env.E2E_WORKSPACES ?? path.join(root, "workspaces");
 const reviewDir = path.join(root, "review");
 fs.mkdirSync(path.join(home, ".config"), { recursive: true });
 // Two subdirectories so the new-workspace picker has something to show.
