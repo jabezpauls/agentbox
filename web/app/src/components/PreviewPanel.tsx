@@ -69,7 +69,8 @@ export function expiryLabel(expiresAt: number | null, now = Date.now()): string 
   if (expiresAt === null) return "until you stop sharing";
   const ms = expiresAt - now;
   if (ms <= 0) return "expired";
-  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
+  // Rounded, as the hours are: a share made for 7 days says 7 just after, not 6.
+  const days = Math.round(ms / (24 * 60 * 60 * 1000));
   if (days >= 2) return `for ${days} more days`;
   const hours = Math.round(ms / (60 * 60 * 1000));
   if (hours >= 1) return `for ${hours} more hour${hours === 1 ? "" : "s"}`;

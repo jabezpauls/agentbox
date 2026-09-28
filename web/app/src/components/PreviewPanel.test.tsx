@@ -277,6 +277,8 @@ describe("expiry labels", () => {
     expect(expiryLabel(null, now)).toBe("until you stop sharing");
     expect(expiryLabel(now - 1, now)).toBe("expired");
     expect(expiryLabel(now + 5 * 86400_000, now)).toBe("for 5 more days");
+    // Just after sharing for 7 days, it is 7 more days, not 6.
+    expect(expiryLabel(now + 7 * 86400_000 - 2_000, now)).toBe("for 7 more days");
     expect(expiryLabel(now + 3 * 3600_000, now)).toBe("for 3 more hours");
     expect(expiryLabel(now + 90_000, now)).toBe("for 2 more minutes");
   });
