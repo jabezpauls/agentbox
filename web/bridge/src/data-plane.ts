@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:
 import net, { type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream";
-import { createWebSocketStream, WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 
 /**
  * The bridge's data plane: a listener of its own (:7801) that the gate alone
@@ -351,14 +351,22 @@ function proxyAppUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, tar
   upReq.end();
 }
 
+/** How much a tunnel holds in memory for either side before it pushes back. */
+const MAX_EARLY_BYTES = 1024 * 1024;
+
 /**
  * A tunnel: raw bytes both ways over a WebSocket, binary frames. If the far
  * end cannot be reached, one text frame says why — `{"type":"error",
- * "message"}` — and the socket closes. Back-pressure is the streams'.
+ * "message"}` — and the socket closes. Either side that falls behind pauses
+ * the other.
  */
 function tunnel(ws: WebSocket, connect: () => net.Socket, what: string): void {
   const conn = connect();
   let open = false;
+  // What the client sends before the far end has answered is held, not lost:
+  // a forwarded request's first bytes often arrive in the same moment.
+  const early: Buffer[] = [];
+  let earlyBytes = 0;
   const fail = (message: string): void => {
     try {
       ws.send(JSON.stringify({ type: "error", message }));
@@ -367,20 +375,52 @@ function tunnel(ws: WebSocket, connect: () => net.Socket, what: string): void {
       ws.terminate();
     }
   };
+  ws.on("message", (data: Buffer, isBinary: boolean) => {
+    // Text frames are control, and nothing is defined in this direction yet.
+    if (!isBinary) return;
+    if (!open) {
+      earlyBytes += data.length;
+      if (earlyBytes > MAX_EARLY_BYTES) {
+        conn.destroy();
+        fail(`too much was sent before ${what} answered`);
+        return;
+      }
+      early.push(data);
+      return;
+    }
+    // Back-pressure: a slow far end pauses the client's frames.
+    if (!conn.write(data)) {
+      ws.pause();
+      conn.once("drain", () => ws.resume());
+    }
+  });
   conn.once("error", (err: NodeJS.ErrnoException) => {
     if (!open) fail(`cannot reach ${what}: ${err.code ?? err.message}`);
     else ws.terminate();
   });
   conn.once("connect", () => {
     open = true;
-    const stream = createWebSocketStream(ws);
-    stream.on("error", () => conn.destroy());
-    pipeline(conn, stream, () => ws.terminate());
-    pipeline(stream, conn, () => conn.destroy());
+    for (const chunk of early.splice(0)) conn.write(chunk);
+    conn.on("data", (chunk: Buffer) => {
+      ws.send(chunk, { binary: true });
+      // And a slow client pauses the far end.
+      if (ws.bufferedAmount > MAX_EARLY_BYTES) {
+        conn.pause();
+        const drain = setInterval(() => {
+          if (ws.readyState !== ws.OPEN || ws.bufferedAmount <= MAX_EARLY_BYTES / 4) {
+            clearInterval(drain);
+            conn.resume();
+          }
+        }, 20);
+      }
+    });
+    conn.once("end", () => ws.close(1000));
+    conn.once("close", () => {
+      if (ws.readyState === ws.OPEN) ws.close(1000);
+    });
   });
-  ws.once("close", () => {
-    if (!open) conn.destroy();
-  });
+  ws.once("close", () => conn.destroy());
+  ws.on("error", () => conn.destroy());
 }
 
 export function createDataPlane(opts: DataPlaneOptions): http.Server {
