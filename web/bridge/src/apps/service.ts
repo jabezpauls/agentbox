@@ -378,6 +378,20 @@ export class AppsService {
   }
 
   /**
+   * herdr brings its tabs back after a restart, the servers in them gone: an
+   * app's old tab in Apps is an idle shell by the time it is relaunched, and
+   * without this each restart would leave one more behind.
+   */
+  private async closeStaleTabs(app: App): Promise<void> {
+    const snap = await this.deps.snapshot().catch(() => null);
+    const apps = snap?.workspaces.find((w) => w.label === APPS_WORKSPACE);
+    if (!snap || !apps) return;
+    for (const tab of snap.tabs.filter((t) => t.workspace_id === apps.workspace_id && t.label === app.name)) {
+      await this.deps.herdr("tab.close", { tab_id: tab.tab_id }).catch(() => {});
+    }
+  }
+
+  /**
    * On start: every pinned app with a command and a folder that is not
    * already serving is launched again in the Apps workspace, once herdr
    * answers. This is what keeps a staging link working across a restart.
@@ -403,6 +417,7 @@ export class AppsService {
     for (const app of apps) {
       if (!app.pinned || !app.command || !app.cwd || listening.has(app.port)) continue;
       try {
+        await this.closeStaleTabs(app);
         await this.launch(app.id);
         started.push(app.id);
         console.log(`[workbench] relaunched pinned app ${app.name} (:${app.port})`);

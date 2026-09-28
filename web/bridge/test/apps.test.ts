@@ -202,6 +202,23 @@ describe("pinned apps", () => {
     r.ports = [listening(5174)];
     expect(await r.apps.relaunchPinned({ waitMs: 1000 })).toEqual([pinned.id]);
   });
+
+  it("replace the tab herdr brought back, rather than pile up a tab per restart", async () => {
+    const r = rig();
+    const pinned = await r.apps.create({ port: 5173, name: "staging", cwd: "/w/s", command: "npm run preview", pinned: true });
+    // After a restart: herdr restored the Apps workspace and the app's tab
+    // (an idle shell now), and another tab of the owner's there.
+    r.snap.workspaces.push({ workspace_id: "w2", number: 2, label: "Apps", focused: false, pane_count: 2, tab_count: 2, active_tab_id: "w2:t1", agent_status: "unknown" });
+    r.snap.tabs.push(
+      { tab_id: "w2:t1", workspace_id: "w2", number: 1, label: "staging", focused: false, pane_count: 1, agent_status: "unknown" },
+      { tab_id: "w2:t2", workspace_id: "w2", number: 2, label: "notes", focused: false, pane_count: 1, agent_status: "unknown" },
+      // Named the same, in another workspace: not the app's.
+      { tab_id: "w1:t1", workspace_id: "w1", number: 1, label: "staging", focused: true, pane_count: 1, agent_status: "working" },
+    );
+    expect(await r.apps.relaunchPinned({ waitMs: 1000 })).toEqual([pinned.id]);
+    expect(r.herdr.filter(([m]) => m === "tab.close")).toEqual([["tab.close", { tab_id: "w2:t1" }]]);
+    expect(r.herdr.findIndex(([m]) => m === "tab.close")).toBeLessThan(r.herdr.findIndex(([m]) => m === "tab.create"));
+  });
 });
 
 describe("keeping up with the gate", () => {
