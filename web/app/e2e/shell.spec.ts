@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Cookie, type Page } from "@playwright/test";
 import { GATE, signIn } from "./gate.ts";
+import { resume, sharedSession } from "./session.ts";
 import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
 
 /**
@@ -15,6 +16,10 @@ import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./
 test.describe.configure({ mode: "serial" });
 
 let client = 0;
+let cookies: Cookie[] = [];
+test.beforeAll(async ({ browser }) => {
+  cookies = await sharedSession(browser, "203.0.113.170");
+});
 test.beforeEach(async ({ page }) => {
   client += 1;
   await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${170 + client}` });
@@ -71,7 +76,7 @@ test("J5: moving between surfaces reloads nothing — the editor keeps its text,
   page.on("websocket", (ws) => {
     if (ws.url().includes("/ws/terminal")) terminalSockets.push(ws.url());
   });
-  await signIn(page, "/workbench");
+  await resume(page, cookies, "/workbench");
   await page.evaluate(() => ((window as unknown as { __sameDocument: boolean }).__sameDocument = true));
 
   await test.step("a terminal is running in the Workbench", async () => {
@@ -133,10 +138,22 @@ test("J5: moving between surfaces reloads nothing — the editor keeps its text,
     await expect(hidden).toHaveAttribute("aria-hidden", "true");
     expect(await hidden.evaluate((el) => el.hasAttribute("inert"))).toBe(true);
   });
+
+  // Leave herdr as it was found: the Workbench spec starts from nothing open.
+  await page.evaluate(async () => {
+    const session = (await (await fetch("/api/session")).json()) as { workspaces: { workspace_id: string }[] };
+    for (const w of session.workspaces) {
+      await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: "workspace.close", params: { workspace_id: w.workspace_id } }),
+      });
+    }
+  });
 });
 
 test("every route is a deep link that survives a reload, and back and forward", async ({ page }) => {
-  await signIn(page);
+  await resume(page, cookies);
   const root = await workspaceRoot(page);
   // Each route, the surface it shows, and something only that view says (the
   // editor is its frame alone).
@@ -175,7 +192,7 @@ test("every route is a deep link that survives a reload, and back and forward", 
 });
 
 test("the palette finds surfaces, projects, files and commands", async ({ page }) => {
-  await signIn(page);
+  await resume(page, cookies);
   const root = await workspaceRoot(page);
   fs.writeFileSync(path.join(root, "demo", "findme-palette.md"), "# Found\n");
 
@@ -217,7 +234,7 @@ test("the palette finds surfaces, projects, files and commands", async ({ page }
 });
 
 test("the dock opens beside any surface and remembers itself per surface", async ({ page }) => {
-  await signIn(page, "/system");
+  await resume(page, cookies, "/system");
   await expect(surface(page, "system")).toBeVisible();
   const dock = page.getByRole("complementary", { name: "Dock" });
   await page.keyboard.press("Control+Alt+d");

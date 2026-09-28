@@ -249,7 +249,14 @@ export function FilesSurface() {
   useOnActivate(() => focusOnArrival(() => grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true })));
 
   // Quick look follows the route: a link to a file opens it.
-  const lookPath = listing.file;
+  // Closing takes effect at once, not when the folder has been read again.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const lookPath = listing.file && listing.file !== dismissed ? listing.file : null;
+  useEffect(() => {
+    if (listing.file !== dismissed) setDismissed(null);
+    // Only when the listing moves on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing.file]);
   const lookEntry = lookPath ? (byPath.get(lookPath) ?? (stray?.path === lookPath ? stray : null)) : null;
   useEffect(() => {
     if (!lookPath) return;
@@ -263,8 +270,12 @@ export function FilesSurface() {
   }, [lookPath, byPath]);
 
   const go = (path: string) => navigate({ surface: "files", path });
-  const quickLook = (e: FileEntry) => navigate({ surface: "files", path: e.path }, { replace: true });
+  const quickLook = (e: FileEntry) => {
+    setDismissed(null);
+    navigate({ surface: "files", path: e.path }, { replace: true });
+  };
   const closeLook = () => {
+    setDismissed(listing.file);
     navigate({ surface: "files", path: dir }, { replace: true });
     requestAnimationFrame(() => {
       // Back to the list — unless something opened over it meanwhile.

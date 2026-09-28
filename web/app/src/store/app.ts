@@ -251,6 +251,10 @@ const wideViewport = typeof window === "undefined" || window.innerWidth >= 900;
 // The inspector auto-opens on the first non-system port of a session, once.
 let previewAutoOpened = false;
 
+function narrowViewport(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(max-width: 700px)").matches;
+}
+
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
   sidebarWidth: readSidebarWidth(),
@@ -302,8 +306,9 @@ export const useApp = create<AppState>((set, get) => ({
         set({ ports: m.ports, portsReadable: m.readable !== false });
         // The first time a real (non-system) port appears while the inspector
         // is closed, open it on Preview — once per session — where the port
-        // is one click from being shown.
-        if (!previewAutoOpened) {
+        // is one click from being shown. Not on a phone, where the dock is a
+        // full-screen sheet and would take the screen away.
+        if (!previewAutoOpened && !narrowViewport()) {
           const port = m.ports.find((p) => !p.system);
           if (port && !get().ui.inspector.open) {
             previewAutoOpened = true;

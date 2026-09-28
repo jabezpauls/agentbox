@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { devices, expect, test, type Page } from "@playwright/test";
-import { signIn } from "./gate.ts";
+import { devices, expect, test, type Cookie, type Page } from "@playwright/test";
+import { resume, sharedSession } from "./session.ts";
 
 /**
  * J7 — from a phone: the same app with a bottom bar instead of the rail,
@@ -11,11 +11,12 @@ import { signIn } from "./gate.ts";
 test.use({ ...devices["Pixel 7"] });
 test.describe.configure({ mode: "serial" });
 
-let client = 0;
+let cookies: Cookie[] = [];
+test.beforeAll(async ({ browser }) => {
+  cookies = await sharedSession(browser, "203.0.113.200");
+});
 test.beforeEach(async ({ page }) => {
-  client += 1;
-  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${200 + client}` });
-  await signIn(page);
+  await resume(page, cookies);
   await expect(page.locator('section.surface[data-surface="home"][data-active]')).toBeVisible();
 });
 

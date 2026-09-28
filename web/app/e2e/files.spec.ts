@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./gate.ts";
+import { expect, test, type Cookie, type Page } from "@playwright/test";
+import { resume, sharedSession } from "./session.ts";
 
 /**
  * J4 — Files: drop a folder from the desktop, rename a file, download a
@@ -15,6 +15,11 @@ test.describe.configure({ mode: "serial" });
 let client = 0;
 let root = "";
 let project = "";
+let cookies: Cookie[] = [];
+
+test.beforeAll(async ({ browser }) => {
+  cookies = await sharedSession(browser, "203.0.113.140");
+});
 
 async function workspaceRoot(page: Page): Promise<string> {
   return page.evaluate(async () => ((await (await fetch("/api/health")).json()) as { workspaceRoot: string }).workspaceRoot);
@@ -27,8 +32,7 @@ const row = (page: Page, name: string) => page.getByRole("row", { name, exact: t
 
 test.beforeEach(async ({ page }) => {
   client += 1;
-  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${140 + client}` });
-  await signIn(page);
+  await resume(page, cookies);
   root = await workspaceRoot(page);
   project = path.join(root, "files-e2e");
   if (client === 1) {
