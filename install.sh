@@ -425,7 +425,9 @@ COMPOSE=(-f docker-compose.yml -f "docker-compose.$MODE.yml")
 log "Building the sandbox and gate images (first run takes a few minutes)"
 docker compose "${COMPOSE[@]}" build
 log "Starting"
-docker compose "${COMPOSE[@]}" up -d
+# --remove-orphans: a re-run over an older install stops services this
+# version no longer has.
+docker compose "${COMPOSE[@]}" up -d --remove-orphans
 
 # The gate's store, not .env, holds the password: .env's hash only seeds a
 # store that does not exist yet. So a password chosen now — given with

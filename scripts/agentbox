@@ -195,7 +195,9 @@ case "${1:-help}" in
         # the gate existed, the gate's store is seeded from the password hash
         # already in .env, so the same password signs in on the new page.
         docker compose "${OVERLAYS[@]}" build --pull
-        docker compose "${OVERLAYS[@]}" up -d
+        # --remove-orphans: a service an update removes (lavish, previews)
+        # must not keep running, unmanaged, from the old compose file.
+        docker compose "${OVERLAYS[@]}" up -d --remove-orphans
         if [ "$ISOLATE" = "true" ]; then
             # shellcheck source=scripts/isolate-host.sh
             . "$SCRIPT_DIR/isolate-host.sh"

@@ -60,6 +60,9 @@ jobs:
         # The entrypoint's own lines, against a scratch home.
         run: tests/install/codex-block.sh
 
+      - name: An update stops the services it drops
+        run: tests/install/orphans.sh
+
   proxy-config:
     runs-on: ubuntu-latest
     steps:
