@@ -76,17 +76,22 @@ function create(file: string): boolean {
   return true;
 }
 
-/** Remove the lock if it is still the stale one seen (same inode), under the takeover lock. */
-function takeOver(lock: string, ino: number, staleMs: number): void {
+/**
+ * Replace a stale lock with ours, holding the takeover lock throughout: check
+ * it is still the stale one seen (same inode), remove it, create ours, and
+ * only then let go. True when the lock is now ours.
+ */
+function takeOver(lock: string, ino: number, staleMs: number): boolean {
   const takeover = `${lock}.takeover`;
   if (!create(takeover)) {
     // Someone else is taking it over, or died doing so long ago.
     if (inspect(takeover, staleMs).kind === "stale") fs.rmSync(takeover, { force: true });
-    return;
+    return false;
   }
   try {
     const now = inspect(lock, staleMs);
     if (now.kind === "stale" && now.ino === ino) fs.rmSync(lock, { force: true });
+    return create(lock);
   } finally {
     fs.rmSync(takeover, { force: true });
   }
@@ -97,15 +102,13 @@ export function withFileLock<T>(file: string, fn: () => T, opts: LockOptions = {
   const lock = `${file}.lock`;
   const deadline = Date.now() + (opts.timeoutMs ?? 5000);
   const staleMs = opts.staleMs ?? 30_000;
-  while (!create(lock)) {
+  for (;;) {
+    if (create(lock)) break;
     const state = inspect(lock, staleMs);
-    if (state.kind === "gone") continue;
-    if (state.kind === "stale") {
-      takeOver(lock, state.ino, staleMs);
-      continue;
-    }
+    if (state.kind === "stale" && takeOver(lock, state.ino, staleMs)) break;
     if (Date.now() > deadline) {
-      throw new CliError(`${file} is being changed by another agentbox${state.pid ? ` (pid ${state.pid})` : ""}; if none is running, remove ${lock}`);
+      const holder = state.kind === "held" && state.pid ? ` (pid ${state.pid})` : "";
+      throw new CliError(`${file} is being changed by another agentbox${holder}; if none is running, remove ${lock}`);
     }
     sleepSync(WAIT_MS);
   }

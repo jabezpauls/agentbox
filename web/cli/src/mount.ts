@@ -129,27 +129,6 @@ export function mountPlan(opts: {
   };
 }
 
-/**
- * Why a folder is no place for the Linux convenience link, or `null`. The
- * link's target names the mount's secret path, and anyone who can list the
- * folder can read a link's target: so the folder must be the user's own and
- * closed to everyone else.
- */
-export function linkFolderProblem(folder: string): string | null {
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(folder);
-  } catch {
-    return `${folder}: no such folder`;
-  }
-  if (!st.isDirectory()) return `${folder} is not a folder`;
-  const uid = process.getuid?.();
-  if ((st.mode & 0o077) !== 0 || (uid !== undefined && st.uid !== uid)) {
-    return `${folder} can be opened by other users, and the link would show them the mount's secret address; make it in a folder only you can open (chmod 700), or leave [dir] out`;
-  }
-  return null;
-}
-
 /** The full path of `command` on PATH, or `null`. */
 export function findOnPath(command: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | null {
   const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);

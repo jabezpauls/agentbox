@@ -6,7 +6,7 @@ import type { Context } from "../context.js";
 import { DavFront, REMOTE_PREFIX } from "../dav.js";
 import { CliError, EXIT } from "../errors.js";
 import { apiErrorFrom } from "../http.js";
-import { driveFromNetUse, findOnPath, gvfsMountName, linkFolderProblem, mountPlan, runStep } from "../mount.js";
+import { driveFromNetUse, findOnPath, gvfsMountName, mountPlan, runStep } from "../mount.js";
 import { command, type Command } from "./types.js";
 
 /** This mount's folder under gvfs's, once it appears; `null` after `ms` without it. */
@@ -48,7 +48,7 @@ export const mount = command({
   details:
     "Serves the workspace on 127.0.0.1 behind a random path and a random password, carrying this device's\n" +
     "token to the box, and mounts it: macOS mount_webdav (at [dir], default ~/agentbox/<box>), Linux gio\n" +
-    "mount ([dir] becomes a link to it, in a folder only you can open), Windows net use ([dir] is a drive\n" +
+    "mount ([dir] becomes a link to it), Windows net use ([dir] is a drive\n" +
     "letter, default the next free one). Keep it running; Ctrl-C unmounts. Deleting sends things to the\n" +
     "box's trash. --no-mount prints the URL, user and password for a WebDAV client of your choice.",
   async run(ctx, p) {
@@ -105,11 +105,7 @@ export const mount = command({
         fs.mkdirSync(plan.mountpoint, { recursive: true });
         madeMountpoint = true;
       }
-      if (plan.link) {
-        if (fs.existsSync(plan.link)) throw new CliError(`${plan.link} already exists; name a new folder for the link, or leave it out`);
-        const problem = linkFolderProblem(path.dirname(plan.link));
-        if (problem) throw new CliError(problem);
-      }
+      if (plan.link && fs.existsSync(plan.link)) throw new CliError(`${plan.link} already exists; name a new folder for the link, or leave it out`);
 
       const mounted = await runStep(plan.mount, helper, ctx.env);
       if (mounted.code !== 0) {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../src/errors.js";
-import { driveFromNetUse, findOnPath, gvfsMountName, linkFolderProblem, mountPlan, mountWebdavCredentials, runStep } from "../src/mount.js";
+import { driveFromNetUse, findOnPath, gvfsMountName, mountPlan, mountWebdavCredentials, runStep } from "../src/mount.js";
 import { capture, json, runCli, signedIn, stubServer, tmpDir, type Stub } from "./helpers.js";
 
 const creds = { user: "agentbox", password: "pw-Secret_123" };
@@ -82,16 +82,6 @@ describe("mount plans", () => {
     expect(fs.readFileSync(out, "utf8")).toBe("agentbox|pw|6869");
     expect(fs.readdirSync(path.dirname(fs.mkdtempSync(path.join(dir, "probe-")))).filter((n) => n.startsWith("agentbox-mount-"))).toEqual([]);
   });
-
-  it.runIf(posix)("puts the Linux link only in a folder only this user can open", () => {
-    const priv = tmpDir();
-    fs.chmodSync(priv, 0o700);
-    expect(linkFolderProblem(priv)).toBeNull();
-    const open = tmpDir();
-    fs.chmodSync(open, 0o755);
-    expect(linkFolderProblem(open)).toMatch(/other users.*secret address/);
-    expect(linkFolderProblem(path.join(priv, "missing"))).toMatch(/no such folder/);
-  });
 });
 
 describe("the mount command", () => {
@@ -151,7 +141,7 @@ describe("the mount command", () => {
     await expect(fetch(url, { method: "PROPFIND" })).rejects.toThrow();
   });
 
-  it.runIf(posix)("mounts with gio, the password on its standard input and never in its arguments, and links in a private folder", async () => {
+  it.runIf(posix)("mounts with gio, the password on its standard input and never in its arguments, and links where asked", async () => {
     const cfg = await davBox();
     const bin = tmpDir();
     const runtime = tmpDir();
@@ -194,18 +184,6 @@ describe("the mount command", () => {
     expect((await running).code).toBe(0);
     expect(fs.existsSync(link)).toBe(false);
     expect(fs.readFileSync(log, "utf8")).toMatch(/argv: mount -u dav:/);
-  });
-
-  it.runIf(posix)("refuses to put the link where other users could read it, before mounting anything", async () => {
-    const cfg = await davBox();
-    const bin = tmpDir();
-    fs.writeFileSync(path.join(bin, "gio"), `#!/bin/sh\ntouch '${path.join(bin, "ran")}'\n`, { mode: 0o755 });
-    const open = tmpDir();
-    fs.chmodSync(open, 0o755);
-    const r = await runCli(["mount", path.join(open, "box")], { configDir: cfg, platform: "linux", env: { PATH: `${bin}:${process.env.PATH}` } });
-    expect(r.code).toBe(EXIT.FAILURE);
-    expect(r.stderr).toMatch(/can be opened by other users/);
-    expect(fs.existsSync(path.join(bin, "ran"))).toBe(false);
   });
 
   it.runIf(posix)("mounts with mount_webdav reading the credentials from fd 3, not from its arguments", async () => {

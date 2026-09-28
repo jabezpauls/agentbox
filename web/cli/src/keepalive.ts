@@ -32,6 +32,9 @@ export function keepAlive(ws: WebSocket, onDead: () => void, everyMs = PING_MS, 
   ws.on("message", alive);
   const timer = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) return;
+    // Paused for back-pressure, the socket is not being read, so a pong that
+    // came is not seen yet: that is the reader being slow, not the box.
+    if (ws.isPaused) return;
     if (unanswered >= missed) {
       stop();
       onDead();

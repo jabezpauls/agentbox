@@ -12,7 +12,7 @@ export const DETACH_PREFIX = 0x1d;
 export const DETACH_KEYS = "Ctrl-] then q";
 
 /** What a key event means to the detach sequence. */
-export type KeyKind = "prefix" | "q" | "release" | "modifier" | "other";
+export type KeyKind = "prefix" | "q" | "release" | "modifier" | "passive" | "other";
 
 const CTRL = 4;
 /** Caps Lock and Num Lock ride along in the modifier bits; they change nothing here. */
@@ -36,6 +36,11 @@ function modifiers(field: string | undefined): number {
  * - xterm's modifyOtherKeys: `CSI 27 ; <mods> ; <code> ~` — Ctrl-] is `CSI 27;5;93~`.
  */
 export function classifyCsi(params: string, final: string): KeyKind {
+  // Not keys at all: mouse reports (SGR `CSI < … M/m`, legacy `CSI M…`) and
+  // focus in/out (`CSI I`, `CSI O`), which herdr asks the terminal for.
+  if ((params.startsWith("<") && (final === "M" || final === "m")) || (params === "" && (final === "I" || final === "O" || final === "M"))) {
+    return "passive";
+  }
   if (final === "u") {
     const [keyField = "", modField = ""] = params.split(";");
     const code = Number(keyField.split(":")[0]);
@@ -64,8 +69,9 @@ export function classifyCsi(params: string, final: string): KeyKind {
  * program has switched the terminal to kitty's keyboard protocol or xterm's
  * modifyOtherKeys, as herdr does — escape sequences. `Ctrl-]` is held back
  * until the next key press: `q` detaches, a second `Ctrl-]` sends one
- * through, anything else sends what was held and itself. Key releases and
- * modifier keys pressed on their own neither complete nor cancel it.
+ * through, anything else sends what was held and itself. Key releases,
+ * modifier keys pressed on their own, mouse reports and focus changes
+ * neither complete nor cancel it.
  */
 export class DetachFilter {
   /** The bytes held back since the `Ctrl-]`, or `null` when none is pending. */
@@ -98,6 +104,14 @@ export class DetachFilter {
         } else {
           len = j + 1 - i;
           kind = classifyCsi(data.subarray(i + 2, j).toString("latin1"), String.fromCharCode(data[j] as number));
+          // A legacy mouse report carries three raw bytes after `CSI M`.
+          if (kind === "passive" && data[j] === 0x4d && j === i + 2) {
+            if (j + 3 >= data.length) {
+              this.carry = Buffer.from(data.subarray(i));
+              break;
+            }
+            len += 3;
+          }
         }
       } else if (b === DETACH_PREFIX) {
         kind = "prefix";
@@ -108,7 +122,7 @@ export class DetachFilter {
       i += len;
 
       if (this.held) {
-        if (kind === "release" || kind === "modifier") {
+        if (kind === "release" || kind === "modifier" || kind === "passive") {
           this.held.push(bytes);
           continue;
         }
