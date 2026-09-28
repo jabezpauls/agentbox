@@ -63,6 +63,15 @@ describe("isSystemPort", () => {
     ).toBe(true);
   });
 
+  it("flags the editor's own ports, though its processes run in the workspace", () => {
+    // code-server's extension host (and extensions such as Claude Code's IDE
+    // bridge) listen with /workspace as their cwd.
+    const editor = { port: 14882, systemPorts: set(), cwd: "/workspace", workspaceRoot: "/workspace" };
+    expect(isSystemPort({ ...editor, exe: "/usr/lib/code-server/lib/node" })).toBe(true);
+    // A dev server on the system's node, in the same folder, is an app.
+    expect(isSystemPort({ ...editor, exe: "/usr/bin/node" })).toBe(false);
+  });
+
   it("flags a port with an unattributable owner once a workspace root is known", () => {
     expect(isSystemPort({ port: 3000, systemPorts: set(), cwd: null, workspaceRoot: "/workspace" })).toBe(true);
   });

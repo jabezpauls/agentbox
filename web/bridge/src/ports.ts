@@ -149,6 +149,22 @@ async function readCwd(pid: number): Promise<string | null> {
   }
 }
 
+/** The program a pid runs, or null when `/proc` will not reveal it. */
+async function readExe(pid: number): Promise<string | null> {
+  try {
+    return await fsp.readlink(`/proc/${pid}/exe`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Programs whose ports are the box's own, wherever they run: the editor's
+ * processes run with `/workspace` as their cwd, and its extensions (Claude
+ * Code's IDE bridge, say) listen on ports of their own — never an app.
+ */
+const INFRA_PROGRAM_PREFIXES = ["/usr/lib/code-server/"];
+
 /**
  * Ports belonging to host daemons that share the sandbox's network namespace
  * (systemd-resolved on :53, DHCP, NTP, mDNS, CUPS…). They are listening, but
@@ -170,6 +186,8 @@ export interface PortClassification {
   cwd: string | null;
   /** Workspace root; when set, only ports opened under it may auto-preview. */
   workspaceRoot: string | null;
+  /** The owning process's program (`/proc/<pid>/exe`), when known. */
+  exe?: string | null;
 }
 
 /**
@@ -183,6 +201,7 @@ export interface PortClassification {
 export function isSystemPort(c: PortClassification): boolean {
   if (c.systemPorts.has(c.port)) return true;
   if (WELL_KNOWN_INFRA.has(c.port)) return true;
+  if (c.exe && INFRA_PROGRAM_PREFIXES.some((prefix) => c.exe!.startsWith(prefix))) return true;
   if (c.workspaceRoot) {
     if (c.cwd === null || !underRoot(c.cwd, c.workspaceRoot)) return true;
   }
@@ -221,9 +240,9 @@ export async function listListeningPorts(opts: {
   if (rows.length === 0) return { ports: [], readable };
 
   const inodePid = await buildInodePidMap(new Set(rows.map((r) => r.inode)));
-  const owners = new Map<number, { process: string | null; cwd: string | null }>();
+  const owners = new Map<number, { process: string | null; cwd: string | null; exe: string | null }>();
   for (const pid of new Set(inodePid.values())) {
-    owners.set(pid, { process: await readComm(pid), cwd: await readCwd(pid) });
+    owners.set(pid, { process: await readComm(pid), cwd: await readCwd(pid), exe: await readExe(pid) });
   }
 
   const byPort = new Map<number, ListeningPort>();
@@ -236,7 +255,7 @@ export async function listListeningPorts(opts: {
       port: row.port,
       pid,
       process,
-      system: isSystemPort({ port: row.port, systemPorts: system, cwd, workspaceRoot }),
+      system: isSystemPort({ port: row.port, systemPorts: system, cwd, workspaceRoot, exe: owner?.exe ?? null }),
       address: row.address,
       // Which project started it: the project cards and the apps list both
       // attribute a server by where its process runs.
