@@ -61,16 +61,84 @@ export function rewriteSrcset(value: string, prefix: string): string {
     .join(",");
 }
 
-/** `url(/…)` and `@import "/…"` in a stylesheet. */
+/**
+ * `url(/…)` and `@import "/…"` in a stylesheet.
+ *
+ * `url()` is read by hand, forward only, rather than with a pattern: however
+ * the text is built (`url(` again and again, a sea of spaces, a quote that
+ * never closes), each character is looked at a bounded number of times. A
+ * value holding a parenthesis is left as it is.
+ */
 export function rewriteCss(css: string, prefix: string): string {
-  return css
-    .replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, (whole, quote: string, url: string) => {
-      const t = url.trim();
-      return isRootAbsolute(t, prefix) ? `url(${quote}${prefix}${t}${quote})` : whole;
-    })
-    .replace(/@import\s+(['"])([^'"]*)\1/gi, (whole, quote: string, url: string) =>
-      isRootAbsolute(url, prefix) ? `@import ${quote}${prefix}${url}${quote}` : whole,
-    );
+  const lower = css.toLowerCase();
+  const isSpace = (c: string): boolean => c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f";
+  // Where a quote of each kind is known not to occur again.
+  const noMore: Record<string, number> = { '"': Infinity, "'": Infinity };
+  let out = "";
+  let copied = 0;
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf("url(", from);
+    if (at === -1) break;
+    from = at + 4;
+    let j = at + 4;
+    while (j < css.length && isSpace(css.charAt(j))) j++;
+    let quote = "";
+    let value: string;
+    const c = css.charAt(j);
+    if (c === '"' || c === "'") {
+      if (j >= (noMore[c] as number)) continue;
+      const close = css.indexOf(c, j + 1);
+      if (close === -1) {
+        noMore[c] = j;
+        continue;
+      }
+      value = css.slice(j + 1, close);
+      if (/[()]/.test(value)) continue;
+      quote = c;
+      j = close + 1;
+    } else {
+      const begin = j;
+      while (j < css.length && !isSpace(css.charAt(j)) && !"'\"()".includes(css.charAt(j))) j++;
+      value = css.slice(begin, j);
+    }
+    while (j < css.length && isSpace(css.charAt(j))) j++;
+    if (css.charAt(j) !== ")") continue;
+    from = j + 1;
+    if (!isRootAbsolute(value, prefix)) continue;
+    out += `${css.slice(copied, at)}url(${quote}${prefix}${value}${quote})`;
+    copied = j + 1;
+  }
+  out += css.slice(copied);
+  return out.replace(/@import\s+(['"])([^'"]*)\1/gi, (whole, q: string, url: string) =>
+    isRootAbsolute(url, prefix) ? `@import ${q}${prefix}${url}${q}` : whole,
+  );
+}
+
+/**
+ * Whether the page brings an import map of its own, found the way the tag
+ * scanner reads tags: each `<script` tag's attributes, once, from where the
+ * last tag ended. Linear in the page (a pattern that looked for the attribute
+ * across the whole page from every `<script` would not be).
+ */
+export function hasOwnImportMap(src: string): boolean {
+  const lower = src.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf("<script", from);
+    if (at === -1) return false;
+    const after = lower.charAt(at + 7);
+    if (after !== "" && !/[\s/>]/.test(after)) {
+      from = at + 7;
+      continue;
+    }
+    const end = lower.indexOf(">", at);
+    // No tag after this one can end either.
+    if (end === -1) return false;
+    const type = attr(parseAttrs(src.slice(at + 7, end)), "type")?.value?.trim().toLowerCase();
+    if (type === "importmap") return true;
+    from = end + 1;
+  }
 }
 
 interface Attr {
@@ -131,7 +199,7 @@ export function injection(prefix: string, withImportMap: boolean): string {
  */
 export function rewriteHtml(src: string, opts: RewriteOptions): RewriteResult {
   const { prefix } = opts;
-  const ownImportMap = /<script\b[^>]*\btype\s*=\s*["']?importmap\b/i.test(src);
+  const ownImportMap = hasOwnImportMap(src);
   const inject = injection(prefix, !ownImportMap);
   let injected = false;
   let out = "";
