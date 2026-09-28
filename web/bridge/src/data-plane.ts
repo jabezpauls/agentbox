@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
-import net from "node:net";
+import net, { type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream";
 import { createWebSocketStream, WebSocketServer, type WebSocket } from "ws";
@@ -75,6 +75,23 @@ interface AppTarget {
   /** The path and query to request on the app, raw. */
   path: string;
 }
+
+/**
+ * How the plane reaches a port on the sandbox's loopback: IPv4 first, then
+ * IPv6. A dev server told to listen on `localhost` may have bound `::1` alone
+ * (Node and Vite resolve it the way the system does), and it must be reached
+ * all the same; nothing but these two addresses is ever tried.
+ */
+const LOOPBACK_ADDRESSES = [
+  { address: "127.0.0.1", family: 4 },
+  { address: "::1", family: 6 },
+];
+const lookupLoopback: LookupFunction = (_host, opts, cb) => {
+  const done = cb as (err: Error | null, address: string | Array<{ address: string; family: number }>, family?: number) => void;
+  if (opts.all) done(null, LOOPBACK_ADDRESSES);
+  else done(null, "127.0.0.1", 4);
+};
+export const LOOPBACK = { host: "loopback.agentbox.invalid", autoSelectFamily: true, lookup: lookupLoopback };
 
 /** Parse `/app/<port>/…` from a raw request target; `null` for anything else. */
 export function parseAppTarget(url: string): AppTarget | null {
@@ -237,7 +254,7 @@ const agent = new http.Agent({ keepAlive: true, maxSockets: 256, maxFreeSockets:
 function proxyApp(req: IncomingMessage, res: ServerResponse, target: AppTarget): void {
   let started = false;
   const upReq = http.request(
-    { host: "127.0.0.1", port: target.port, method: req.method, path: target.path, headers: appRequestHeaders(req.headers, target.port), agent },
+    { ...LOOPBACK, port: target.port, method: req.method, path: target.path, headers: appRequestHeaders(req.headers, target.port), agent },
     (upRes) => {
       started = true;
       clearTimeout(firstByte);
@@ -289,7 +306,7 @@ function proxyAppUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, tar
   const headers = appRequestHeaders(req.headers, target.port, true);
   headers.connection = "Upgrade";
   headers.upgrade = req.headers.upgrade ?? "websocket";
-  const upReq = http.request({ host: "127.0.0.1", port: target.port, method: req.method, path: target.path, headers, agent: false });
+  const upReq = http.request({ ...LOOPBACK, port: target.port, method: req.method, path: target.path, headers, agent: false });
   let upgraded = false;
   upReq.on("upgrade", (upRes, upSocket, upHead) => {
     upgraded = true;
@@ -391,7 +408,7 @@ export function createDataPlane(opts: DataPlaneOptions): http.Server {
     const tcp = /^\/tunnel\/tcp\/(\d{1,5})$/.exec(url);
     const port = tcp ? Number(tcp[1]) : 0;
     if (tcp && port >= 1 && port <= 65535) {
-      wss.handleUpgrade(req, socket, head, (ws) => tunnel(ws, () => net.connect(port, "127.0.0.1"), `port ${port}`));
+      wss.handleUpgrade(req, socket, head, (ws) => tunnel(ws, () => net.connect({ ...LOOPBACK, port }), `port ${port}`));
       return;
     }
     if (url === "/tunnel/herdr") {

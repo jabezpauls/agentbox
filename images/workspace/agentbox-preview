@@ -202,10 +202,13 @@ async function link(app) {
   return `${await publicOrigin()}/a/${app.id}/`;
 }
 
-/** Does anything answer HTTP on the port yet? Any status counts: the app is up. */
-function answers(port) {
+/**
+ * Does anything answer HTTP on the port yet, on either loopback (a server told
+ * `localhost` may have bound ::1 alone)? Any status counts: the app is up.
+ */
+function answersOn(host, port) {
   return new Promise((resolve) => {
-    const req = http.request({ host: "127.0.0.1", port, method: "GET", path: "/", timeout: 3000 }, (res) => {
+    const req = http.request({ host, port, method: "GET", path: "/", timeout: 3000 }, (res) => {
       res.resume();
       resolve(true);
     });
@@ -213,6 +216,10 @@ function answers(port) {
     req.on("error", () => resolve(false));
     req.end();
   });
+}
+
+async function answers(port) {
+  return (await answersOn("127.0.0.1", port)) || (await answersOn("::1", port));
 }
 
 async function waitUp(port, timeoutS) {

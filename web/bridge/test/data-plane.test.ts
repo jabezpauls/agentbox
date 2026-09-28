@@ -133,6 +133,21 @@ describe("making a request local", () => {
   });
 });
 
+describe("an app on either loopback", () => {
+  it("is reached on ::1 when that is all it bound (a dev server told `localhost`)", async () => {
+    const srv = http.createServer((_req, res) => res.end("from ::1"));
+    const bound = await new Promise<boolean>((resolve) => {
+      srv.once("error", () => resolve(false));
+      srv.listen(0, "::1", () => resolve(true));
+    });
+    if (!bound) return; // no IPv6 loopback on this machine
+    servers.push(srv);
+    const port = (srv.address() as AddressInfo).port;
+    const res = await fetch(url(port, "/"));
+    expect(await res.text()).toBe("from ::1");
+  });
+});
+
 describe("when nothing answers", () => {
   it("a page load gets the branded page", async () => {
     const res = await fetch(url(closedPort), { headers: NAV });
