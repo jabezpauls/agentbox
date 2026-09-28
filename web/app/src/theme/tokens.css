@@ -67,6 +67,15 @@
      background looks the way it would in a normal tab. */
   --frame-bg: #ffffff;
 
+  /* Fixed in every theme: the miniature of each theme Settings offers, which
+     must look like that theme whichever one is on. */
+  --swatch-light-canvas: #f8f9fc;
+  --swatch-light-surface: #ffffff;
+  --swatch-light-line: #e5e8f0;
+  --swatch-dark-canvas: #0b0e17;
+  --swatch-dark-surface: #151a27;
+  --swatch-dark-line: #262d40;
+
   /* terminal surface + ANSI palette (xterm reads these through themes.ts).
      --term-bg must equal --surface exactly or the seam between the pane frame
      and the canvas shows as a hairline of the wrong colour. */

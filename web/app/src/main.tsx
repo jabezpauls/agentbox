@@ -8,6 +8,8 @@ import "./app.css";
 import "./styles/shell.css";
 import "./styles/surfaces.css";
 import "./styles/files.css";
+import "./styles/system.css";
+import "./styles/settings.css";
 import { App } from "./App.tsx";
 import { installSessionGuard } from "./api/session-guard.ts";
 
