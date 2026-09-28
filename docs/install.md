@@ -234,6 +234,11 @@ to prefer behind-proxy mode there.
 ./scripts/agentbox update
 ```
 
+The terminals, the shell, the monitor and the Workbench share the editor
+container's network. If Docker restarts the `code` container on its own (after
+a crash, say), those four lose their network and the box answers 502 until
+they rejoin it; `./scripts/agentbox restart` brings them back in the right order.
+
 ## Updating
 
 `./scripts/agentbox update` pulls, rebuilds and restarts. Your workspace and
