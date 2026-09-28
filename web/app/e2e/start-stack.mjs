@@ -21,6 +21,10 @@ const bridgeEntry = path.resolve(appDir, "../bridge/dist/bridge/src/main.js");
 const gateEntry = path.resolve(appDir, "../gate/dist/main.js");
 const staticDir = path.resolve(appDir, "dist");
 const port = Number(process.env.WORKBENCH_PORT ?? 7800);
+// The bridge's data plane (apps, tunnels) and the gate's sandbox-side app API.
+const dataPort = Number(process.env.WORKBENCH_DATA_PORT ?? port + 1);
+const gatePort = Number(process.env.GATE_PORT ?? 7900);
+const appsPort = Number(process.env.GATE_APPS_PORT ?? gatePort + 1);
 
 for (const [what, p] of [["bridge build", bridgeEntry], ["gate build", gateEntry], ["app build", staticDir]]) {
   if (!fs.existsSync(p)) {
@@ -102,7 +106,10 @@ const bridge = spawn(process.execPath, [bridgeEntry], {
     WORKBENCH_WORKSPACE_ROOT: workspaces,
     WORKBENCH_REVIEW_DIR: reviewDir,
     // Links the bridge prints (agentbox-review open) point at the gate.
-    WORKBENCH_PUBLIC_URL: `http://127.0.0.1:${process.env.GATE_PORT ?? 7900}`,
+    WORKBENCH_PUBLIC_URL: process.env.E2E_PUBLIC_URL ?? `http://127.0.0.1:${gatePort}`,
+    WORKBENCH_DATA_PORT: String(dataPort),
+    WORKBENCH_DATA_HOST: "127.0.0.1",
+    AGENTBOX_GATE_APPS_URL: `http://127.0.0.1:${appsPort}`,
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
@@ -118,7 +125,6 @@ bridge.on("exit", (code) => {
 // ever talks to it, and signs in first. Its store lives in the throwaway
 // directory. The loopback address stands in for the proxy, so a test can play
 // another client by sending X-Forwarded-For (see e2e/gate.ts).
-const gatePort = Number(process.env.GATE_PORT ?? 7900);
 // Playwright waits on the gate's sign-in page; the bridge behind it must be
 // listening by then, or the first page load is a 502.
 await waitForSocket({ host: "127.0.0.1", port }, 20_000);
@@ -136,6 +142,9 @@ const gate = spawn(process.execPath, [gateEntry], {
     GATE_ADMIN_SOCKET: path.join(root, "gate-admin.sock"),
     GATE_UPSTREAM_HOST: "127.0.0.1",
     GATE_BRIDGE_PORT: String(port),
+    GATE_DATA_PORT: String(dataPort),
+    GATE_APPS_HOST: "127.0.0.1",
+    GATE_APPS_PORT: String(appsPort),
     // No code-server here; a spec stands one in on this port when it needs it.
     GATE_CODE_PORT: process.env.E2E_CODE_PORT ?? "7808",
     GATE_TRUSTED_PROXIES: "127.0.0.1",

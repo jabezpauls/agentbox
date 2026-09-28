@@ -40,6 +40,13 @@ export async function gateApi(
   );
 }
 
+/** Make an app of a port, as the owner does from the Preview panel; returns its id. */
+export async function makeApp(page: Page, port: number, name?: string): Promise<string> {
+  const res = await gateApi(page, "POST", "/_gate/apps", { port, ...(name ? { name } : {}) });
+  if (res.status !== 201) throw new Error(`could not make an app of :${port}: ${res.status} ${JSON.stringify(res.body)}`);
+  return String(res.body.id);
+}
+
 function base32Decode(text: string): Buffer {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = 0;

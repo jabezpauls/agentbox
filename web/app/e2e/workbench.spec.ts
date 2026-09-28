@@ -112,19 +112,20 @@ test("the Workbench drives herdr end to end", async ({ page }) => {
     expect(before).not.toBe("dark");
   });
 
-  await test.step("a server started in a pane can be previewed", async () => {
+  await test.step("a server started in a pane can be previewed as an app", async () => {
     const devPort = await freePort();
     await runCommand(page, `python3 -m http.server ${devPort} --bind 127.0.0.1`);
     await waitForOutput(page, "Serving HTTP");
 
-    const portRow = page.getByRole("button", { name: new RegExp(`:${devPort}\\b`) });
+    // Not an app yet: it is listed apart, and choosing it makes it one.
+    const portRow = page.getByRole("list", { name: "Also listening" }).getByRole("button", { name: new RegExp(`:${devPort}\\b`) });
     await expect(portRow).toBeVisible({ timeout: 30_000 });
     await portRow.click();
 
     const frame = page.locator("iframe.prev-frame");
-    await expect(frame).toHaveAttribute("src", new RegExp(`/preview/${devPort}/`));
-    // Without a preview domain the path proxy is same-origin, so the frame
-    // must be sandboxed without allow-same-origin.
+    await expect(frame).toHaveAttribute("src", /^\/a\/[a-z2-7]{26}\/$/);
+    await expect(page.getByRole("list", { name: "Apps" })).toContainText(`:${devPort}`);
+    // Every app runs with an opaque origin: never allow-same-origin.
     const sandbox = await frame.getAttribute("sandbox");
     expect(sandbox).toContain("allow-scripts");
     expect(sandbox).not.toContain("allow-same-origin");

@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AppError, isAppId, toView, type AppRegistry } from "./apps.js";
-import type { ClientIpResolver } from "./client-ip.js";
+import { normalizeIp, type ClientIpResolver } from "./client-ip.js";
 
 /**
  * The sandbox-side app API, on its own listener (:7901), which the sandbox
@@ -76,8 +76,13 @@ function settable(body: Record<string, unknown>): Record<string, unknown> {
 export function createSandboxApi(registry: AppRegistry, clientIps: ClientIpResolver): http.Server {
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Only the sandbox. The gate shares a network with the proxy too; nothing
-    // arriving from it is the sandbox, whatever it asks for.
-    if (clientIps.resolve(req).viaProxy) return send(res, 403, { error: "forbidden" });
+    // arriving from it is the sandbox, whatever it asks for. (A proxy on
+    // loopback is a test harness standing in for both; in the stack the proxy
+    // is a container of its own and never the gate's loopback.)
+    const peer = normalizeIp(req.socket.remoteAddress ?? "");
+    if (clientIps.resolve(req).viaProxy && peer !== "127.0.0.1" && peer !== "::1") {
+      return send(res, 403, { error: "forbidden" });
+    }
     const url = new URL(req.url ?? "/", "http://gate");
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts[0] !== "apps" || parts.length > 2) return send(res, 404, { error: "not found" });

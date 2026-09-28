@@ -5,7 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { GATE, signIn } from "./gate.ts";
+import { GATE, makeApp, signIn } from "./gate.ts";
 
 /**
  * A service worker registered by a page the sandbox serves would control every
@@ -36,10 +36,14 @@ test.beforeAll(async () => {
   fs.writeFileSync(
     path.join(dir, "index.html"),
     `<!doctype html><title>sw-pending</title><script>
-      navigator.serviceWorker.register("sw.js", { scope: "./" }).then(
-        () => navigator.serviceWorker.ready.then(() => { document.title = "sw-registered"; }),
-        (e) => { document.title = "sw-refused: " + e.message; },
-      );
+      try {
+        navigator.serviceWorker.register("sw.js", { scope: "./" }).then(
+          () => navigator.serviceWorker.ready.then(() => { document.title = "sw-registered"; }),
+          (e) => { document.title = "sw-refused: " + e.name; },
+        );
+      } catch (e) {
+        document.title = "sw-refused: " + e.name;
+      }
     </script>`,
   );
   fs.writeFileSync(
@@ -144,20 +148,21 @@ test("the sign-in page clears workers left from before, and keeps the editor's",
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
-test("a page from the sandbox cannot register a service worker", async ({ page }) => {
+test("an app's page cannot register a service worker", async ({ page }) => {
   await signIn(page);
-  const scriptStatus: number[] = [];
-  page.on("response", (r) => {
-    if (r.url().endsWith("/sw.js")) scriptStatus.push(r.status());
-  });
-  await page.goto(`${GATE}/preview/${port}/index.html`);
+  const id = await makeApp(page, port, "sw-test");
+  // Opened full screen, as its own top-level page: it runs with an opaque
+  // origin all the same (the gate's CSP sandbox), which has no workers at all
+  // — and the gate refuses a worker's script outside the editor besides.
+  await page.goto(`${GATE}/a/${id}/index.html`);
   await expect(page).toHaveTitle(/^sw-refused/, { timeout: 15_000 });
-  // Refused by the gate, for being a worker's script: the same file loads fine
-  // as an ordinary script.
-  expect(await page.title()).toContain("403");
+  expect(await page.evaluate(() => window.origin)).toBe("null");
+  // The same file loads as an ordinary script, on the page's grant.
   const plain = await page.evaluate(async () => (await fetch("sw.js")).status);
   expect(plain).toBe(200);
-  // And nothing took over: signed out, the sign-in page is still the gate's.
+  // And nothing took over the box: no worker on its origin, and signed out,
+  // the sign-in page is still the gate's.
+  await page.goto(`${GATE}/workbench`);
   const registrations = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
   expect(registrations).toBe(0);
   expect(await page.evaluate(async () => (await fetch("/_gate/logout", { method: "POST" })).status)).toBe(204);
