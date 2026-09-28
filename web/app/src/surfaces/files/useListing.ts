@@ -33,13 +33,17 @@ export function useListing(target: string | null, hidden: boolean) {
   const current = useRef<Listing>(EMPTY);
   current.current = listing;
   const gen = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
   // A new folder being read: a refresh of the old one must not overtake it.
   const navigating = useRef(false);
 
   const load = useCallback(
     async (path: string, keep: boolean, file: string | null = null) => {
       const my = ++gen.current;
+      // A newer read makes this one pointless: stop it on the wire too.
+      inflight.current?.abort();
       const abort = new AbortController();
+      inflight.current = abort;
       try {
         let dir = path;
         let page;

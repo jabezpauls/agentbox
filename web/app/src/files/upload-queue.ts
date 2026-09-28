@@ -177,6 +177,11 @@ export class UploadQueue {
       if (!job.uploadId) {
         try {
           job.uploadId = (await this.transport.start(job.item.dest, job.item.size, job.overwrite)).uploadId;
+          // Cancelled while the session was being made: it is not wanted.
+          if (this.cancelled(job)) {
+            void this.transport.cancel(job.uploadId).catch(() => {});
+            return;
+          }
         } catch (err) {
           if (isTransportError(err) && err.status === 409 && err.code === "exists") {
             if (job.rename > 1) {

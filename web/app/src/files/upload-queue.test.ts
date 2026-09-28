@@ -163,6 +163,26 @@ describe("UploadQueue", () => {
     expect(q.items).toHaveLength(0);
   });
 
+  it("throws away a session that was still being made when the file was cancelled", async () => {
+    const server = new FakeServer();
+    const start = server.start.bind(server);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    server.start = async (...args) => {
+      await gate;
+      return start(...args);
+    };
+    const q = new UploadQueue(server, quick);
+    q.add([{ file: blob(5), dest: "/w/slow" }]);
+    q.cancel(q.items[0]!.id);
+    release();
+    await settle(q);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(q.items[0]!.state).toBe("cancelled");
+    expect(server.cancelled).toEqual(["up1"]);
+    expect(server.puts).toBe(0);
+  });
+
   it("makes empty folders from a dropped tree", async () => {
     const server = new FakeServer();
     const q = new UploadQueue(server, quick);
