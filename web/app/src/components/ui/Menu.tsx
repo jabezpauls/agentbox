@@ -49,7 +49,11 @@ export function Menu({ anchor, items, label, onClose, align = "start" }: Props) 
   useLayoutEffect(() => {
     const menu = ref.current;
     if (!menu) return;
-    invoker.current = anchor instanceof HTMLElement ? anchor : (document.activeElement as HTMLElement | null);
+    // Focus goes back to what had it — the list a Shift+F10 came from, the
+    // button clicked — or, when nothing did (a click that does not focus, as
+    // in Safari), to the anchor.
+    const had = document.activeElement as HTMLElement | null;
+    invoker.current = had && had !== document.body ? had : anchor instanceof HTMLElement ? anchor : null;
     const r =
       anchor instanceof HTMLElement ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
     const w = menu.offsetWidth;

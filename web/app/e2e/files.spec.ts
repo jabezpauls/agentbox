@@ -245,6 +245,58 @@ test("a filter over a big folder says it only looks through what is loaded", asy
   fs.rmSync(big, { recursive: true, force: true });
 });
 
+test("menus work from the keyboard: Shift+F10, the context-menu key and the ⋯ button", async ({ page }) => {
+  await page.goto(filesRoute(project));
+  await row(page, "notes.txt").click();
+  const menu = page.getByRole("menu");
+
+  // Shift+F10: the menu opens with its first item focused; arrows move;
+  // Escape closes it and gives the keyboard back to the list.
+  await page.keyboard.press("Shift+F10");
+  await expect(menu).toBeVisible();
+  const first = menu.getByRole("menuitem").first();
+  await expect(first).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(first).not.toBeFocused();
+  await expect(menu.locator('[role="menuitem"]:focus')).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(page.locator('[data-surface="files"] [role="grid"]')).toBeFocused();
+
+  // The context-menu key, then Enter on an item: Rename.
+  await page.keyboard.press("ContextMenu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  for (let i = 0; i < 12; i++) {
+    if (await menu.getByRole("menuitem", { name: /^Rename/ }).evaluate((el) => el === document.activeElement)) break;
+    await page.keyboard.press("ArrowDown");
+  }
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Rename notes.txt")).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // The row's ⋯ button, by keyboard as well as by mouse.
+  await row(page, "notes.txt").getByRole("button", { name: "Actions for notes.txt" }).click();
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
+test("closing the palette gives the keyboard back to where it was", async ({ page }) => {
+  await page.goto(filesRoute(project));
+  await row(page, "notes.txt").click();
+  const grid = page.locator('[data-surface="files"] [role="grid"]');
+  await expect(grid).toBeFocused();
+  await page.keyboard.press("Control+Alt+k");
+  await expect(page.getByLabel("Command palette query")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(grid).toBeFocused();
+  // And the list still answers the keyboard.
+  await page.keyboard.press("ArrowUp");
+  await expect(page.locator('[data-surface="files"] .frow.is-cursor')).not.toHaveAttribute("aria-label", "notes.txt");
+});
+
 test("a folder downloads as a zip", async ({ page }) => {
   await page.goto(filesRoute(project));
   await row(page, "docs").click({ button: "right" });
