@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { Bot, ChevronDown, Code2, Folder, GitBranch, SquareTerminal, X } from "lucide-react";
 import type { Project } from "@workbench/shared";
 import { formatAgo, plural } from "../../lib/format.ts";
@@ -65,13 +65,15 @@ export function ProjectCard({ project, agents: launchable }: { project: Project;
   const agents = project.agents.filter((a): a is typeof a & { agent: string } => Boolean(a.agent));
   const shells = project.agents.length - agents.length;
   const openFiles = () => navigate({ surface: "files", path: project.path });
+  // A folder's name can hold spaces and anything else; an id cannot.
+  const titleId = useId();
   return (
-    <article className="card project-card" aria-labelledby={`project-${project.name}`}>
+    <article className="card project-card" aria-labelledby={titleId}>
       <div className="card-head">
         <span className="card-icon" aria-hidden="true">
           <Folder size={15} />
         </span>
-        <h3 className="card-title" id={`project-${project.name}`}>
+        <h3 className="card-title" id={titleId}>
           <button className="linklike" onClick={openFiles} title={`Browse ${project.path}`}>
             {project.name}
           </button>

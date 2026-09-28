@@ -17,7 +17,7 @@
   {
     "id": "a7c2de5fg3hj4km6np7qr2st3u",
     "name": "staging",
-    "port": 8080,
+    "port": 4000,
     "keepPrefix": false,
     "cwd": "/workspace/site",
     "command": "npm run preview",

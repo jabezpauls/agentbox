@@ -65,6 +65,25 @@ test("J1: signing in lands on Home, which says what needs you and what is in the
   await expect(page).toHaveTitle(/Home · agentbox/);
 });
 
+test("project cards: a name with spaces labels its card, and the actions line up at the foot", async ({ page }) => {
+  await resume(page, cookies);
+  const root = await workspaceRoot(page);
+  fs.mkdirSync(path.join(root, "two words"), { recursive: true });
+  fs.writeFileSync(path.join(root, "two words", "README.md"), "# Two words\n");
+  await page.reload();
+  const card = page.getByRole("article", { name: "two words" });
+  await expect(card).toBeVisible();
+
+  // Every card's action row sits the same distance from its card's foot,
+  // however much each card has above it.
+  const gaps = await page.locator("article.project-card").evaluateAll((cards) =>
+    cards.map((c) => Math.round(c.getBoundingClientRect().bottom - c.querySelector(".card-actions")!.getBoundingClientRect().bottom)),
+  );
+  expect(gaps.length).toBeGreaterThan(1);
+  expect(new Set(gaps).size).toBe(1);
+  fs.rmSync(path.join(root, "two words"), { recursive: true, force: true });
+});
+
 test("J1: a link into the app survives the sign-in on the way", async ({ page }) => {
   await signIn(page, "/settings/cli");
   await expect(surface(page, "settings")).toBeVisible();

@@ -192,13 +192,18 @@ p code,
 .card-chip.is-more {
   color: var(--text-2);
 }
+/* Pinned to the foot of the card, so a row of cards lines its actions up
+   whatever each one has above them. */
 .card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  margin: var(--sp-3) calc(var(--sp-2) * -1) calc(var(--sp-2) * -1);
+  margin: auto calc(var(--sp-2) * -1) calc(var(--sp-2) * -1);
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border-subtle);
+}
+.card > :has(+ .card-actions) {
+  margin-bottom: var(--sp-3);
 }
 .card-actions .btn-ghost {
   color: var(--text-2);
