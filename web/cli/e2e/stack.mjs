@@ -121,7 +121,16 @@ export async function startStack({ log = () => {} } = {}) {
     SHELL: "/bin/bash",
     TERM: "xterm-256color",
   };
-  const ports = { bridge: await freePort(), terminal: await freePort(), shell: await freePort(), gate: await freePort(), code: await freePort() };
+  const ports = {
+    bridge: await freePort(),
+    // The bridge's data plane (apps, tunnels) and the gate's sandbox-side app API.
+    data: await freePort(),
+    apps: await freePort(),
+    terminal: await freePort(),
+    shell: await freePort(),
+    gate: await freePort(),
+    code: await freePort(),
+  };
 
   const children = [];
   const spawnChild = (name, cmd, args, env, cwd = undefined) => {
@@ -147,6 +156,9 @@ export async function startStack({ log = () => {} } = {}) {
     WORKBENCH_WORKSPACE_ROOT: workspace,
     WORKBENCH_HOME_ROOT: home,
     WORKBENCH_REVIEW_DIR: path.join(root, "review"),
+    WORKBENCH_DATA_PORT: String(ports.data),
+    WORKBENCH_DATA_HOST: "127.0.0.1",
+    AGENTBOX_GATE_APPS_URL: `http://127.0.0.1:${ports.apps}`,
   });
   // As docker-compose.yml runs them.
   spawnChild("terminal", ttyd, ["--port", String(ports.terminal), "--interface", "127.0.0.1", "--base-path", "/terminal", "--check-origin", "--writable", "herdr"], sandboxEnv);
@@ -163,6 +175,9 @@ export async function startStack({ log = () => {} } = {}) {
     GATE_ADMIN_SOCKET: path.join(root, "gate-admin.sock"),
     GATE_UPSTREAM_HOST: "127.0.0.1",
     GATE_BRIDGE_PORT: String(ports.bridge),
+    GATE_DATA_PORT: String(ports.data),
+    GATE_APPS_HOST: "127.0.0.1",
+    GATE_APPS_PORT: String(ports.apps),
     GATE_TERMINAL_PORT: String(ports.terminal),
     GATE_SHELL_PORT: String(ports.shell),
     GATE_CODE_PORT: String(ports.code),
