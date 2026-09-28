@@ -312,12 +312,19 @@ export interface SystemVersions {
 export type EditorClientMessage =
   | { type: "hello"; version: string; focused: boolean }
   | { type: "focus"; focused: boolean }
-  | { type: "opened"; id: string; ok: boolean; error?: string };
-export type EditorServerMessage = { type: "open"; id: string; path: string; line?: number; column?: number };
+  | { type: "opened"; id: string; ok: boolean; error?: string }
+  /** The window is closing: its extension host is going away. */
+  | { type: "bye" };
+export type EditorServerMessage =
+  | { type: "open"; id: string; path: string; line?: number; column?: number }
+  /** The app's theme, resolved: the editor follows it. */
+  | { type: "theme"; kind: EditorThemeKind };
+/** Light or dark, as the app resolved it (a "system" choice already decided). */
+export type EditorThemeKind = "light" | "dark";
 /** `POST /api/editor/open` → whether a running editor opened it. */
 export interface EditorOpenResult { delivered: boolean; error?: string }
-/** `GET /api/editor/status`: how many editor windows are connected. */
-export interface EditorStatus { connected: number }
+/** `GET /api/editor/status`: how many editor windows are connected, and the theme they follow. */
+export interface EditorStatus { connected: number; theme: EditorThemeKind | null }
 /** Percent-encode a (possibly byte-escaped) path for a query string. */
 export function encodePathParam(path: string): string {
   let out = "";

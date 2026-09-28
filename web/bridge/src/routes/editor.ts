@@ -40,15 +40,24 @@ function position(raw: unknown, what: string): number | undefined {
 
 /**
  * The editor channel: `/ws/editor`, which the `agentbox-connect` extension
- * holds open, and `POST /api/editor/open {path, line?, column?, wait?}`, which
- * asks it to open a file and answers whether it did.
+ * holds open; `POST /api/editor/open {path, line?, column?, wait?, fresh?}`,
+ * which asks it to open a file and answers whether it did; and
+ * `POST /api/editor/theme {kind}`, the app's resolved light or dark, which
+ * every editor window follows.
  */
 export function registerEditorRoutes(app: FastifyInstance, channel: EditorChannel, files: FilesService): void {
   app.get("/ws/editor", { websocket: true, onRequest: localOnly }, (socket) => {
     channel.attach(socket);
   });
 
-  app.get("/api/editor/status", () => ({ connected: channel.connected }));
+  app.get("/api/editor/status", () => ({ connected: channel.connected, theme: channel.theme }));
+
+  app.post<{ Body: Record<string, unknown> | undefined }>("/api/editor/theme", async (req, reply) => {
+    const kind = req.body?.kind;
+    if (kind !== "light" && kind !== "dark") return reply.code(400).send({ error: "kind must be light or dark" });
+    channel.setTheme(kind);
+    return { theme: kind };
+  });
 
   app.post<{ Body: Record<string, unknown> | undefined }>("/api/editor/open", async (req, reply) => {
     try {
@@ -63,6 +72,7 @@ export function registerEditorRoutes(app: FastifyInstance, channel: EditorChanne
         ...(line !== undefined ? { line } : {}),
         ...(column !== undefined ? { column } : {}),
         waitMs: wait,
+        fresh: body.fresh === true,
       });
     } catch (err) {
       return sendError(reply, err);

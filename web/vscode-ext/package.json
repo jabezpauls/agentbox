@@ -1,9 +1,9 @@
 {
   "name": "agentbox-connect",
   "displayName": "agentbox connect",
-  "description": "Lets agentbox open files in this editor: “Open in editor” anywhere in the app lands here, at the line.",
+  "description": "Lets agentbox open files in this editor — “Open in editor” anywhere in the app lands here, at the line — and keeps the editor's theme with the app's.",
   "publisher": "agentbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "engines": { "vscode": "^1.80.0", "node": ">=22" },

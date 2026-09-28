@@ -44,12 +44,44 @@ afterEach(async () => {
   cleanup = [];
 });
 
-function client(port: number, opener: Opener, focused = true) {
-  const c = new BridgeClient({ url: `ws://127.0.0.1:${port}/ws/editor`, version: "9.9.9", opener, focused: () => focused, minDelayMs: 20, maxDelayMs: 100 });
+function client(port: number, opener: Opener, focused = true, theme?: (kind: "light" | "dark") => void) {
+  const c = new BridgeClient({
+    url: `ws://127.0.0.1:${port}/ws/editor`,
+    version: "9.9.9",
+    opener,
+    focused: () => focused,
+    ...(theme ? { theme } : {}),
+    minDelayMs: 20,
+    maxDelayMs: 100,
+  });
   c.start();
   cleanup.push(() => c.stop());
   return c;
 }
+
+describe("the extension's bridge client, theme and goodbye", () => {
+  it("follows the theme it is sent, and ignores one it does not know", async () => {
+    const bridge = await fakeBridge();
+    cleanup.push(bridge.close);
+    const kinds: string[] = [];
+    client(bridge.port, { open: async () => {} }, true, (k) => void kinds.push(k));
+    await until(() => bridge.received.length > 0);
+    bridge.send({ type: "theme", kind: "dark" });
+    bridge.peer()?.send(JSON.stringify({ type: "theme", kind: "sepia" }));
+    bridge.send({ type: "theme", kind: "light" });
+    await until(() => kinds.length === 2);
+    expect(kinds).toEqual(["dark", "light"]);
+  });
+
+  it("says goodbye when the window closes", async () => {
+    const bridge = await fakeBridge();
+    cleanup.push(bridge.close);
+    const c = client(bridge.port, { open: async () => {} });
+    await until(() => bridge.received.length > 0);
+    c.stop();
+    await until(() => bridge.received.some((m) => m.type === "bye"));
+  });
+});
 
 describe("the extension's bridge client", () => {
   it("says hello with its version and focus", async () => {

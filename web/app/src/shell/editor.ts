@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EditorOpenResult } from "@workbench/shared";
+import type { EditorOpenResult, EditorThemeKind } from "@workbench/shared";
 import { http } from "../api/http.ts";
 import { useRouter } from "./router.ts";
 import { toast, toastError } from "./toast.ts";
@@ -24,7 +24,10 @@ export async function openInEditor(path: string, at: { line?: number; column?: n
   useRouter.getState().navigate({ surface: "editor" });
   useEditorState.setState({ opening: path });
   try {
-    const res = await http.post<EditorOpenResult>("/api/editor/open", { path, ...at, wait: WAIT_MS });
+    // `fresh`: the app has just brought its own editor frame forward, which
+    // takes focus and so says "here I am" — the bridge waits a moment for
+    // that rather than send the file to a closed tab's lingering window.
+    const res = await http.post<EditorOpenResult>("/api/editor/open", { path, ...at, wait: WAIT_MS, fresh: true });
     if (!res.delivered) {
       toast("error", `Couldn't open ${basename(path)} in the editor.`, res.error ? capitalise(res.error) : undefined, {
         retry: () => void openInEditor(path, at),
@@ -40,4 +43,17 @@ export async function openInEditor(path: string, at: { line?: number; column?: n
 function capitalise(s: string): string {
   const t = s.charAt(0).toUpperCase() + s.slice(1);
   return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+/**
+ * Tell the editor the app's theme, resolved to light or dark, so VS Code
+ * switches its color theme with the app. Sent on every change and whenever
+ * the events socket comes back (a restarted bridge has forgotten it).
+ */
+export async function followAppTheme(kind: EditorThemeKind): Promise<void> {
+  try {
+    await http.post("/api/editor/theme", { kind });
+  } catch {
+    // An older bridge, or none: the editor keeps its own theme.
+  }
 }

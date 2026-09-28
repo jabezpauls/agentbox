@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { BridgeClient } from "./client";
+import { themeToApply } from "./theme";
 
 let client: BridgeClient | undefined;
 
@@ -20,6 +21,7 @@ export function activate(context: vscode.ExtensionContext): void {
     version,
     opener: { open: openInEditor },
     focused: () => vscode.window.state.focused,
+    theme: followTheme,
     log: (m) => log.appendLine(m),
   });
   client.start();
@@ -33,6 +35,17 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   client?.stop();
   client = undefined;
+}
+
+/**
+ * The app turned light or dark: switch the color theme to match, so the
+ * editor is never the one light pane in a dark app. Globally, like picking a
+ * theme by hand — every window follows the one app.
+ */
+async function followTheme(kind: "light" | "dark"): Promise<void> {
+  const workbench = vscode.workspace.getConfiguration("workbench");
+  const target = themeToApply(kind, (key) => workbench.get<string>(key));
+  if (target) await workbench.update("colorTheme", target, vscode.ConfigurationTarget.Global);
 }
 
 /** Open a file at a line (1-based), or reveal a folder in the explorer. */

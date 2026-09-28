@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { EditorClientMessage, EditorServerMessage } from "@workbench/shared";
+import type { EditorClientMessage, EditorServerMessage, EditorThemeKind } from "@workbench/shared";
 
 /** Opens a file in the editor this extension runs in. */
 export interface Opener {
@@ -14,6 +14,8 @@ export interface ClientOptions {
   opener: Opener;
   /** Whether this editor window has focus now. */
   focused: () => boolean;
+  /** Follow the app's theme (light or dark). */
+  theme?: (kind: EditorThemeKind) => Promise<void> | void;
   /** Reconnect backoff bounds. */
   minDelayMs?: number;
   maxDelayMs?: number;
@@ -24,8 +26,10 @@ export interface ClientOptions {
  * The extension's end of the editor channel: a socket to the bridge, kept
  * open for as long as the editor runs (the bridge restarts on updates, so a
  * dropped socket is retried with a capped backoff). It says hello, reports
- * focus changes so the bridge knows which window a person is looking at, and
- * opens what it is sent, answering whether it could.
+ * focus changes so the bridge knows which window a person is looking at,
+ * opens what it is sent, answering whether it could, follows the app's
+ * theme, and says goodbye when the window closes — code-server would
+ * otherwise keep a closed tab's window connected for hours.
  */
 export class BridgeClient {
   private socket: WebSocket | null = null;
@@ -50,6 +54,7 @@ export class BridgeClient {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.send({ type: "bye" });
     this.socket?.close();
     this.socket = null;
   }
@@ -87,6 +92,15 @@ export class BridgeClient {
     try {
       m = JSON.parse(raw.toString()) as EditorServerMessage;
     } catch {
+      return;
+    }
+    if (m.type === "theme") {
+      if (m.kind !== "light" && m.kind !== "dark") return;
+      try {
+        await this.opts.theme?.(m.kind);
+      } catch (err) {
+        this.opts.log?.(`could not follow the app's theme: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
     if (m.type !== "open" || typeof m.id !== "string" || typeof m.path !== "string") return;

@@ -25,6 +25,7 @@ afterAll(async () => {
 /** A stand-in for the extension: says hello, then answers opens as told. */
 async function fakeEditor(opts: { answer?: (m: EditorServerMessage) => EditorClientMessage | null; focused?: boolean } = {}) {
   const got: EditorServerMessage[] = [];
+  const themes: string[] = [];
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/editor`);
   await new Promise<void>((resolve, reject) => {
     ws.once("open", () => resolve());
@@ -32,6 +33,10 @@ async function fakeEditor(opts: { answer?: (m: EditorServerMessage) => EditorCli
   });
   ws.on("message", (raw) => {
     const m = JSON.parse(raw.toString()) as EditorServerMessage;
+    if (m.type === "theme") {
+      themes.push(m.kind);
+      return;
+    }
     got.push(m);
     const reply = opts.answer ? opts.answer(m) : { type: "opened", id: m.id, ok: true };
     if (reply) ws.send(JSON.stringify(reply));
@@ -39,7 +44,21 @@ async function fakeEditor(opts: { answer?: (m: EditorServerMessage) => EditorCli
   ws.send(JSON.stringify({ type: "hello", version: "0.1.0", focused: opts.focused ?? false } satisfies EditorClientMessage));
   // Let the hello land before the test asks for anything.
   await new Promise((r) => setTimeout(r, 50));
-  return { ws, got, close: () => new Promise<void>((r) => (ws.once("close", () => r()), ws.close())) };
+  const say = async (m: EditorClientMessage) => {
+    ws.send(JSON.stringify(m));
+    await new Promise((r) => setTimeout(r, 30));
+  };
+  return { ws, got, themes, say, close: () => new Promise<void>((r) => (ws.once("close", () => r()), ws.close())) };
+}
+
+/** Wait until the bridge counts `n` editors (a closed socket takes a moment to be noticed). */
+async function connectedCount(n: number): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    const { connected } = (await f.app.inject({ method: "GET", url: "/api/editor/status" })).json() as { connected: number };
+    if (connected === n) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`never ${n} editors`);
 }
 
 const open = (payload: object) => f.app.inject({ method: "POST", url: "/api/editor/open", payload });
@@ -53,7 +72,7 @@ describe("the editor channel", () => {
 
   it("delivers an open, at a line and column, to the editor", async () => {
     const ed = await fakeEditor();
-    expect((await f.app.inject({ method: "GET", url: "/api/editor/status" })).json()).toEqual({ connected: 1 });
+    expect((await f.app.inject({ method: "GET", url: "/api/editor/status" })).json()).toEqual({ connected: 1, theme: null });
     const res = await open({ path: "src/main.ts", line: 12, column: 3 });
     expect(res.json()).toEqual({ delivered: true });
     expect(ed.got[0]).toMatchObject({ type: "open", path: path.join(f.workspace, "src", "main.ts"), line: 12, column: 3 });
@@ -81,6 +100,66 @@ describe("the editor channel", () => {
     expect(a.got).toHaveLength(1);
     await a.close();
     await b.close();
+  });
+
+  it("prefers a window that just connected over a closed tab's lingering one", async () => {
+    // A tab that was focused, then closed: code-server keeps its window.
+    const ghost = await fakeEditor({ focused: true });
+    await ghost.say({ type: "focus", focused: true });
+    // A new tab opens the editor; it has not been focused yet.
+    const fresh = await fakeEditor({ focused: false });
+    await open({ path: "src/main.ts" });
+    expect(fresh.got).toHaveLength(1);
+    expect(ghost.got).toHaveLength(0);
+    await ghost.close();
+    await fresh.close();
+  });
+
+  it("waits a moment for the app's own frame to announce itself, when fresh", async () => {
+    const live = await fakeEditor();
+    // Then the ghost was focused last, before its tab closed.
+    const ghost = await fakeEditor();
+    await ghost.say({ type: "focus", focused: true });
+    // The app brings its frame forward and asks at once; the frame's focus
+    // lands a moment after the request.
+    const pending = open({ path: "src/main.ts", fresh: true, wait: 5000 });
+    setTimeout(() => live.ws.send(JSON.stringify({ type: "focus", focused: true })), 100);
+    expect((await pending).json()).toEqual({ delivered: true });
+    expect(live.got).toHaveLength(1);
+    expect(ghost.got).toHaveLength(0);
+    await live.close();
+    await ghost.close();
+  });
+
+  it("drops a window that says it is closing", async () => {
+    await connectedCount(0);
+    const leaving = await fakeEditor({ focused: true });
+    await connectedCount(1);
+    await leaving.say({ type: "bye" });
+    expect((await f.app.inject({ method: "GET", url: "/api/editor/status" })).json()).toMatchObject({ connected: 0 });
+    expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: false, error: "no editor is open" });
+    await leaving.close();
+  });
+
+  it("tells every window the app's theme, now and as each connects", async () => {
+    const early = await fakeEditor();
+    const set = (kind: unknown) => f.app.inject({ method: "POST", url: "/api/editor/theme", payload: { kind } });
+    expect((await set("dark")).statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(early.themes).toEqual(["dark"]);
+    // A window that connects later is told on hello.
+    const late = await fakeEditor();
+    expect(late.themes).toEqual(["dark"]);
+    // A change reaches both; the same theme again is not news.
+    await set("light");
+    await set("light");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(early.themes).toEqual(["dark", "light"]);
+    expect(late.themes).toEqual(["dark", "light"]);
+    expect((await f.app.inject({ method: "GET", url: "/api/editor/status" })).json()).toMatchObject({ theme: "light" });
+    expect((await set("sepia")).statusCode).toBe(400);
+    await early.close();
+    await late.close();
   });
 
   it("waits for an editor that is still starting, when asked to", async () => {
