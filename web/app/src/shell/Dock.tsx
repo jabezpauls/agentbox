@@ -5,7 +5,7 @@ import { PreviewPanel } from "../components/PreviewPanel.tsx";
 import { ReviewPanel } from "../components/ReviewPanel.tsx";
 import { useFocusTrap } from "../components/ui/focus.ts";
 import { chordLabel } from "./keys.ts";
-import { clampDockWidth } from "./dock.ts";
+import { clampDockWidth, DOCK_MIN, dockMaxWidth } from "./dock.ts";
 
 const TABS: InspectorTab[] = ["preview", "review"];
 const TAB_LABEL: Record<InspectorTab, string> = { preview: "Preview", review: "Review" };
@@ -18,6 +18,19 @@ function subscribeNarrow(cb: () => void): () => void {
   const mq = matchMedia(NARROW_QUERY);
   mq.addEventListener("change", cb);
   return () => mq.removeEventListener("change", cb);
+}
+
+function subscribeResize(cb: () => void): () => void {
+  window.addEventListener("resize", cb);
+  return () => window.removeEventListener("resize", cb);
+}
+
+function useViewportWidth(): number {
+  return useSyncExternalStore(
+    subscribeResize,
+    () => window.innerWidth,
+    () => 1280,
+  );
 }
 
 export function useNarrow(): boolean {
@@ -44,6 +57,7 @@ export function Dock() {
   const width = useApp((s) => s.ui.inspector.width);
   const setInspector = useApp((s) => s.setInspector);
   const narrow = useNarrow();
+  const viewport = useViewportWidth();
   const ref = useRef<HTMLElement>(null);
   const dragging = useRef(false);
   const [resizing, setResizing] = useState(false);
@@ -75,11 +89,17 @@ export function Dock() {
     if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
     if (was) setInspector({});
   };
+  // The window splitter's keys: arrows move the edge (with Shift, further),
+  // Home and End take it to either end.
   const onResizeKey = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? 64 : 16;
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    let next: number;
+    if (e.key === "ArrowLeft") next = width + step;
+    else if (e.key === "ArrowRight") next = width - step;
+    else if (e.key === "Home") next = DOCK_MIN;
+    else if (e.key === "End") next = dockMaxWidth(window.innerWidth);
+    else return;
     e.preventDefault();
-    const next = width + (e.key === "ArrowLeft" ? step : -step);
     setInspector({ width: clampDockWidth(next, window.innerWidth) });
   };
 
@@ -117,7 +137,10 @@ export function Dock() {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize the dock"
-        aria-valuenow={width}
+        aria-valuemin={DOCK_MIN}
+        aria-valuemax={dockMaxWidth(viewport)}
+        aria-valuenow={Math.min(width, dockMaxWidth(viewport))}
+        aria-valuetext={`${Math.min(width, dockMaxWidth(viewport))} pixels wide`}
         tabIndex={0}
         onKeyDown={onResizeKey}
         onPointerDown={onPointerDown}

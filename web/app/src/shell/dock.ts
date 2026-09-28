@@ -18,9 +18,13 @@ export const DOCK_MIN = 320;
 /** The widest the dock may be, as a share of the window. */
 export const DOCK_MAX_SHARE = 0.6;
 
+/** The widest the dock may be beside a surface in a `viewport`-wide window. */
+export function dockMaxWidth(viewport: number): number {
+  return Math.max(DOCK_MIN, Math.round(viewport * DOCK_MAX_SHARE));
+}
+
 export function clampDockWidth(width: number, viewport: number): number {
-  const max = Math.max(DOCK_MIN, Math.round(viewport * DOCK_MAX_SHARE));
-  return Math.min(max, Math.max(DOCK_MIN, Math.round(width)));
+  return Math.min(dockMaxWidth(viewport), Math.max(DOCK_MIN, Math.round(width)));
 }
 
 type Memory = Partial<Record<SurfaceId, DockShape>>;
