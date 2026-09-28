@@ -27,6 +27,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   h.gate.core.limiter.reset();
+  h.gate.core.passcodes.reset();
 });
 
 const owner = () => sameOrigin(h, { cookie });
@@ -236,6 +237,48 @@ describe("who may open /a/<id>/", () => {
     // A new passcode voids what the old one unlocked.
     await share(app.id, { mode: "passcode", passcode: "new passcode", expiresIn: null });
     expect((await request(h.base, "GET", `/a/${app.id}/api`, { headers: { cookie: grant } })).status).toBe(404);
+  });
+
+  it("takes a passcode from the app's own page, never another site's form", async () => {
+    const app = await registerApp(h, { port: 5212 });
+    await share(app.id, { mode: "passcode", passcode: "letmein", expiresIn: null });
+    const res = await request(h.base, "POST", `/a/${app.id}/__agentbox/unlock`, {
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://evil.example" },
+      body: "passcode=letmein",
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("keeps guesses at a passcode off the owner's sign-in budget, and caps them per app from everywhere", async () => {
+    let tclock = Date.now();
+    const t = await startHarness({ trustedProxies: ["127.0.0.1"], dataPlane: { host: "127.0.0.1", port: plane.port } }, { now: () => tclock });
+    try {
+      const c = await login(t);
+      const created = await request(t.apps, "POST", "/apps", { body: { port: 5213 } });
+      const id = created.json<{ id: string }>().id;
+      await request(t.base, "PUT", `/_gate/apps/${id}/visibility`, { headers: sameOrigin(t, { cookie: c }), body: { mode: "passcode", passcode: "right one", expiresIn: null } });
+      const guess = (ip: string, passcode = "wrong") =>
+        request(t.base, "POST", `/a/${id}/__agentbox/unlock`, {
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: "null", "x-agentbox-client-ip": ip },
+          body: `passcode=${encodeURIComponent(passcode)}`,
+        });
+      // One address: five guesses, then it waits — and signs in all the same.
+      for (let i = 0; i < 5; i++) expect((await guess("198.51.100.1")).status).toBe(401);
+      expect((await guess("198.51.100.1")).status).toBe(429);
+      await login(t, { ip: "198.51.100.1" });
+      // Many addresses, each within its own limit and the ceiling across all
+      // of them: thirty wrong passcodes for the app within ten minutes, and
+      // nobody gets another try for a while — the right passcode included.
+      tclock += 61_000;
+      for (let i = 0; i < 25; i++) expect((await guess(`203.0.113.${i + 1}`)).status).toBe(401);
+      tclock += 61_000;
+      const capped = await guess("203.0.113.200", "right one");
+      expect(capped.status).toBe(429);
+      expect(capped.body).toContain("Too many wrong passcodes for this app");
+    } finally {
+      await t.close();
+    }
   });
 
   it("sends a passcode's visitor only somewhere in the app", async () => {

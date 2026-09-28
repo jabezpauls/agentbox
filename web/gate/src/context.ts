@@ -46,6 +46,11 @@ export interface GateCore {
   devices: DeviceFlow;
   /** Sign-in and every other password check. */
   limiter: LoginLimiter;
+  /**
+   * App passcodes: the same limits, per address, but a budget of their own,
+   * so guessing at an app's passcode never uses up the owner's sign-ins.
+   */
+  passcodes: LoginLimiter;
   /** Starting a device login: no bcrypt, but not free either. */
   deviceStarts: WindowLimiter;
   devicePolls: WindowLimiter;

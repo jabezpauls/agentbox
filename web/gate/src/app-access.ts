@@ -162,6 +162,11 @@ export interface AppGatewayDeps {
   dataPlane: Upstream;
   /** Refused `/a/` lookups, per client address. */
   probes: WindowLimiter;
+  /**
+   * Wrong passcodes per app, from every address together: guesses spread over
+   * many addresses still meet this.
+   */
+  passcodeMisses: WindowLimiter;
   forwarded(info: RequestInfo): Forwarded;
 }
 
@@ -577,21 +582,37 @@ export class AppGateway {
    * alone, and the request carrying it is not forwarded.
    */
   private async unlock(req: IncomingMessage, res: ServerResponse, route: AppRoute, app: AppRecord, info: RequestInfo): Promise<void> {
+    // The passcode page's own form (an opaque page: `Origin: null`), or a
+    // client that names no origin; never another site's form, which would
+    // spend its visitors' budgets on guesses.
+    if (!appOriginAllowed(req.headers)) {
+      req.resume();
+      this.plain(res, 403, "request refused: it did not come from this app");
+      return;
+    }
     const form = await this.readForm(req);
     if (this.deps.registry.isPublic(app) !== "passcode" || form === null) return this.refuse(req, res, info, route);
     const next = this.safeNext(app, form.next ?? "");
-    const { limiter, passwords } = this.deps.core;
-    const refusal = limiter.attempt(info.key);
+    const { passcodeMisses } = this.deps;
+    const { passcodes } = this.deps.core;
+    const refusal = passcodes.attempt(info.key);
     if (refusal) return this.passcodePage(res, app, route, refusal.reason, refusal.retryAfterMs, 429, next);
+    // Checked, not spent: only a wrong passcode costs from the app's budget.
+    const appWait = passcodeMisses.blocked(app.id);
+    if (appWait !== null) {
+      passcodes.success(info.key);
+      return this.passcodePage(res, app, route, "app_busy", appWait, 429, next);
+    }
     const epoch = app.visibility.epoch;
-    const ok = await passwords.verify(form.passcode ?? "", app.visibility.passcodeHash ?? null);
+    const ok = await this.deps.core.passwords.verify(form.passcode ?? "", app.visibility.passcodeHash ?? null);
     // The passcode may have changed while it was being checked.
     if (!ok || app.visibility.epoch !== epoch || this.deps.registry.isPublic(app) !== "passcode") {
-      limiter.failure(info.key);
+      passcodes.failure(info.key);
+      passcodeMisses.take(app.id);
       console.warn(`[gate] app passcode refused from ${info.ip}`);
       return this.passcodePage(res, app, route, "invalid", 0, 401, next);
     }
-    limiter.success(info.key);
+    passcodes.success(info.key);
     const now = this.deps.core.now();
     const until = Math.min(now + PASSCODE_GRANT_MS, app.visibility.expiresAt ?? Number.POSITIVE_INFINITY);
     const value = await this.deps.grants.mint({ appId: app.id, subject: { kind: "passcode", epoch }, expiresAt: until });

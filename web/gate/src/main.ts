@@ -41,6 +41,7 @@ async function main(argv: string[]): Promise<void> {
     auth: gate.core.auth,
     devices: gate.core.devices,
     limiter: gate.core.limiter,
+    passcodes: gate.core.passcodes,
     now: gate.core.now,
   });
   console.log(`[gate] listening on ${config.host}:${config.port}; the sandbox's app API on ${config.appsHost}:${config.appsPort}`);

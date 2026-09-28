@@ -261,7 +261,12 @@ installer's `--sharing off` makes every app private and refuses to share any.
 or device token (a page load then mints a grant); anyone, when the owner
 shared it with the link and it has not expired; anyone with the passcode,
 when shared with one — the gate's own passcode page, checked against a bcrypt
-hash under the sign-in limits, and never forwarded to the app. Anything else:
+hash, taken only from that page's own form (never another site's), and never
+forwarded to the app. Guesses meet the sign-in limits per address, counted
+apart from sign-in so they can never use up the owner's, and at most 30 wrong
+passcodes for one app in ten minutes from every address together; a passcode
+is at least 4 characters, and a longer one is worth it for anything that
+matters. Anything else:
 a page load is sent to sign in, and any other request gets `404` — what an
 unknown id gets, so a private app and a missing one look alike; those refusals
 cost from a per-address budget of 60 a minute, so ids cannot be enumerated.

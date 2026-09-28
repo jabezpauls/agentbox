@@ -24,6 +24,8 @@ export interface AdminDeps {
   auth: Auth;
   devices?: DeviceFlow;
   limiter?: LoginLimiter;
+  /** App passcode attempts, which `unlock` clears too. */
+  passcodes?: LoginLimiter;
   now: () => number;
 }
 
@@ -65,6 +67,7 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: { 
     }
     case "unlock": {
       deps.limiter?.reset();
+      deps.passcodes?.reset();
       return { ok: true };
     }
     case "status": {

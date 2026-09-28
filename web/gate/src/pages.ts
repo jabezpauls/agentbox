@@ -159,7 +159,8 @@ export interface PasscodeView {
   action: string;
   /** Where to go once unlocked. */
   next: string;
-  error: "invalid" | "rate" | "locked" | "busy" | null;
+  /** `app_busy`: too many wrong passcodes for this app, from anywhere. */
+  error: "invalid" | "rate" | "locked" | "busy" | "app_busy" | null;
   retryAfterMs: number;
   /** The tokens and the sign-in stylesheet, to inline. */
   styles: string;
@@ -169,9 +170,11 @@ export function renderPasscode(v: PasscodeView): string {
   const message =
     v.error === "invalid"
       ? "That passcode isn’t right. Check it with whoever shared this link."
-      : v.error
-        ? loginMessage(v.error, v.retryAfterMs)
-        : "";
+      : v.error === "app_busy"
+        ? `Too many wrong passcodes for this app. Try again in ${waitPhrase(v.retryAfterMs)}.`
+        : v.error
+          ? loginMessage(v.error, v.retryAfterMs)
+          : "";
   return `<!doctype html>
 <html lang="en">
 <head>

@@ -137,6 +137,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     auth,
     devices,
     limiter: new LoginLimiter(deps.limits ?? LOGIN_LIMITS, now),
+    passcodes: new LoginLimiter(deps.limits ?? LOGIN_LIMITS, now),
     deviceStarts: new WindowLimiter(10, 60_000, now),
     devicePolls: new WindowLimiter(60, 60_000, now),
     totpConfirms: new WindowLimiter(10, 60_000, now),
@@ -154,6 +155,9 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     // Refused lookups of apps, per address: 60 a minute, so no one can
     // enumerate ids (they are 128 random bits besides).
     probes: new WindowLimiter(60, 60_000, now),
+    // Thirty wrong passcodes for one app in ten minutes, from anywhere, and
+    // that app's passcode page waits: 4,320 guesses a day at most.
+    passcodeMisses: new WindowLimiter(30, 10 * 60_000, now),
     forwarded: (info) => forwarded(info),
   });
   const sandboxServer = createSandboxApi(core.apps, clientIps);

@@ -161,6 +161,13 @@ export class WindowLimiter {
     return null;
   }
 
+  /** How long until `key` may be taken again, without taking it; `null` when it may now. */
+  blocked(key: string): number | null {
+    const t = this.now();
+    const list = (this.hits.get(key) ?? []).filter((h) => h > t - this.windowMs);
+    return list.length >= this.limit ? (list[0] ?? t) + this.windowMs - t : null;
+  }
+
   private prune(t: number): void {
     for (const [k, v] of this.hits) {
       if (v.every((h) => h <= t - this.windowMs)) this.hits.delete(k);
