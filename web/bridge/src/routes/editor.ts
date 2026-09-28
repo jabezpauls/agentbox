@@ -44,7 +44,7 @@ function position(raw: unknown, what: string): number | undefined {
  * starting?}`,
  * which asks it to open a file and answers whether it did; and
  * `POST /api/editor/theme {kind}`, the app's resolved light or dark, which
- * every editor window follows.
+ * every editor window follows (null: stop following).
  */
 export function registerEditorRoutes(app: FastifyInstance, channel: EditorChannel, files: FilesService): void {
   app.get("/ws/editor", { websocket: true, onRequest: localOnly }, (socket) => {
@@ -55,7 +55,7 @@ export function registerEditorRoutes(app: FastifyInstance, channel: EditorChanne
 
   app.post<{ Body: Record<string, unknown> | undefined }>("/api/editor/theme", async (req, reply) => {
     const kind = req.body?.kind;
-    if (kind !== "light" && kind !== "dark") return reply.code(400).send({ error: "kind must be light or dark" });
+    if (kind !== "light" && kind !== "dark" && kind !== null) return reply.code(400).send({ error: "kind must be light, dark or null" });
     channel.setTheme(kind);
     return { theme: kind };
   });

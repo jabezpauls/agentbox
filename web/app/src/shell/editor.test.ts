@@ -39,6 +39,11 @@ describe("the app's side of the editor channel", () => {
     expect(calls[0]).toMatchObject({ body: { fresh: true, starting: true } });
   });
 
+  it("tells the bridge to stop when following is turned off", async () => {
+    await followAppTheme(null);
+    expect(calls).toEqual([{ url: "/api/editor/theme", body: { kind: null } }]);
+  });
+
   it("keeps quiet when the bridge cannot take the theme", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
     await expect(followAppTheme("light")).resolves.toBeUndefined();

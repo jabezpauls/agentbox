@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useEditorFollowsTheme } from "../../theme/editorSync.ts";
 import { BookOpen, Info, Keyboard, KeyRound, Laptop, Monitor, Moon, Palette, Share2, Sun, type LucideIcon } from "lucide-react";
 import { useApp } from "../../store/app.ts";
 import type { Theme } from "../../theme/useTheme.ts";
@@ -60,7 +61,37 @@ function AppearanceSection() {
         })}
       </div>
       <p className="field-hint">Kept in this browser. The terminals follow it too.</p>
+      <EditorFollows />
     </Section>
+  );
+}
+
+/** Whether VS Code switches between light and dark with the app. */
+function EditorFollows() {
+  const on = useEditorFollowsTheme((s) => s.on);
+  const set = useEditorFollowsTheme((s) => s.set);
+  return (
+    <div className="settings-card editor-follows">
+      <div className="settings-row">
+        <div className="settings-row-text">
+          <strong id="editor-follows-label">Editor follows the app's theme</strong>
+          <span id="editor-follows-hint">
+            VS Code turns light or dark with the app, unless you pick a theme of your own there. It is one editor for the box: the last device to change
+            theme sets it.
+          </span>
+        </div>
+        <button
+          className={`switch${on ? " is-on" : ""}`}
+          role="switch"
+          aria-checked={on}
+          aria-labelledby="editor-follows-label"
+          aria-describedby="editor-follows-hint"
+          onClick={() => set(!on)}
+        >
+          <span className="switch-knob" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   );
 }
 

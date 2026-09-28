@@ -138,6 +138,17 @@ Inside the editor VS Code owns the keyboard, `⌘K` included. The app's `⌃⌥`
 chords still work there — the app listens on the editor's frame, which is on
 the same origin — and VS Code binds none of them by default.
 
+VS Code turns light or dark with the app (Settings → Appearance → **Editor
+follows the app's theme**, on by default and kept per browser). It switches
+between the themes VS Code prefers for each kind — Default Light Modern and
+Default Dark Modern unless you set `workbench.preferredLightColorTheme` /
+`preferredDarkColorTheme` — and only while the editor is on one of those or
+on VS Code's untouched default: pick another theme in VS Code (Monokai, say)
+and it stays yours until you pick one of agentbox's again. The box has one
+editor and one settings file for it, so with several devices signed in the
+theme is the one the device that last changed its theme (or connected) asked
+for; turn the setting off on a device to stop it taking part.
+
 ## Files
 
 ![Files, with the folder tree and git marks](images/files-light.png)

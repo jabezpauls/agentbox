@@ -53,10 +53,11 @@ function capitalise(s: string): string {
 
 /**
  * Tell the editor the app's theme, resolved to light or dark, so VS Code
- * switches its color theme with the app. Sent on every change and whenever
- * the events socket comes back (a restarted bridge has forgotten it).
+ * switches its color theme with the app — or null, to stop (Settings →
+ * Appearance). Sent on every change and whenever the events socket comes
+ * back (a restarted bridge has forgotten it).
  */
-export async function followAppTheme(kind: EditorThemeKind): Promise<void> {
+export async function followAppTheme(kind: EditorThemeKind | null): Promise<void> {
   try {
     await http.post("/api/editor/theme", { kind });
   } catch {

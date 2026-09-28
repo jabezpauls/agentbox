@@ -21,6 +21,7 @@ import { BottomBar } from "./BottomBar.tsx";
 import { Dock } from "./Dock.tsx";
 import { installDropGuard } from "./drops.ts";
 import { followAppTheme } from "./editor.ts";
+import { useEditorFollowsTheme } from "../theme/editorSync.ts";
 import { dockOnSwitch } from "./dock.ts";
 import { Rail } from "./Rail.tsx";
 import { useRouter } from "./router.ts";
@@ -56,11 +57,12 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
   const pageVisible = usePageVisible();
   const previous = useRef<SurfaceId>(surface);
 
-  // The editor follows the app's light or dark.
+  // The editor follows the app's light or dark, unless told not to.
   const connStatus = useApp((s) => s.status);
+  const editorFollows = useEditorFollowsTheme((s) => s.on);
   useEffect(() => {
-    if (connStatus === "open") void followAppTheme(resolved);
-  }, [resolved, connStatus]);
+    if (connStatus === "open") void followAppTheme(editorFollows ? resolved : null);
+  }, [resolved, connStatus, editorFollows]);
 
   // Files dropped where nothing takes them must not replace the app.
   useEffect(() => installDropGuard(), []);

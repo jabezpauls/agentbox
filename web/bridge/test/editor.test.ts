@@ -148,17 +148,43 @@ describe("the editor channel", () => {
     await Promise.all([ghostA.close(), ghostB.close(), mine.close()]);
   });
 
-  it("passes over a window that let an open go unanswered, until it stirs", async () => {
+  it("ranks a window that let an open go unanswered below the rest, until it stirs", async () => {
     await connectedCount(0);
+    let answering = false;
     const live = await fakeEditor();
-    const ghost = await fakeEditor({ answer: () => null });
+    const ghost = await fakeEditor({ answer: (m) => (answering ? { type: "opened", id: (m as { id: string }).id, ok: true } : null) });
     await ghost.say({ type: "focus", focused: true });
     // The ghost was seen last, so it is asked first, and says nothing.
     expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: false, error: "the editor did not answer" });
     // Next time the live one is asked.
     expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: true });
     expect(live.got).toHaveLength(1);
+    // Any word from the silent one — a blur will do — brings it back.
+    answering = true;
+    await ghost.say({ type: "focus", focused: false });
+    await open({ path: "src/main.ts" });
+    expect(ghost.got).toHaveLength(2);
     await Promise.all([live.close(), ghost.close()]);
+  });
+
+  it("still asks a silent window when it is the only one open", async () => {
+    await connectedCount(0);
+    let answering = false;
+    const only = await fakeEditor({ answer: (m) => (answering ? { type: "opened", id: (m as { id: string }).id, ok: true } : null) });
+    expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: false, error: "the editor did not answer" });
+    answering = true;
+    expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: true });
+    await only.close();
+  });
+
+  it("stops telling windows a theme when the app turns following off", async () => {
+    const set = (kind: unknown) => f.app.inject({ method: "POST", url: "/api/editor/theme", payload: { kind } });
+    await set("dark");
+    expect((await set(null)).statusCode).toBe(200);
+    const late = await fakeEditor();
+    expect(late.themes).toEqual([]);
+    expect((await f.app.inject({ method: "GET", url: "/api/editor/status" })).json()).toMatchObject({ theme: null });
+    await late.close();
   });
 
   it("drops a window that says it is closing", async () => {

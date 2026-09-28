@@ -6,16 +6,16 @@ interface Editor {
   socket: WebSocket;
   version: string;
   /**
-   * The last sign that someone is at this window: it connected, said hello,
-   * or took focus. code-server keeps a closed tab's extension host — and so
-   * its socket — alive for hours, so a window that merely stays connected
-   * proves nothing; one that just connected or was just focused does.
+   * The last sign of life from this window: it connected, or said anything
+   * at all — hello, focus or blur, an answer. code-server keeps a closed
+   * tab's extension host, and so its socket, alive for hours, so a window
+   * that merely stays connected proves nothing; one that just spoke does.
    */
   seenAt: number;
   /**
    * When it last let an open go unanswered: a window whose tab is gone
-   * cannot open anything. It is passed over until it shows a sign of life
-   * again.
+   * cannot open anything. It ranks below every other window until it shows
+   * a sign of life again — but is still asked when it is the only one.
    */
   silentAt: number;
   pending: Map<string, (r: EditorOpenResult) => void>;
@@ -80,23 +80,21 @@ export class EditorChannel {
       } catch {
         return;
       }
+      if (m.type === "bye") {
+        this.drop(editor, "the editor closed");
+        return;
+      }
+      // Whatever it says, the window is there to say it.
+      editor.seenAt = this.now();
       if (m.type === "hello") {
         editor.version = typeof m.version === "string" && m.version ? m.version : "unknown";
-        editor.seenAt = this.now();
         if (this.themeKind) this.send(editor, { type: "theme", kind: this.themeKind });
-        this.wake();
-      } else if (m.type === "focus") {
-        if (m.focused) {
-          editor.seenAt = this.now();
-          this.wake();
-        }
       } else if (m.type === "opened" && typeof m.id === "string") {
         const done = editor.pending.get(m.id);
         editor.pending.delete(m.id);
         done?.(m.ok ? { delivered: true } : { delivered: false, error: String(m.error ?? "the editor could not open it") });
-      } else if (m.type === "bye") {
-        this.drop(editor, "the editor closed");
       }
+      this.wake();
     });
     socket.on("close", () => this.drop(editor, "the editor went away"));
   }
@@ -115,19 +113,28 @@ export class EditorChannel {
     if (editor.socket.readyState === editor.socket.OPEN) editor.socket.send(JSON.stringify(m));
   }
 
-  /** Follow the app's theme: tell every window now, and each new one as it connects. */
-  setTheme(kind: EditorThemeKind): void {
+  /**
+   * Follow the app's theme: tell every window now, and each new one as it
+   * connects. Null stops it (the app's "Editor follows the app's theme" is
+   * off): windows keep whatever theme they have.
+   */
+  setTheme(kind: EditorThemeKind | null): void {
     if (this.themeKind === kind) return;
     this.themeKind = kind;
+    if (kind === null) return;
     for (const e of this.editors) if (e.version !== "") this.send(e, { type: "theme", kind });
   }
 
-  /** The editor to send to: the one seen most recently, `since` a moment if given. */
+  /**
+   * The editor to send to: the one seen most recently (`since` a moment, if
+   * given), a window that went silent on an open only when no other will do.
+   */
   private pick(since = 0): Editor | null {
     let best: Editor | null = null;
+    const silent = (e: Editor) => e.silentAt > e.seenAt;
     for (const e of this.editors) {
-      if (e.version === "" || e.socket.readyState !== e.socket.OPEN || e.seenAt < since || e.silentAt > e.seenAt) continue;
-      if (!best || e.seenAt > best.seenAt) best = e;
+      if (e.version === "" || e.socket.readyState !== e.socket.OPEN || e.seenAt < since) continue;
+      if (!best || (silent(best) && !silent(e)) || (silent(best) === silent(e) && e.seenAt > best.seenAt)) best = e;
     }
     return best;
   }
