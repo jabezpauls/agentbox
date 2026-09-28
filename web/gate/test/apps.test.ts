@@ -332,6 +332,8 @@ describe("path fidelity", () => {
     expect(res.body).toContain(`<img src="/a/${app.id}/logo.png">`);
     expect(Number(res.headers["content-length"])).toBe(Buffer.byteLength(res.body));
     expect(plane.seen[plane.seen.length - 1]?.headers["accept-encoding"]).toBe("identity");
+    // The app's validator named its own bytes, not these.
+    expect(res.headers.etag).toBeUndefined();
   });
 
   it("reads a compressed page to rewrite it", async () => {

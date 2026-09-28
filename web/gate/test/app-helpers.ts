@@ -31,7 +31,7 @@ export async function startPlane(): Promise<FakePlane> {
       res.writeHead(status, { "content-type": type, ...extra });
       res.end(body);
     };
-    if (rest === "/" || rest.endsWith("/index.html")) return send(200, "text/html; charset=utf-8", PAGE);
+    if (rest === "/" || rest.endsWith("/index.html")) return send(200, "text/html; charset=utf-8", PAGE, { etag: '"page-1"' });
     if (rest.endsWith("/gz.html")) return send(200, "text/html", zlib.gzipSync(PAGE), { "content-encoding": "gzip" });
     if (rest.endsWith("/own-map.html")) {
       return send(200, "text/html", `<head><script type="importmap">{"imports":{}}</script></head><body>x</body>`);

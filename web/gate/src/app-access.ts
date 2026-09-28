@@ -457,9 +457,12 @@ export class AppGateway {
           edited = rewriteCss(text, prefix);
         }
         const body = Buffer.from(edited, "latin1");
+        // The validators named the app's bytes, not these: a revalidation must
+        // not answer "unchanged" for an edit made under other settings (the
+        // path fixes turned off, say).
         pairs = pairs.filter(([n]) => {
           const l = n.toLowerCase();
-          return l !== "content-length" && l !== "content-encoding" && l !== "content-md5";
+          return l !== "content-length" && l !== "content-encoding" && l !== "content-md5" && l !== "etag" && l !== "last-modified";
         });
         pairs.push(["Content-Length", String(body.length)]);
         if (hint) pairs.push([HINT_HEADER, hint]);
