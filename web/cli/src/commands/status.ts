@@ -106,7 +106,9 @@ export const status = command({
       return failed ? EXIT.FAILURE : EXIT.OK;
     }
 
-    const row = (label: string, text: string): void => ctx.out(`  ${label.padEnd(8)} ${text}\n`);
+    // Everything after the label may quote the box (versions, names, its
+    // error messages): shown with control characters escaped.
+    const row = (label: string, text: string): void => ctx.out(`  ${label.padEnd(8)} ${safeText(text)}\n`);
     ctx.out(`${name}  ${box.url}\n`);
     row(
       "box",
@@ -125,7 +127,7 @@ export const status = command({
       if (agents.length) {
         const lines = table(
           ["AGENT", "STATUS", "WORKSPACE", "WHERE"],
-          agents.map((a) => [safeText(a.agent), a.status, safeText(a.workspace), safeText(a.cwd ?? "-")]),
+          agents.map((a) => [safeText(String(a.agent)), safeText(String(a.status)), safeText(String(a.workspace)), safeText(String(a.cwd ?? "-"))]),
         );
         for (const l of lines.trimEnd().split("\n")) ctx.out(`           ${l}\n`);
       }
@@ -141,7 +143,12 @@ export const status = command({
         row("apps", `${list.length}${shared ? ` (${shared} shared)` : ""}`);
         const lines = table(
           ["NAME", "PORT", "STATE", "SHARING"],
-          list.map((a) => [safeText(a.name ?? a.id), String(a.port ?? "-"), a.listening === false ? "not up" : a.listening ? "up" : "-", a.visibility?.mode ?? "private"]),
+          list.map((a) => [
+            safeText(String(a.name ?? a.id)),
+            safeText(String(a.port ?? "-")),
+            a.listening === false ? "not up" : a.listening ? "up" : "-",
+            safeText(String(a.visibility?.mode ?? "private")),
+          ]),
         );
         for (const l of lines.trimEnd().split("\n")) ctx.out(`           ${l}\n`);
       }

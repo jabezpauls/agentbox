@@ -1,5 +1,5 @@
 import type { OutStream } from "./context.js";
-import { formatBytes } from "./format.js";
+import { formatBytes, safeText } from "./format.js";
 
 /**
  * A transfer's progress on one line of stderr, redrawn at most ten times a
@@ -12,14 +12,18 @@ export class Progress {
   private readonly started: number;
   private drawn = false;
 
+  private readonly label: string;
+
   constructor(
     private readonly stream: OutStream,
-    private readonly label: string,
+    label: string,
     private readonly total: number | null,
     private readonly enabled: boolean = stream.isTTY === true,
     private readonly now: () => number = Date.now,
   ) {
     this.started = now();
+    // A local path built from names the box gave: shown, never interpreted.
+    this.label = safeText(label);
   }
 
   update(done: number): void {
@@ -41,7 +45,10 @@ export class Progress {
   }
 
   private draw(): void {
-    const width = this.stream.columns ?? 80;
+    // A pty may say it is 0 columns wide (not set up yet): assume 80 then,
+    // and never try to fit into less than a handful.
+    const cols = this.stream.columns;
+    const width = cols && cols >= 20 ? cols : cols && cols > 0 ? 20 : 80;
     let text = this.line();
     if (text.length > width - 1) text = `…${text.slice(text.length - (width - 2))}`;
     this.stream.write(`\r\x1b[2K${text}`);

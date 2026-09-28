@@ -3,6 +3,7 @@ import https from "node:https";
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError, CliError, EXIT } from "./errors.js";
+import { safeText } from "./format.js";
 import { VERSION } from "./version.js";
 
 /**
@@ -102,8 +103,10 @@ export function apiErrorFrom(status: number, text: string, what: string): ApiErr
     if (typeof body.code === "string") code = body.code;
     else if (typeof body.error === "string") code = body.error;
   } catch {
-    message = text.trim().split("\n")[0]?.slice(0, 200) ?? "";
+    message = text.trim().split("\n")[0] ?? "";
   }
+  // The box's words, shown as they are and never acted on by the terminal.
+  message = safeText(message.slice(0, 300));
   if (status === 401) {
     return new ApiError(401, "the box did not accept this device's sign-in (the token was revoked or has expired); run `agentbox login` again", code);
   }

@@ -151,4 +151,36 @@ describe("the status command", () => {
     await runCli(["open", "--print"], { configDir: cfg });
     expect(box.seen.filter((s) => s.url === "/_gate/version").length).toBe(before);
   });
+
+  it("shows nothing the box says as terminal control: status, whoami, warnings and errors", async () => {
+    const evil = "\x1b]0;PWNED\x07\x1b[31m";
+    box = await stubServer((req, res) => {
+      switch (req.url) {
+        case "/_gate/version":
+          return json(res, 200, { version: `9${evil}` });
+        case "/_gate/session":
+          return json(res, 200, { kind: "token", id: "t", user: `own${evil}er`, name: `dev${evil}`, createdAt: 1 });
+        case "/api/health":
+          return json(res, 200, { ok: true, herdr: { connected: true, version: `0.9${evil}` } });
+        case "/api/session":
+          return json(res, 200, { ...SNAPSHOT, agents: [{ pane_id: "p", workspace_id: "w1", agent_status: `blocked${evil}`, agent: `cl${evil}aude` }] });
+        case "/api/apps":
+          return json(res, 200, [{ id: "a", name: `app${evil}`, port: 1, visibility: { mode: `link${evil}` } }]);
+        case "/api/system":
+          return json(res, 500, { error: `system${evil} broke` });
+      }
+      json(res, 404, {});
+    });
+    const cfg = signedIn(box.url, TOKEN, { versionCheckedAt: 0 });
+    for (const argv of [["status"], ["whoami"], ["boxes"]]) {
+      const r = await runCli(argv, { configDir: cfg });
+      for (const out of [r.stdout, r.stderr]) {
+        expect(out, argv.join(" ")).not.toContain("\x1b");
+        expect(out, argv.join(" ")).not.toContain("\x07");
+      }
+    }
+    const r = await runCli(["status"], { configDir: cfg });
+    expect(r.stdout).toContain("\\x1b]0;PWNED\\x07");
+    expect(r.stdout).toMatch(/system\s+unknown: reading system: system\\x1b/);
+  });
 });
