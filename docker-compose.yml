@@ -109,9 +109,11 @@ services:
       - code
 
   # The Workbench: a browser client for herdr — agents, live terminals,
-  # previews of the servers they start, and the Review surface agents publish
-  # artifacts to. Shares the editor's network and process namespaces, so it
-  # sees the same localhost ports and the same process table.
+  # the apps they start, and the Review surface agents publish artifacts to.
+  # Shares the editor's network and process namespaces, so it sees the same
+  # localhost ports and the same process table. It listens twice: :7800, the
+  # app and its API, and :7801, the data plane — apps and tunnels — which the
+  # gate alone talks to (as code:7801) and wraps in the app policy.
   workbench:
     <<: *sandbox
     command: ["agentbox-workbench"]
@@ -125,14 +127,12 @@ services:
       TZ: ${TZ:-UTC}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Public `/s/<token>` shares stay off: the bridge would decide who may see
-      # them, and the bridge is inside the sandbox. The gate admits nobody
-      # without a session, so a share link could only ever open for the owner.
-      # (Per-port preview hostnames are gone for the same reason: the session
-      # cookie is host-only and never reaches another hostname.)
-      WORKBENCH_PREVIEW_MODE: "off"
-      # Only used to print a clickable link from `agentbox-review open`; unset,
-      # the bridge falls back to whatever Host the request arrived with.
+      # Where the app registry lives: the gate's sandbox-side API. The
+      # sandbox may register, change and remove apps there, always private;
+      # who may open one is the gate's, on its public side.
+      AGENTBOX_GATE_APPS_URL: http://gate:7901
+      # Only used to print a clickable link from `agentbox-review open` and
+      # `agentbox-preview`; unset, links are relative to the box.
       WORKBENCH_PUBLIC_URL: ${AGENTBOX_PUBLIC_URL:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:7800/api/health"]
@@ -168,7 +168,9 @@ services:
     cpus: ${AGENTBOX_GATE_CPUS:-1}
     mem_limit: ${AGENTBOX_GATE_MEMORY:-256m}
     pids_limit: 128
-    # `front` to hear from the proxy, `internal` to reach the sandbox's services.
+    # `front` to hear from the proxy, `internal` to reach the sandbox's
+    # services — and to be reached by the sandbox, on :7901 alone for what it
+    # may do (the app API), or on :7900 as any anonymous visitor.
     networks:
       - front
       - internal
@@ -185,6 +187,10 @@ services:
       # worked out) is believed. Everyone else, the sandbox included, is keyed
       # on the address it connects from.
       GATE_TRUSTED_PROXIES: proxy
+      # Whether the owner may make an app public (install.sh --sharing).
+      AGENTBOX_SHARING: ${AGENTBOX_SHARING:-on}
+      # Ports never served as apps, beyond agentbox's own.
+      AGENTBOX_INFRA_PORTS: ${AGENTBOX_INFRA_PORTS:-}
     volumes:
       - gate:/data
     healthcheck:

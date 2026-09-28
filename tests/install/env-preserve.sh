@@ -66,7 +66,7 @@ expect TZ Asia/Kolkata "TZ kept"
 expect MY_OWN_SETTING "keep me" "a key the installer does not manage is kept"
 expect AGENTBOX_PASSWORD_HASH "$HASH" "password hash kept byte-for-byte (not re-escaped)"
 expect AGENTBOX_PUBLIC_URL https://work.example.com "public URL kept"
-expect AGENTBOX_PREVIEW_MODE path "a key new to this version gets its default"
+expect AGENTBOX_SHARING on "a key new to this version gets its default"
 if [ "$(grep -c '^AGENTBOX_MODE=' "$DIR/.env")" = 1 ]; then pass "no duplicated keys"; else fail "duplicated keys"; fi
 
 echo "re-run twice more"
@@ -141,6 +141,31 @@ done
 seed
 run
 expect AGENTBOX_PUBLIC_URL https://work.example.com "a real public URL is still kept"
+
+echo "sharing, and its older name"
+seed
+run --sharing off
+expect AGENTBOX_SHARING off "--sharing off is written"
+run
+expect AGENTBOX_SHARING off "and kept on the next run"
+run --preview path
+expect AGENTBOX_SHARING on "--preview path is the old spelling of --sharing on"
+run --preview off
+expect AGENTBOX_SHARING off "--preview off is the old spelling of --sharing off"
+seed
+echo "AGENTBOX_PREVIEW_MODE=off" >> "$DIR/.env"
+run
+expect AGENTBOX_SHARING off "an older .env's AGENTBOX_PREVIEW_MODE=off carries over as sharing off"
+if grep -q '^AGENTBOX_PREVIEW_MODE=' "$DIR/.env"; then fail "AGENTBOX_PREVIEW_MODE is still in .env"; else pass "and the old key is gone"; fi
+seed
+echo "AGENTBOX_PREVIEW_MODE=path" >> "$DIR/.env"
+run --sharing off
+expect AGENTBOX_SHARING off "a flag beats the older key"
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --sharing maybe >/dev/null 2>&1; then
+    fail "--sharing maybe was accepted"
+else
+    pass "--sharing takes on or off only"
+fi
 
 echo "the removed per-port preview hostnames"
 seed

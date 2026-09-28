@@ -80,7 +80,7 @@ case "${1:-help}" in
     workbench) "${DC[@]}" logs -f --tail=100 workbench ;;
     update)
         # Adopt any of the install flags on an existing box: update .env, then
-        # rebuild and restart with the resolved overlays. --agents and --preview
+        # rebuild and restart with the resolved overlays. --agents and --sharing
         # take effect on the rebuild; --mode swaps the overlay in place.
         shift
         ISOLATE="false"
@@ -98,12 +98,20 @@ case "${1:-help}" in
                         *[!a-z0-9,_-]*) echo "--agents takes a comma-separated list, e.g. claude,codex" >&2; exit 1 ;;
                     esac
                     PENDING+=("AGENTBOX_AGENTS=$val"); shift 2 ;;
-                --preview)
+                --sharing)
                     case "$val" in
-                        off|path) ;;
-                        *) echo "--preview must be off or path" >&2; exit 1 ;;
+                        on|off) ;;
+                        *) echo "--sharing must be on or off" >&2; exit 1 ;;
                     esac
-                    PENDING+=("AGENTBOX_PREVIEW_MODE=$val"); shift 2 ;;
+                    PENDING+=("AGENTBOX_SHARING=$val"); shift 2 ;;
+                --preview)
+                    # The older name of --sharing: path allowed sharing, off did not.
+                    case "$val" in
+                        path) PENDING+=("AGENTBOX_SHARING=on") ;;
+                        off) PENDING+=("AGENTBOX_SHARING=off") ;;
+                        *) echo "--preview must be off or path (or use --sharing on|off)" >&2; exit 1 ;;
+                    esac
+                    shift 2 ;;
                 --cloudflare)
                     case "$val" in
                         on|off) ;;
@@ -163,6 +171,17 @@ case "${1:-help}" in
                 esac
             fi
             unset_env AGENTBOX_CLIENT_IP_HEADER
+        fi
+        # An .env from before --sharing said it with AGENTBOX_PREVIEW_MODE.
+        if grep -q '^AGENTBOX_PREVIEW_MODE=' .env; then
+            if ! grep -q '^AGENTBOX_SHARING=' .env; then
+                if [ "$(grep -m1 '^AGENTBOX_PREVIEW_MODE=' .env | cut -d= -f2-)" = off ]; then
+                    set_env AGENTBOX_SHARING off
+                else
+                    set_env AGENTBOX_SHARING on
+                fi
+            fi
+            unset_env AGENTBOX_PREVIEW_MODE
         fi
         # A header set by hand is checked before anything restarts.
         real_ip_header_problem "$(grep -m1 '^AGENTBOX_REAL_IP_HEADER=' .env | cut -d= -f2- || true)" && exit 1
@@ -279,7 +298,7 @@ agentbox <command>
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
   update [flags]        pull, rebuild, restart; accepts the install flags
-                        (--agents, --preview, --cloudflare, --real-ip-header, --mode,
+                        (--agents, --sharing, --cloudflare, --real-ip-header, --mode,
                         --cert-resolver, --edge-network, --cpus, --memory, --proxy-cpus,
                         --proxy-memory, --isolate-host)
   passwd [new]          set the sign-in password (prompted, or generated);

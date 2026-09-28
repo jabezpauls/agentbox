@@ -18,7 +18,7 @@ USERNAME="admin"
 PASSWORD=""
 CPUS="2"
 MEMORY="4g"
-PREVIEW_MODE="path"
+SHARING="on"
 # Behind Cloudflare? on/off; empty until decided (flag, .env, or the mode's default).
 CLOUDFLARE=""
 # A header the operator's own proxy sets to the client's address (behind-proxy
@@ -57,7 +57,9 @@ Run with no options for an interactive walk-through.
   --user <name>         Login username (default admin)
   --password <pass>     Login password (default: generated and printed once);
                         on an existing install, replaces the current one
-  --preview <off|path>  Kept for compatibility; public /s/ shares are off
+  --sharing <on|off>    Whether you may make an app public from the Preview
+                        panel (default on); off keeps every app private
+  --preview <path|off>  The older name of --sharing (path means on)
   --cloudflare <on|off> The hostname is proxied through Cloudflare (default on in
                         traefik mode, off otherwise); decides whose address the
                         sign-in limits count
@@ -104,7 +106,15 @@ while [ $# -gt 0 ]; do
             # cookie is host-only, so it never reaches another hostname.
             warn "--preview-domain no longer does anything; ignoring it"
             shift 2 ;;
-        --preview)       flag PREVIEW_MODE "${2:-}"; shift 2 ;;
+        --sharing)       flag SHARING "${2:-}"; shift 2 ;;
+        --preview)
+            # The older name: `path` allowed sharing, `off` did not.
+            case "${2:-}" in
+                path) flag SHARING on ;;
+                off)  flag SHARING off ;;
+                *)    die "--preview must be off or path (or use --sharing on|off)" ;;
+            esac
+            shift 2 ;;
         --cloudflare)    flag CLOUDFLARE "${2:-}"; shift 2 ;;
         --real-ip-header) flag REAL_IP_HEADER "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
@@ -130,7 +140,7 @@ ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
-AGENTBOX_USER:USERNAME AGENTBOX_PREVIEW_MODE:PREVIEW_MODE AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
@@ -142,6 +152,14 @@ if [ -f "$ENV_FILE" ]; then
         grep -q "^$key=" "$ENV_FILE" || continue
         printf -v "$var" '%s' "$(grep -m1 "^$key=" "$ENV_FILE" | cut -d= -f2-)"
     done
+fi
+# Sharing, when neither this run nor .env says: an older .env said it with
+# AGENTBOX_PREVIEW_MODE (path meant sharing was allowed, off that it was not).
+if [ -f "$ENV_FILE" ] && ! grep -q '^AGENTBOX_SHARING=' "$ENV_FILE" && grep -q '^AGENTBOX_PREVIEW_MODE=' "$ENV_FILE"; then
+    case "$EXPLICIT" in
+        *" SHARING "*) ;;
+        *) if [ "$(grep -m1 '^AGENTBOX_PREVIEW_MODE=' "$ENV_FILE" | cut -d= -f2-)" = off ]; then SHARING="off"; fi ;;
+    esac
 fi
 # The public URL follows the domain whenever the domain was just given, or no
 # URL is recorded yet. It is left blank for localhost: https://localhost is
@@ -271,9 +289,9 @@ if [ -n "$PASSWORD" ]; then
     [ "${#PASSWORD}" -ge 8 ] || die "--password must be at least 8 characters"
     [ "$(printf '%s' "$PASSWORD" | wc -c)" -le 72 ] || die "--password must be at most 72 bytes (bcrypt ignores the rest)"
 fi
-case "$PREVIEW_MODE" in
-    off|path) ;;
-    *) die "--preview must be off or path" ;;
+case "$SHARING" in
+    on|off) ;;
+    *) die "--sharing must be on or off" ;;
 esac
 if [ "$MODE" = "standalone" ] || [ "$MODE" = "traefik" ]; then
     [ -z "$DOMAIN" ] && die "--domain is required for $MODE mode"
@@ -366,8 +384,8 @@ NEW_ENV="$(mktemp .env.XXXXXX)"
 if [ -f .env ]; then
     # Keep every line this installer does not manage — API keys, TZ, comments,
     # settings added by hand — exactly as it was.
-    # AGENTBOX_CLIENT_IP_HEADER is an older key, carried over above.
-    managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_VERSION|AGENTBOX_CLIENT_IP_HEADER"
+    # AGENTBOX_CLIENT_IP_HEADER and AGENTBOX_PREVIEW_MODE are older keys, carried over above.
+    managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_VERSION|AGENTBOX_CLIENT_IP_HEADER|AGENTBOX_PREVIEW_MODE"
     for pair in $MANAGED; do managed_re="$managed_re|${pair%%:*}"; done
     managed_re="$managed_re)="
     grep -Ev "$managed_re" .env > "$NEW_ENV" || true
@@ -386,7 +404,7 @@ AGENTBOX_EDGE_NETWORK=$EDGE_NETWORK
 AGENTBOX_CERT_RESOLVER=$CERT_RESOLVER
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
-AGENTBOX_PREVIEW_MODE=$PREVIEW_MODE
+AGENTBOX_SHARING=$SHARING
 AGENTBOX_CLOUDFLARE=$CLOUDFLARE
 AGENTBOX_REAL_IP_HEADER=$REAL_IP_HEADER
 AGENTBOX_AGENTS=$AGENTS

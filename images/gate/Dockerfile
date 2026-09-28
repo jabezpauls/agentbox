@@ -69,5 +69,6 @@ ENV AGENTBOX_VERSION=${AGENTBOX_VERSION}
 
 USER 10001:10001
 VOLUME /data
-EXPOSE 7900
+# 7900: the public side (the proxy); 7901: the sandbox-side app API.
+EXPOSE 7900 7901
 CMD ["node", "/app/dist/main.js"]
