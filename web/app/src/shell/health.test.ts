@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getHealth = vi.fn();
-vi.mock("../api/client.ts", () => ({ getHealth: () => getHealth() }));
+vi.mock("../api/client.ts", async (orig) => ({ ...(await orig<typeof import("../api/client.ts")>()), getHealth: () => getHealth() }));
 
-const { loadHealth, resetHealth, retryDelay, useHealthState } = await import("./health.ts");
+const { healthErrorText, loadHealth, resetHealth, retryDelay, useHealthState } = await import("./health.ts");
+const { RpcError } = await import("../api/client.ts");
 const { useApp } = await import("../store/app.ts");
 
 const health = { ok: true, workspaceRoot: "/workspace", homeRoot: "/home/coder" };
@@ -20,7 +21,7 @@ describe("loadHealth", () => {
   it("retries with backoff until the box answers", async () => {
     getHealth.mockRejectedValueOnce(new TypeError("fetch failed")).mockRejectedValueOnce(new TypeError("fetch failed")).mockResolvedValue(health);
     await loadHealth();
-    expect(useHealthState.getState().error).toMatch(/could not be reached/);
+    expect(useHealthState.getState().error).toBe("The box could not be reached. Check the connection.");
     expect(useApp.getState().health).toBeNull();
     await vi.advanceTimersByTimeAsync(retryDelay(1));
     expect(getHealth).toHaveBeenCalledTimes(2);
@@ -31,6 +32,12 @@ describe("loadHealth", () => {
     // And then stops asking.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getHealth).toHaveBeenCalledTimes(3);
+  });
+
+  it("says why in words, not as a status code", () => {
+    const text = healthErrorText(new RpcError(502, "/api/health → 502"));
+    expect(text).toBe("The box is not answering right now — it may be restarting.");
+    expect(text).not.toMatch(/api|502/);
   });
 
   it("backs off to at most thirty seconds", () => {

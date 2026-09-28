@@ -59,5 +59,7 @@ test("with the bridge down, each surface says it cannot reach the box", async ({
   await page.goto("/files");
   const files = surface(page, "files");
   await expect(files.getByText("Couldn't reach the box.")).toBeVisible();
+  await expect(files.getByText(/not answering right now/)).toBeVisible();
+  await expect(files.getByText(/\/api\/|502/)).toHaveCount(0);
   await expect(files.getByRole("button", { name: "Retry" })).toBeVisible();
 });

@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import { getHealth } from "../api/client.ts";
-import { errorText } from "../api/http.ts";
+import { getHealth, RpcError } from "../api/client.ts";
 import { useApp } from "../store/app.ts";
 
 /**
@@ -16,6 +15,15 @@ const MAX_DELAY_MS = 30_000;
 let attempt = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inflight: Promise<void> | null = null;
+
+/** Why the box could not be read, in words — never "/api/health → 502". */
+export function healthErrorText(err: unknown): string {
+  if (err instanceof RpcError) {
+    if (err.status >= 500) return "The box is not answering right now — it may be restarting.";
+    return "The box turned the request down.";
+  }
+  return "The box could not be reached. Check the connection.";
+}
 
 export function retryDelay(n: number): number {
   return Math.min(MAX_DELAY_MS, 1000 * 2 ** Math.max(0, n - 1));
@@ -35,7 +43,7 @@ export function loadHealth(): Promise<void> {
     })
     .catch((err: unknown) => {
       attempt += 1;
-      useHealthState.setState({ error: errorText(err, "The box did not answer.") });
+      useHealthState.setState({ error: healthErrorText(err) });
       timer = setTimeout(() => void loadHealth(), retryDelay(attempt));
     })
     .finally(() => {
