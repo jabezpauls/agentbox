@@ -85,7 +85,9 @@ test("(a) agentbox-preview start: it opens in the Preview of an open tab, render
   expect(run.stdout).toContain(`/a/${idA}/`);
   // Every open tab switches its Preview to the app, and says who asked.
   await expect(page.getByText(`agentbox-preview opened vite-a-${tag} in Preview`)).toBeVisible();
-  await expect(page.locator("iframe.prev-frame")).toHaveAttribute("src", `/a/${idA}/`);
+  // The panel checks the app before framing it, and a first page load waits
+  // on Vite optimising its dependencies: slow on a busy machine.
+  await expect(page.locator("iframe.prev-frame")).toHaveAttribute("src", `/a/${idA}/`, { timeout: 60_000 });
   const frame = previewFrame(page);
   await rendersTemplate(frame);
   await liveReloads(frame, dirA, "Edited live (a)");
@@ -99,7 +101,7 @@ test("(b) plain npm run dev: made an app from the panel, it renders, loads its i
   await waitPort(portB);
   await showPreview(page);
   await page.getByRole("list", { name: "Also listening" }).getByRole("button", { name: new RegExp(`:${portB}\\b`) }).click();
-  await expect(page.locator("iframe.prev-frame")).toHaveAttribute("src", /^\/a\/[a-z2-7]{26}\/$/);
+  await expect(page.locator("iframe.prev-frame")).toHaveAttribute("src", /^\/a\/[a-z2-7]{26}\/$/, { timeout: 60_000 });
   idB = String(await page.locator("iframe.prev-frame").getAttribute("src")).split("/")[2] as string;
   const frame = previewFrame(page);
   await rendersTemplate(frame);
