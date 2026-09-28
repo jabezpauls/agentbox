@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { AppError, MAX_EXPIRY_MS, toView } from "./apps.js";
+import { AppError, MAX_EXPIRY_MS, MIN_PASSCODE, generatePasscode, toView } from "./apps.js";
 import { IDLE_MS, bearerToken, type Subject } from "./auth.js";
 import { BUNDLE_NAME, INSTALL_NAME, renderInstallScript } from "./cli-files.js";
 import { clearedSessionCookie, sessionCookie } from "./cookies.js";
@@ -619,19 +619,28 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
         expiresAt = core.now() + Math.round(secs * 1000);
       }
     }
+    // A passcode given is checked; none given, for an app that has none yet,
+    // is made here and handed back once (the CLI's `share --passcode` with no
+    // value, say). None given for an app that has one keeps it.
     let passcodeHash: string | undefined;
-    if (mode === "passcode" && b.passcode !== undefined && b.passcode !== null && b.passcode !== "") {
-      const passcode = str(b.passcode);
-      if (passcode.length < 4 || Buffer.byteLength(passcode) > 72) {
-        return reply.code(400).send({ error: "invalid_passcode", message: "a passcode is 4 to 72 characters" });
+    let generated: string | undefined;
+    if (mode === "passcode") {
+      let passcode = b.passcode === undefined || b.passcode === null ? "" : str(b.passcode);
+      if (passcode === "" && apps.get(req.params.id)?.visibility.passcodeHash === undefined) {
+        passcode = generated = generatePasscode();
       }
-      passcodeHash = await hashPassword(passcode, config.bcryptCost);
+      if (passcode !== "") {
+        if (passcode.length < MIN_PASSCODE || Buffer.byteLength(passcode) > 72) {
+          return reply.code(400).send({ error: "invalid_passcode", message: `a passcode is ${MIN_PASSCODE} to 72 characters` });
+        }
+        passcodeHash = await hashPassword(passcode, config.bcryptCost);
+      }
     }
     try {
       const changed = await apps.setVisibility(req.params.id, { mode, expiresAt, ...(passcodeHash ? { passcodeHash } : {}) });
       const s = req.subject as Subject;
       console.log(`[gate] app ${changed.id} made ${mode} by a ${s.kind} from ${infoOf(req.raw).ip}`);
-      return appView(changed);
+      return { ...appView(changed), ...(generated ? { passcode: generated } : {}) };
     } catch (err) {
       return appFailed(reply, err);
     }

@@ -57,7 +57,8 @@ function routes(opts: { app?: AppView; down?: boolean; hint?: boolean; shareStat
     if (url === `/_gate/apps/${ID}/visibility` && method === "PUT") {
       if (opts.shareStatus) return json(opts.shareStatus, { error: "sharing_off", message: "sharing is turned off on this box" });
       current = { ...current, visibility: { mode: body.mode, expiresAt: body.expiresIn === null ? null : Date.now() + body.expiresIn * 1000 } };
-      return json(200, current);
+      // As the gate does: asked for a passcode without one, it makes one.
+      return json(200, body.mode === "passcode" && !body.passcode ? { ...current, passcode: "made-by-the-box" } : current);
     }
     if (url === `/_gate/apps/${ID}/visibility` && method === "DELETE") {
       current = { ...current, visibility: { mode: "private", expiresAt: null } };
@@ -198,7 +199,7 @@ describe("sharing", () => {
     await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(`https://box.example/a/${ID}/`));
   });
 
-  it("needs a passcode to share with one, and sends it to the gate", async () => {
+  it("sends a passcode of 8 characters or more to the gate", async () => {
     setup({ sharing: true });
     const { calls } = routes();
     const user = userEvent.setup();
@@ -206,11 +207,32 @@ describe("sharing", () => {
     await user.click(screen.getByRole("button", { name: "Share" }));
     await user.click(screen.getByLabelText(/Link and a passcode/));
     const go = screen.getByRole("button", { name: "Share and copy link" });
+    await user.type(screen.getByRole("textbox", { name: "Passcode" }), "short");
     expect(go).toBeDisabled();
-    await user.type(screen.getByLabelText("Passcode"), "open sesame");
+    expect(screen.getByText(/at least 8 characters/)).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Passcode" }), " but longer");
     await user.selectOptions(screen.getByLabelText("How long"), "Until I stop sharing");
     await user.click(go);
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ mode: "passcode", expiresIn: null, passcode: "open sesame" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ mode: "passcode", expiresIn: null, passcode: "short but longer" }));
+  });
+
+  it("makes a passcode here to copy, or lets the box make one and shows it", async () => {
+    setup({ sharing: true });
+    const { calls } = routes();
+    const user = userEvent.setup();
+    render(<PreviewPanel />);
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    await user.click(screen.getByLabelText(/Link and a passcode/));
+    await user.click(screen.getByRole("button", { name: "Make a passcode" }));
+    const field = screen.getByRole("textbox", { name: "Passcode" });
+    expect((field as HTMLInputElement).value).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+    await user.click(screen.getByRole("button", { name: "Copy passcode" }));
+    expect(await navigator.clipboard.readText()).toBe((field as HTMLInputElement).value);
+    // Left empty, the box makes one, and the popover shows it.
+    await user.clear(field);
+    await user.click(screen.getByRole("button", { name: "Share and copy link" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ mode: "passcode", expiresIn: 604800 }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Passcode" })).toHaveValue("made-by-the-box"));
   });
 
   it("shows a shared app's banner, and stops sharing", async () => {

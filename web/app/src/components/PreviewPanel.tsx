@@ -3,6 +3,7 @@ import {
   AppWindow,
   Check,
   Copy,
+  Dices,
   ExternalLink,
   Globe,
   Info,
@@ -44,6 +45,24 @@ const EXPIRIES: { label: string; seconds: number | null }[] = [
   { label: "Until I stop sharing", seconds: null },
 ];
 const DEFAULT_EXPIRY = 2;
+
+/** The shortest passcode the box takes. */
+export const MIN_PASSCODE = 8;
+
+/**
+ * A passcode made here, as the box makes one: three groups of four from an
+ * alphabet without look-alikes (about 60 bits).
+ */
+export function makePasscode(): string {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let out = "";
+  bytes.forEach((b, i) => {
+    if (i > 0 && i % 4 === 0) out += "-";
+    out += alphabet[b % alphabet.length];
+  });
+  return out;
+}
 
 /** A shared app's remaining lifetime, phrased for the panel. */
 export function expiryLabel(expiresAt: number | null, now = Date.now()): string {
@@ -349,8 +368,10 @@ function SharePanel({ app, copied, onCopy, onChanged, onClose }: SharePanelProps
   const [error, setError] = useState<string | null>(null);
   const shared = isPublic(app);
   const link = appLink(app.id);
-  // A passcode is needed to start one; an app already behind one keeps it unless a new one is typed.
-  const needsPasscode = mode === "passcode" && app.visibility.mode !== "passcode" && passcode.trim().length < 4;
+  // A passcode typed must be long enough; none typed, the box makes one (or
+  // an app already behind one keeps it).
+  const tooShort = mode === "passcode" && passcode.length > 0 && passcode.length < MIN_PASSCODE;
+  const needsPasscode = tooShort;
 
   const apply = () => {
     setBusy(true);
@@ -360,8 +381,9 @@ function SharePanel({ app, copied, onCopy, onChanged, onClose }: SharePanelProps
       expiresIn: EXPIRIES[expiry]?.seconds ?? null,
       ...(mode === "passcode" && passcode ? { passcode } : {}),
     })
-      .then(() => {
-        setPasscode("");
+      .then((shared) => {
+        // The box made one: show it, to be copied and handed on.
+        setPasscode(shared.passcode ?? passcode);
         onChanged();
         onCopy("link", link);
       })
@@ -411,16 +433,36 @@ function SharePanel({ app, copied, onCopy, onChanged, onClose }: SharePanelProps
         ))}
       </div>
       {mode === "passcode" && (
-        <input
-          className="input prev-share-passcode"
-          type="password"
-          autoComplete="new-password"
-          aria-label="Passcode"
-          placeholder={app.visibility.mode === "passcode" ? "New passcode (leave empty to keep it)" : "Passcode, 4 characters or more"}
-          value={passcode}
-          onChange={(e) => setPasscode(e.target.value)}
-        />
+        <div className="prev-share-link">
+          <input
+            className="input prev-share-passcode"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Passcode"
+            placeholder={
+              app.visibility.mode === "passcode"
+                ? "New passcode (leave empty to keep it)"
+                : `${MIN_PASSCODE} characters or more, or leave empty for one made for you`
+            }
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+          />
+          <button className="icon-btn" aria-label="Make a passcode" title="Make a passcode" onClick={() => setPasscode(makePasscode())}>
+            <Dices size={14} />
+          </button>
+          <button
+            className="icon-btn"
+            aria-label="Copy passcode"
+            title="Copy passcode"
+            disabled={passcode === ""}
+            onClick={() => onCopy("passcode", passcode)}
+          >
+            {copied === "passcode" ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+        </div>
       )}
+      {tooShort && <p className="prev-share-error">A passcode is at least {MIN_PASSCODE} characters.</p>}
       <label className="prev-share-expiry">
         <span>For</span>
         <select className="input" aria-label="How long" value={expiry} onChange={(e) => setExpiry(Number(e.target.value))}>

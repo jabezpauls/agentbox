@@ -78,6 +78,25 @@ export function newAppId(): string {
 
 export const APP_ID_SHAPE = /^[a-z2-7]{26}$/;
 
+/** The shortest passcode the owner may set. */
+export const MIN_PASSCODE = 8;
+
+/**
+ * A passcode made for the owner: three groups of four from an alphabet
+ * without look-alikes (`k7mq-2xnd-p9wt`), about 60 bits — easy to read out,
+ * and far beyond what the passcode page's limits let anyone guess.
+ */
+export function generatePasscode(): string {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = randomBytes(12);
+  let out = "";
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 4 === 0) out += "-";
+    out += alphabet[(bytes[i] as number) % alphabet.length];
+  }
+  return out;
+}
+
 export function isAppId(id: string): boolean {
   return APP_ID_SHAPE.test(id);
 }

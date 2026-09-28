@@ -156,8 +156,12 @@ export function restartApp(id: string): Promise<unknown> {
   return send("POST", `/api/apps/${id}/restart`, {});
 }
 
-/** Who may open the app: the owner's decision, on the gate's side. */
-export function shareApp(id: string, req: ShareRequest): Promise<App> {
+/**
+ * Who may open the app: the owner's decision, on the gate's side. Asked for a
+ * passcode without one, for an app that has none, the gate makes one and
+ * hands it back here, once.
+ */
+export function shareApp(id: string, req: ShareRequest): Promise<App & { passcode?: string }> {
   return send("PUT", `/_gate/apps/${id}/visibility`, req);
 }
 
