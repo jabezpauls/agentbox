@@ -6,7 +6,7 @@ import type { Context } from "../context.js";
 import { DavFront, REMOTE_PREFIX } from "../dav.js";
 import { CliError, EXIT } from "../errors.js";
 import { apiErrorFrom } from "../http.js";
-import { driveFromNetUse, findOnPath, gvfsMountName, mountPlan, runStep } from "../mount.js";
+import { driveFromNetUse, findOnPath, gvfsMountName, linkFolderProblem, mountPlan, runStep } from "../mount.js";
 import { command, type Command } from "./types.js";
 
 /** This mount's folder under gvfs's, once it appears; `null` after `ms` without it. */
@@ -46,10 +46,11 @@ export const mount = command({
     { name: "port", type: "string", value: "n", description: "the local port (default: any free one)" },
   ],
   details:
-    "Serves the workspace on 127.0.0.1 behind a random path, carrying this device's token to the box, and\n" +
-    "mounts it: macOS mount_webdav (at [dir], default ~/agentbox/<box>), Linux gio mount ([dir] becomes a\n" +
-    "link to it), Windows net use ([dir] is a drive letter, default the next free one). Keep it running;\n" +
-    "Ctrl-C unmounts. Deleting sends things to the box's trash.",
+    "Serves the workspace on 127.0.0.1 behind a random path and a random password, carrying this device's\n" +
+    "token to the box, and mounts it: macOS mount_webdav (at [dir], default ~/agentbox/<box>), Linux gio\n" +
+    "mount ([dir] becomes a link to it, in a folder only you can open), Windows net use ([dir] is a drive\n" +
+    "letter, default the next free one). Keep it running; Ctrl-C unmounts. Deleting sends things to the\n" +
+    "box's trash. --no-mount prints the URL, user and password for a WebDAV client of your choice.",
   async run(ctx, p) {
     const { name, client } = await ctx.connect();
     // Ask the box first: an old box without WebDAV, or a revoked token, is
@@ -61,7 +62,12 @@ export const mount = command({
     if (probe.status !== 207) throw new CliError(`${name} refused WebDAV (HTTP ${probe.status})`);
 
     const port = int(p.options, "port", 1, 65535);
+    const noMount = bool(p.options, "no-mount");
+    const dir = p.operands[0] ?? null;
+    // Windows' WebClient will not send Basic credentials over plain http, so
+    // a `net use` mount can only be guarded by the path; any other client can.
     const front = new DavFront(client, {
+      ...(ctx.platform === "win32" && !noMount ? { credentials: null } : {}),
       ...(port ? { port } : {}),
       onUnauthorized: () => ctx.warn("the box refused this device's token; the mount will not work until you `agentbox login` again"),
       onError: (m) => ctx.warn(m),
@@ -74,18 +80,18 @@ export const mount = command({
     }
 
     try {
-      if (bool(p.options, "no-mount")) {
-        if (ctx.json) ctx.printJson({ box: name, url });
-        else ctx.out(`${url}\n`);
-        ctx.err(`Serving ${name}'s workspace over WebDAV at that URL (loopback only). Ctrl-C to stop.\n`);
+      const credentials = front.credentials;
+      if (noMount) {
+        if (ctx.json) ctx.printJson({ box: name, url, user: credentials?.user ?? null, password: credentials?.password ?? null });
+        else ctx.out(`${url}\n${credentials ? `user      ${credentials.user}\npassword  ${credentials.password}\n` : ""}`);
+        ctx.err(`Serving ${name}'s workspace over WebDAV there (loopback only${credentials ? ", with that user and password" : ""}). Ctrl-C to stop.\n`);
         await stopped(ctx);
         return;
       }
 
-      const dir = p.operands[0] ?? null;
       let plan;
       try {
-        plan = mountPlan({ platform: ctx.platform, url, dir, boxName: name, home: os.homedir(), env: ctx.env });
+        plan = mountPlan({ platform: ctx.platform, url, dir, boxName: name, home: os.homedir(), env: ctx.env, credentials });
       } catch (err) {
         throw new CliError((err as Error).message, EXIT.USAGE);
       }
@@ -99,9 +105,13 @@ export const mount = command({
         fs.mkdirSync(plan.mountpoint, { recursive: true });
         madeMountpoint = true;
       }
-      if (plan.link && fs.existsSync(plan.link)) throw new CliError(`${plan.link} already exists; name a new folder for the link, or leave it out`);
+      if (plan.link) {
+        if (fs.existsSync(plan.link)) throw new CliError(`${plan.link} already exists; name a new folder for the link, or leave it out`);
+        const problem = linkFolderProblem(path.dirname(plan.link));
+        if (problem) throw new CliError(problem);
+      }
 
-      const mounted = await runStep(plan.mount, helper);
+      const mounted = await runStep(plan.mount, helper, ctx.env);
       if (mounted.code !== 0) {
         if (madeMountpoint) fs.rmSync(plan.mountpoint as string, { recursive: false, force: true });
         throw new CliError(`${plan.helper} could not mount it${mounted.output ? `: ${mounted.output}` : ""}`);
@@ -139,7 +149,7 @@ export const mount = command({
       await stopped(ctx);
       ctx.err("Unmounting…\n");
       if (unmount) {
-        const done = await runStep(unmount, findOnPath(unmount.command, ctx.env, ctx.platform) ?? unmount.command);
+        const done = await runStep(unmount, findOnPath(unmount.command, ctx.env, ctx.platform) ?? unmount.command, ctx.env);
         if (done.code !== 0) ctx.warn(`${unmount.command} ${unmount.args.join(" ")} failed${done.output ? `: ${done.output}` : ""}; unmount it yourself`);
       }
       if (linked) fs.rmSync(plan.link as string, { force: true });

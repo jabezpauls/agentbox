@@ -11,11 +11,18 @@ import type { BoxClient } from "./http.js";
  *
  *   client ── http://127.0.0.1:<port>/<secret>/… ──▶ front ── https://box/api/dav/… + Bearer ──▶ box
  *
- * It listens on loopback only, and answers nothing outside `/<secret>/` — a
- * random 128-bit path — so another user of this machine, or a web page
- * poking at localhost, cannot use the token through it. It also refuses a
- * `Host` that is not loopback, so a DNS-rebinding page cannot reach it by
- * name.
+ * Anyone who can reach it would reach the box as this device, so it is
+ * guarded three ways, each enough on its own against a web page, and
+ * together against another user of this machine:
+ *
+ * - it listens on loopback only, and refuses a `Host` that is not loopback,
+ *   so a DNS-rebinding page cannot reach it by name;
+ * - it answers nothing outside `/<secret>/`, a random 128-bit path;
+ * - it asks for HTTP Basic credentials: a user name and a random 192-bit
+ *   password made for this run, which `mount` hands the OS's client outside
+ *   any command line (the secret path shows in `ps` and the mount table; the
+ *   password does not). Windows' WebClient will not send Basic credentials
+ *   over plain http, so there the path is the secret, and says so.
  *
  * WebDAV names resources by URL in more places than the request line, and
  * each has to be translated between the two namespaces or the box refuses
@@ -193,10 +200,31 @@ const DROP_RESPONSE = new Set(["set-cookie", "www-authenticate", "strict-transpo
 /** Multistatus bodies are small; anything past this is passed through unedited rather than held. */
 const MAX_REWRITE = 64 * 1024 * 1024;
 
+/** The Basic credentials the front asks for. */
+export interface DavCredentials {
+  user: string;
+  password: string;
+}
+
+export function newCredentials(): DavCredentials {
+  return { user: "agentbox", password: randomBytes(24).toString("base64url") };
+}
+
+/** True when an `Authorization` header carries exactly these credentials (compared in constant time). */
+export function basicMatches(header: string | undefined, want: DavCredentials): boolean {
+  const m = /^Basic\s+([A-Za-z0-9+/=]+)\s*$/i.exec(header ?? "");
+  if (!m) return false;
+  const got = Buffer.from(m[1] as string, "base64");
+  const expected = Buffer.from(`${want.user}:${want.password}`, "utf8");
+  return got.length === expected.length && timingSafeEqual(got, expected);
+}
+
 export interface DavFrontOptions {
   host?: string;
   port?: number;
   secret?: string;
+  /** The credentials to ask for (default: new ones); `null` asks for none (Windows' WebClient, see above). */
+  credentials?: DavCredentials | null;
   /** Told about requests the box refused as unauthorised, once. */
   onUnauthorized?: () => void;
   onError?: (message: string) => void;
@@ -208,12 +236,15 @@ export class DavFront {
   private port = 0;
   private warnedAuth = false;
   readonly secret: string;
+  /** What a client must sign in with, or `null` when nothing is asked. */
+  readonly credentials: DavCredentials | null;
 
   constructor(
     private readonly client: BoxClient,
     private readonly opts: DavFrontOptions = {},
   ) {
     this.secret = opts.secret ?? randomBytes(16).toString("base64url");
+    this.credentials = opts.credentials === undefined ? newCredentials() : opts.credentials;
   }
 
   /** Start listening; resolves with the URL to give a WebDAV client. */
@@ -230,6 +261,12 @@ export class DavFront {
       });
     });
     server.keepAliveTimeout = 65_000;
+    // Node's default gives a whole request five minutes, body included, then
+    // answers 408: a large file copied into the mount over a slow link would
+    // fail part way. A request may take as long as it needs; the connection
+    // to the box has its own idle limit, and headers must still come quickly.
+    server.requestTimeout = 0;
+    server.headersTimeout = 60_000;
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(this.opts.port ?? 0, this.opts.host ?? "127.0.0.1", () => resolve());
@@ -247,6 +284,11 @@ export class DavFront {
 
   get listenPort(): number {
     return this.port;
+  }
+
+  /** The listening server's own deadlines (for the tests). */
+  get timeouts(): { request: number; headers: number } | null {
+    return this.server ? { request: this.server.requestTimeout, headers: this.server.headersTimeout } : null;
   }
 
   async close(): Promise<void> {
@@ -272,6 +314,13 @@ export class DavFront {
     }
     // Outside the secret: the same answer as a path that does not exist.
     if (target === null) return plain(404, "not found");
+    const credentials = this.credentials;
+    if (credentials && !basicMatches(req.headers.authorization, credentials)) {
+      const text = "sign in with the user name and password agentbox mount printed or passed on\n";
+      res.writeHead(401, { "content-type": "text/plain; charset=utf-8", "content-length": String(Buffer.byteLength(text)), "www-authenticate": 'Basic realm="agentbox", charset="UTF-8"' });
+      res.end(text);
+      return;
+    }
     const method = req.method ?? "GET";
 
     const headers: OutgoingHttpHeaders = {};

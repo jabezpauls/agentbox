@@ -106,7 +106,11 @@ describe("hrefs in responses", () => {
   });
 });
 
-/** Talk to the front as a WebDAV client would. */
+/** The credentials the fronts under test ask for: "Basic dXNlcjpwdw==". */
+const CREDS = { user: "user", password: "pw" };
+const BASIC = "Basic dXNlcjpwdw==";
+
+/** Talk to the front as a WebDAV client would, signed in unless `authorization` says otherwise. */
 function send(
   url: string,
   method: string,
@@ -115,8 +119,10 @@ function send(
   rawPath?: string,
 ): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
   const u = new URL(url);
+  const all = { authorization: BASIC, ...headers };
+  if (all.authorization === "") delete (all as Record<string, string>).authorization;
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: u.hostname, port: u.port, path: rawPath ?? `${u.pathname}${u.search}`, method, headers, agent: false }, (res) => {
+    const req = http.request({ hostname: u.hostname, port: u.port, path: rawPath ?? `${u.pathname}${u.search}`, method, headers: all, agent: false }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() }));
@@ -136,7 +142,7 @@ describe("the local WebDAV front", () => {
     box = null;
   });
 
-  async function start(): Promise<{ url: string; box: Stub }> {
+  async function start(credentials: typeof CREDS | null = CREDS): Promise<{ url: string; box: Stub }> {
     box = await stubServer((req, res) => {
       const url = req.url ?? "";
       if (req.method === "PROPFIND") {
@@ -156,7 +162,7 @@ describe("the local WebDAV front", () => {
       res.writeHead(204);
       res.end();
     });
-    front = new DavFront(new BoxClient(box.url, TOKEN), { secret: SECRET });
+    front = new DavFront(new BoxClient(box.url, TOKEN), { secret: SECRET, credentials });
     const url = await front.start();
     return { url, box };
   }
@@ -164,7 +170,7 @@ describe("the local WebDAV front", () => {
   it("serves under the secret on loopback, carrying the token and nothing of the client's", async () => {
     const { url, box: b } = await start();
     expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+/${SECRET}/$`));
-    const res = await send(`${url}proj/`, "PROPFIND", { depth: "1", authorization: "Basic dXNlcjpwdw==", cookie: "session=1", origin: "http://evil.example" }, "<propfind/>");
+    const res = await send(`${url}proj/`, "PROPFIND", { depth: "1", cookie: "session=1", origin: "http://evil.example" }, "<propfind/>");
     expect(res.status).toBe(207);
     const seen = b.seen[0]!;
     expect(seen.url).toBe("/api/dav/proj/");
@@ -215,6 +221,56 @@ describe("the local WebDAV front", () => {
     expect((await send(url, "GET", {}, undefined, `/${SECRET}/a/%2e%2e/b`)).status).toBe(400);
     expect((await send(url, "GET", {}, undefined, `/${SECRET}/a%2fb`)).status).toBe(400);
     expect(b.seen).toHaveLength(0);
+  });
+
+  it("asks for its password, after the secret path, and never passes it on", async () => {
+    const { url, box: b } = await start();
+    const u = new URL(url);
+    const none = await send(`${url}x`, "GET", { authorization: "" });
+    expect(none.status).toBe(401);
+    expect(none.headers["www-authenticate"]).toMatch(/^Basic realm="agentbox"/);
+    expect((await send(`${url}x`, "GET", { authorization: "Basic dXNlcjpQVw==" })).status).toBe(401);
+    expect((await send(`${url}x`, "GET", { authorization: "Bearer abx_x" })).status).toBe(401);
+    // A wrong path says nothing about what is behind the right one.
+    expect((await send(`http://127.0.0.1:${u.port}/nope/`, "GET", { authorization: "" })).status).toBe(404);
+    expect(b.seen).toHaveLength(0);
+    expect((await send(`${url}x`, "GET")).status).toBe(204);
+    expect(b.seen[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("asks nothing when told to (Windows' WebClient), and makes new credentials by default", async () => {
+    const { url } = await start(null);
+    expect((await send(`${url}x`, "GET", { authorization: "" })).status).toBe(204);
+    const fresh = new DavFront(new BoxClient("http://127.0.0.1:1", TOKEN));
+    expect(fresh.credentials?.user).toBe("agentbox");
+    expect(fresh.credentials?.password).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(new DavFront(new BoxClient("http://127.0.0.1:1", TOKEN)).credentials?.password).not.toBe(fresh.credentials?.password);
+  });
+
+  it("gives a slow upload all the time it needs (no 5-minute request deadline)", async () => {
+    const { url, box: b } = await start();
+    expect(front?.timeouts).toEqual({ request: 0, headers: 60_000 });
+    const u = new URL(url);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { hostname: u.hostname, port: u.port, path: `${u.pathname}slow.bin`, method: "PUT", headers: { authorization: BASIC, "content-length": String(20 * 1024) }, agent: false },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on("error", reject);
+      let sent = 0;
+      const timer = setInterval(() => {
+        req.write(Buffer.alloc(1024));
+        if ((sent += 1024) >= 20 * 1024) {
+          clearInterval(timer);
+          req.end();
+        }
+      }, 50);
+    });
+    expect(status).toBe(204);
+    expect(b.seen[0]?.body.length).toBe(20 * 1024);
   });
 
   it("says 502 when the box cannot be reached", async () => {
