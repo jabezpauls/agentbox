@@ -59,6 +59,10 @@ services:
       - --auth=none          # the gate authenticates; see web/gate
       - --disable-telemetry
       - --disable-update-check
+      # No "Restricted Mode" for folders the editor has not seen: Workspace
+      # Trust guards a machine from the code it opens, and here the sandbox
+      # is that boundary — agents already run whatever is in /workspace.
+      - --disable-workspace-trust
       - /workspace
     networks:
       - internal

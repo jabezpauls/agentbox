@@ -35,4 +35,9 @@ check(published == want, "services publishing ports: %s" % (published or "none")
 trust = svc["proxy"].get("environment", {}).get("AGENTBOX_TRUST", "")
 prefix = "standalone-" if mode == "standalone" else "proxied-"
 check(trust.startswith(prefix), "the proxy trusts per its mode (%s)" % trust)
+# The sandbox is the trust boundary, so the editor opens every folder trusted
+# (no "Restricted Mode"), and never asks for a password of its own.
+code_cmd = svc["code"].get("command") or []
+check("--disable-workspace-trust" in code_cmd, "the editor opens folders trusted")
+check("--auth=none" in code_cmd, "the editor leaves sign-in to the gate")
 sys.exit(1 if failed else 0)
