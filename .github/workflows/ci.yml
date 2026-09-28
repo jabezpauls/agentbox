@@ -63,6 +63,9 @@ jobs:
       - name: An update stops the services it drops
         run: tests/install/orphans.sh
 
+      - name: A restart keeps the editor's namespace whole
+        run: tests/install/restart.sh
+
   proxy-config:
     runs-on: ubuntu-latest
     steps:

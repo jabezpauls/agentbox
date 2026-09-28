@@ -73,7 +73,23 @@ real_ip_header_problem() {
 case "${1:-help}" in
     start)   shift; "${DC[@]}" up -d "$@" ;;
     stop)    shift; "${DC[@]}" stop "$@" ;;
-    restart) shift; "${DC[@]}" restart "$@" ;;
+    restart)
+        shift
+        # The terminals and the Workbench live in the editor's network
+        # namespace (network_mode: service:code). `compose restart` restarts
+        # each on its own, so they come back joined to the namespace of a
+        # `code` that no longer exists and exit ("cannot join network
+        # namespace"). Restarting all of it, or `code`, stops the stack and
+        # starts it again in order; any other service restarts alone.
+        whole=1
+        for s in "$@"; do [ "$s" = code ] && whole=1 && break; whole=0; done
+        if [ "$whole" = 1 ]; then
+            "${DC[@]}" stop
+            "${DC[@]}" up -d
+        else
+            "${DC[@]}" restart "$@"
+        fi
+        ;;
     status)  "${DC[@]}" ps ;;
     logs)    shift; "${DC[@]}" logs -f --tail=100 "$@" ;;
     shell)     "${DC[@]}" exec code bash -l ;;
