@@ -13,6 +13,11 @@ interface Props {
   narrow?: boolean;
   /** Focus the confirm button on open, so Enter confirms. */
   autoFocusSubmit?: boolean;
+  /**
+   * False for a dialog only its own button may close — what it shows cannot
+   * be shown again — so Escape, the scrim and the close button do nothing.
+   */
+  dismissable?: boolean;
   children?: ReactNode;
 }
 
@@ -35,6 +40,7 @@ export function Dialog({
   danger,
   narrow,
   autoFocusSubmit,
+  dismissable = true,
   children,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -59,7 +65,7 @@ export function Dialog({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      onClose();
+      if (dismissable) onClose();
       return;
     }
     // Enter submits — except in a textarea, and except on a button, which must
@@ -87,7 +93,7 @@ export function Dialog({
   };
 
   return (
-    <div className="scrim" onMouseDown={onClose}>
+    <div className="scrim" onMouseDown={dismissable ? onClose : undefined}>
       <div
         className={`dialog pop-in${narrow ? " is-narrow" : ""}`}
         role="dialog"
@@ -100,16 +106,20 @@ export function Dialog({
         <header className="dialog-head">
           <h2 className="dialog-title">{title}</h2>
         </header>
-        <button className="icon-btn is-sm dialog-close" aria-label="Close" title="Close" onClick={onClose}>
-          <X size={14} />
-        </button>
+        {dismissable && (
+          <button className="icon-btn is-sm dialog-close" aria-label="Close" title="Close" onClick={onClose}>
+            <X size={14} />
+          </button>
+        )}
         <div className="dialog-body" ref={bodyRef}>
           {children}
         </div>
         <div className="dialog-actions">
-          <button className="btn btn-small" onClick={onClose}>
-            {cancelLabel ?? "Cancel"}
-          </button>
+          {dismissable && (
+            <button className="btn btn-small" onClick={onClose}>
+              {cancelLabel ?? "Cancel"}
+            </button>
+          )}
           {onSubmit && (
             <button
               ref={submitRef}

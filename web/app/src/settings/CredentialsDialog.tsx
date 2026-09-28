@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Dialog } from "../components/dialogs/Dialog.tsx";
+import { UsernameHint } from "../components/ui/UsernameHint.tsx";
 import type { Credentials } from "./gate.ts";
 
 interface Props {
@@ -39,6 +40,7 @@ export function CredentialsDialog({ title, body, confirmLabel, twoFactor, danger
   return (
     <Dialog title={title} narrow danger={danger ?? false} onClose={onClose} onSubmit={() => void submit()} submitLabel={confirmLabel} submitDisabled={busy}>
       {body && <div className="dialog-text">{body}</div>}
+      <UsernameHint />
       <label className="field">
         <span className="field-label">Password</span>
         <input

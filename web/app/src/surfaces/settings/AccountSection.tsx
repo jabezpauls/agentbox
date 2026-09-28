@@ -1,11 +1,12 @@
 import { useCallback, useState } from "react";
 import { Check, Copy, Download, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { errorText, HttpError } from "../../api/http.ts";
-import { formatAgo } from "../../lib/format.ts";
+import { formatAgo, formatUntil } from "../../lib/format.ts";
 import { Dialog } from "../../components/dialogs/Dialog.tsx";
-import { Section } from "../../components/ui/Page.tsx";
+import { Empty, Section } from "../../components/ui/Page.tsx";
+import { UsernameHint } from "../../components/ui/UsernameHint.tsx";
 import { confirm } from "../../components/ui/prompts.tsx";
-import { usePolling } from "../../shell/activity.tsx";
+import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
 import { signOut, useGateSession } from "../../shell/session.ts";
 import { toast, toastError } from "../../shell/toast.ts";
 import { CredentialsDialog } from "../../settings/CredentialsDialog.tsx";
@@ -24,6 +25,14 @@ function PasswordForm({ twoFactor }: { twoFactor: boolean }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Passwords typed and left are not kept while you are elsewhere.
+  useWhenHidden(() => {
+    setCurrent("");
+    setNext("");
+    setAgain("");
+    setCode("");
+    setError(null);
+  });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +61,7 @@ function PasswordForm({ twoFactor }: { twoFactor: boolean }) {
 
   return (
     <form className="settings-form" onSubmit={(e) => void submit(e)}>
+      <UsernameHint />
       <label className="field">
         <span className="field-label">Current password</span>
         <input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
@@ -93,7 +103,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone(): void }) {
   const [copied, setCopied] = useState(false);
   const text = `agentbox recovery codes for ${location.host}\nEach works once, in place of a 6-digit code.\n\n${codes.join("\n")}\n`;
   return (
-    <Dialog title="Save your recovery codes" onClose={onDone} onSubmit={onDone} submitLabel="I have saved them" cancelLabel="Close">
+    <Dialog title="Save your recovery codes" onClose={onDone} onSubmit={onDone} submitLabel="I have saved them" dismissable={false}>
       <p className="dialog-text">
         Two-factor is on. If you lose your authenticator, each of these signs you in once. Keep them somewhere safe — they are shown only now.
       </p>
@@ -182,6 +192,13 @@ function EnrolDialog({ enrol, onCodes, onClose }: { enrol: Extract<Enrol, { step
 function TwoFactor({ on, refresh }: { on: boolean; refresh(): void }) {
   const [asking, setAsking] = useState<null | "enable" | "disable">(null);
   const [enrol, setEnrol] = useState<Enrol | null>(null);
+  // Leaving Settings closes the password prompt and an unfinished
+  // enrolment. Not the recovery codes: they are shown once and cannot be
+  // shown again, so they wait for "I have saved them".
+  useWhenHidden(() => {
+    setAsking(null);
+    setEnrol((e) => (e?.step === "codes" ? e : null));
+  });
 
   return (
     <div className="settings-card">
@@ -268,8 +285,16 @@ function TwoFactor({ on, refresh }: { on: boolean; refresh(): void }) {
 
 function Sessions() {
   const [rows, setRows] = useState<SessionRow[] | null>(null);
-  const load = useCallback(async () => setRows(await gateApi.sessions()), []);
-  usePolling(load, 30_000);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setRows(await gateApi.sessions());
+      setError(null);
+    } catch (err) {
+      setError(errorText(err, "The box did not answer."));
+    }
+  }, []);
+  const { refresh } = usePolling(load, 30_000);
 
   const end = async (s: SessionRow) => {
     if (s.current) {
@@ -310,26 +335,39 @@ function Sessions() {
         ) : undefined
       }
     >
-      <ul className="settings-list">
-        {(rows ?? []).map((s) => (
-          <li key={s.id} className="settings-row">
-            <div className="settings-row-text">
-              <strong>
-                {describeAgent(s.userAgent)}
-                {s.current && <span className="pill is-current">This browser</span>}
-              </strong>
-              <span>
-                {s.ip} · signed in {formatAgo(s.createdAt)} · last seen {formatAgo(s.lastSeenAt)}
-                {s.remember ? " · remembered" : ""}
-              </span>
-            </div>
-            <button className="btn btn-small btn-ghost" onClick={() => void end(s)}>
-              {s.current ? "Sign out" : "End"}
+      {error && rows === null ? (
+        <Empty
+          compact
+          title="Couldn't read the sessions."
+          sub={error}
+          action={
+            <button className="btn btn-small" onClick={refresh}>
+              Retry
             </button>
-          </li>
-        ))}
-        {rows === null && <li className="skeleton" style={{ height: 56 }} aria-hidden="true" />}
-      </ul>
+          }
+        />
+      ) : (
+        <ul className="settings-list">
+          {(rows ?? []).map((s) => (
+            <li key={s.id} className="settings-row">
+              <div className="settings-row-text">
+                <strong>
+                  {describeAgent(s.userAgent)}
+                  {s.current && <span className="pill is-current">This browser</span>}
+                </strong>
+                <span>
+                  {s.ip} · signed in {formatAgo(s.createdAt)} · last seen {formatAgo(s.lastSeenAt)}
+                  {s.remember ? " · remembered" : ""}
+                </span>
+              </div>
+              <button className="btn btn-small btn-ghost" onClick={() => void end(s)}>
+                {s.current ? "Sign out" : "End"}
+              </button>
+            </li>
+          ))}
+          {rows === null && <li className="skeleton" style={{ height: 56 }} aria-hidden="true" />}
+        </ul>
+      )}
     </Section>
   );
 }
@@ -352,7 +390,13 @@ export function AccountSection() {
               <strong>{session?.user ?? "…"}</strong>
               <span>
                 {location.host}
-                {session?.expiresAt ? ` · this session ends ${session.remember ? "on" : "after 12 hours idle, by"} ${new Date(session.expiresAt).toLocaleString()}` : ""}
+                {session?.expiresAt ? (
+                  <span title={new Date(session.expiresAt).toLocaleString()}>
+                    {session.remember
+                      ? ` · remembered on this browser, signs out ${formatUntil(session.expiresAt)}`
+                      : " · signs out after 12 hours without use"}
+                  </span>
+                ) : null}
               </span>
             </div>
             <button className="btn btn-small" onClick={() => void signOut()}>
