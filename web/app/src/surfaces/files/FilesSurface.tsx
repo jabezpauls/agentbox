@@ -59,7 +59,7 @@ import { FileTree } from "./FileTree.tsx";
 import { isDirLike } from "./icons.tsx";
 import { QuickLook } from "./QuickLook.tsx";
 import { TrashView } from "./TrashView.tsx";
-import { useListing } from "./useListing.ts";
+import { PAGE, useListing } from "./useListing.ts";
 
 function readFlag(key: string, fallback: boolean): boolean {
   try {
@@ -233,7 +233,10 @@ export function FilesSurface() {
   // What is in the folder changes under us (agents write files); read it
   // again every few seconds while Files is showing. A partial folder is left
   // alone — re-reading thousands of entries on a timer is not worth it.
-  usePolling(() => (listing.truncated ? undefined : refresh()), 4000, !trash);
+  // The beat re-reads what is loaded, a page at a time; a folder only partly
+  // loaded, or loaded past a few pages, is left alone (its own actions still
+  // refresh it) rather than re-read in full every few seconds.
+  usePolling(() => (listing.truncated || listing.entries.length > 5 * PAGE ? undefined : refresh()), 4000, !trash);
   usePolling(loadTrash, trash ? 5000 : 30_000);
 
   useEffect(() => {

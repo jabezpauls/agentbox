@@ -22,6 +22,40 @@ export interface Listing {
 const EMPTY: Listing = { dir: "", file: null, entries: [], total: 0, truncated: false, status: "loading", error: null };
 
 /**
+ * Read a folder a page at a time until at least `count` entries are in hand
+ * (or it ends). A refresh must bring back as much as was loaded — asking for
+ * it all in one request would be cut at the API's cap, and a big folder
+ * scrolled past it would lose rows, and the selection in them, on the next
+ * poll. Pages can shift under a folder being written to; an entry seen twice
+ * is kept once.
+ */
+export async function readPages(
+  dir: string,
+  count: number,
+  hidden: boolean,
+  signal?: AbortSignal,
+): Promise<Pick<Listing, "entries" | "total" | "truncated">> {
+  const entries: FileEntry[] = [];
+  const seen = new Set<string>();
+  let offset = 0;
+  let total = 0;
+  let truncated = false;
+  do {
+    const page = await filesApi.list(dir, { hidden, offset, limit: PAGE }, signal);
+    offset += page.entries.length;
+    total = page.total;
+    truncated = page.truncated;
+    for (const e of page.entries) {
+      if (seen.has(e.path)) continue;
+      seen.add(e.path);
+      entries.push(e);
+    }
+    if (page.entries.length === 0) break;
+  } while (truncated && offset < count);
+  return { entries, total, truncated };
+}
+
+/**
  * A folder's contents, for the path the route names. A path that turns out
  * to be a file lists its folder instead and says which file was meant, so a
  * link to a file opens it in quick look. `refresh` re-reads what is loaded
@@ -48,12 +82,12 @@ export function useListing(target: string | null, hidden: boolean) {
         let dir = path;
         let page;
         try {
-          page = await filesApi.list(dir, { hidden, limit: Math.max(PAGE, keep ? current.current.entries.length : 0) }, abort.signal);
+          page = await readPages(dir, keep ? current.current.entries.length : 0, hidden, abort.signal);
         } catch (err) {
           if (!(err instanceof HttpError && err.code === "not-a-directory")) throw err;
           file = path;
           dir = dirname(path);
-          page = await filesApi.list(dir, { hidden, limit: PAGE }, abort.signal);
+          page = await readPages(dir, 0, hidden, abort.signal);
         }
         if (my !== gen.current) return;
         setListing({ dir, file, entries: page.entries, total: page.total, truncated: page.truncated, status: "ready", error: null });
@@ -95,11 +129,16 @@ export function useListing(target: string | null, hidden: boolean) {
   const loadMore = useCallback(async () => {
     const l = current.current;
     if (!l.truncated || l.status !== "ready") return;
+    const my = gen.current;
     try {
       const page = await filesApi.list(l.dir, { hidden, offset: l.entries.length, limit: PAGE });
-      setListing((prev) =>
-        prev.dir === l.dir ? { ...prev, entries: [...prev.entries, ...page.entries], truncated: page.truncated, total: page.total } : prev,
-      );
+      // A refresh or a move since: its rows are the truth, not an append to them.
+      if (my !== gen.current) return;
+      setListing((prev) => {
+        if (prev.dir !== l.dir) return prev;
+        const have = new Set(prev.entries.map((e) => e.path));
+        return { ...prev, entries: [...prev.entries, ...page.entries.filter((e) => !have.has(e.path))], truncated: page.truncated, total: page.total };
+      });
     } catch {
       // The next scroll tries again.
     }
