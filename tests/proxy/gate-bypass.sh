@@ -14,6 +14,12 @@
 #     service worker outside the editor, and no Service-Worker-Allowed but
 #     the editor's own, moved under /vscode/;
 #  3. state-changing and WebSocket requests from another site are refused;
+#     apps: the sandbox registers one on the gate's :7901 (never public, never
+#     one of agentbox's own ports), a private app and the data plane's own
+#     paths reach nothing signed out, the owner reaches the app on the data
+#     plane with a grant scoped to it, a shared app opens for anyone until the
+#     owner stops it, the proxy reaches neither :7901 nor the data plane, and
+#     tunnels take a device token and nothing else;
 #  4. sign-in is rate-limited before bcrypt, keyed on an address the client
 #     cannot choose: the sandbox cannot even reach the proxy; forged headers
 #     from a peer the proxy does not trust change nothing, while a proxy it
@@ -226,12 +232,15 @@ for CADDYFILE in $CADDYFILES; do
         /workbench/ /api/health /preview/8080/ /api/rpc "/s/$TOKEN32/" /a/abc/ /app/3000/; do
         req GET "$p" -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate'
         if [ "$STATUS" = 302 ] && [[ "$(header Location)" == /login\?next=* ]]; then :; else fail "navigation to $p: $STATUS"; fi
+        # An app that is not there answers as a private one does: 404.
+        want=401
+        [[ "$p" == /a/* ]] && want=404
         req GET "$p" -H 'Accept: application/json'
-        [ "$STATUS" = 401 ] || fail "fetch of $p: $STATUS"
+        [ "$STATUS" = "$want" ] || fail "fetch of $p: $STATUS"
         req POST "$p" -H "Origin: $ORIGIN" --data '{}'
-        [ "$STATUS" = 401 ] || fail "POST $p: $STATUS"
+        [ "$STATUS" = "$want" ] || fail "POST $p: $STATUS"
     done
-    pass "every route sends a page load to /login and anything else a 401"
+    pass "every route sends a page load to /login and anything else a 401 (an app, a 404)"
 
     # Path tricks: forms that one parser normalises and another does not. The
     # gate refuses them (400) before routing; whatever Caddy did first, none may
@@ -447,6 +456,134 @@ for CADDYFILE in $CADDYFILES; do
         pass "the editor channel is not served from outside, signed in or not"
     else
         fail "a request for the editor channel reached the sandbox"
+    fi
+
+    # --- apps: /a/<id>/, the data plane, and tunnels ------------------------------
+    # The sandbox registers an app on the gate's own listener for it (:7901),
+    # as agentbox-preview does through the bridge; it is private, and only the
+    # owner can share it. The data plane (:7801) is reached through the gate
+    # alone, under the app policy.
+    sandbox_call() { docker exec "$ECHO" node /harness.mjs call "$@"; }
+    created="$(sandbox_call POST http://gate:7901/apps '{"port":5173,"name":"bypass"}')"
+    APP="$(printf '%s' "$created" | sed -n 's/.*"id":"\([a-z2-7]\{26\}\)".*/\1/p')"
+    if [[ "$created" == 201\ * ]] && [ -n "$APP" ] && [[ "$created" == *'"mode":"private"'* ]]; then
+        pass "the sandbox registers an app on :7901, and it is private"
+    else
+        fail "registering an app from the sandbox: $created"
+    fi
+    ok=1
+    for p in 8080 7681 7682 7683 7800 7801 7900 7901; do
+        r="$(sandbox_call POST http://gate:7901/apps "{\"port\":$p}")"
+        [[ "$r" == 400\ *infrastructure_port* ]] || { fail "port $p was accepted as an app: $r"; ok=0; }
+    done
+    [ "$ok" = 0 ] || pass "agentbox's own ports are refused as apps"
+    r="$(sandbox_call PATCH "http://gate:7901/apps/$APP" '{"visibility":{"mode":"link"}}')"
+    [[ "$r" == 400\ * ]] || fail "the sandbox changed an app's visibility: $r"
+    r="$(sandbox_call PUT "http://gate:7901/apps/$APP/visibility" '{"mode":"link"}')"
+    [[ "$r" == 404\ * ]] || fail "the sandbox side has a visibility route: $r"
+    r="$(sandbox_call PUT "http://gate:7900/_gate/apps/$APP/visibility" '{"mode":"link"}')"
+    [[ "$r" == 401\ * || "$r" == 403\ * ]] || fail "the sandbox shared an app through the public side: $r"
+    pass "the sandbox cannot make an app public, on either side"
+    # The proxy shares a network with the gate, and reaches neither the
+    # sandbox's side of it nor the data plane.
+    r="$(docker exec "$CADDY" wget -q -O - -T 3 "http://gate:7901/apps" 2>&1 || true)"
+    { [[ "$r" == *403* ]] && [[ "$r" != *'"id"'* ]]; } || fail "the proxy on the sandbox's side of the gate: $r"
+    r="$(docker exec "$CADDY" wget -q -O - -T 3 "http://code:7801/app/5173/" 2>&1 || true)"
+    [[ "$r" != *data-plane* ]] || fail "the proxy reached the data plane: $r"
+    pass "from the proxy's network, the app API refuses and the data plane is not there"
+
+    before="$(hits)"
+    for p in "/a/$APP/" "/a/$APP/src/main.tsx" "/a/$APP/__agentbox/shim.js" "/a/$APP/..%2f..%2fvscode/" \
+        "/a/$APP/%2e%2e/%2e%2e/terminal/" "/a/$APP/../../api/health" "/a/abcdefghijklmnopqrstuvwxyz/" "/app/5173/" "/tunnel/tcp/22"; do
+        req GET "$p" -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate'
+        if [ "$STATUS" = 302 ] && [[ "$(header Location)" == /login\?next=* ]]; then :; else fail "navigation to $p: $STATUS"; fi
+        req GET "$p" -H 'Accept: application/json'
+        case "$STATUS" in 401|404) ;; *) fail "fetch of $p: $STATUS" ;; esac
+        req POST "$p" -H 'Origin: null' --data '{}'
+        case "$STATUS" in 401|404) ;; *) fail "POST $p: $STATUS" ;; esac
+    done
+    for h in "Cookie: __Secure-agentbox-app=v1.$APP.s-00.zzzzzz.forged" "Cookie: __Host-agentbox=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "Authorization: Bearer abx_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "X-Agentbox-Public: 1"; do
+        req GET "/a/$APP/x" -H "$h" -H 'Accept: application/json'
+        [ "$STATUS" = 404 ] || fail "header trick '$h' on a private app -> $STATUS"
+    done
+    ws "/a/$APP/" -H 'Origin: null'
+    [ "$STATUS" = 404 ] || fail "a WebSocket to a private app -> $STATUS"
+    ws "/_gate/tunnel?target=tcp:5173" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 401 ] || fail "a tunnel with no credential -> $STATUS"
+    ws "/_gate/tunnel?target=tcp:5173" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 401 ] || fail "a tunnel on the session cookie -> $STATUS"
+    req GET "/a/$APP/sw.js" -H "Cookie: $SESSION" -H 'Service-Worker: script'
+    [ "$STATUS" = 403 ] || fail "an app's service worker script -> $STATUS"
+    if [ "$(hits)" = "$before" ]; then
+        pass "a private app, the data plane's own paths and a tunnel without a device token reach nothing"
+    else
+        fail "a request reached the sandbox:"
+        docker logs "$ECHO" 2>/dev/null | grep '^HIT' | tail -n "$(( $(hits) - before ))" >&2
+    fi
+
+    # The owner's page load reaches the app on the data plane, at its port, with
+    # no front-door credential, and mints a grant scoped to the app alone.
+    req GET "/a/$APP/x?y=1" -H "Cookie: theme=dark; $SESSION; __Secure-agentbox-app=junk" -H "Authorization: Basic $B64" \
+        -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate'
+    if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"port":7801,'* ]] && [[ "$BODY" == *'"url":"/app/5173/x?y=1"'* ]]; then
+        case "$BODY" in
+            *agentbox-app*|*__Host-agentbox*|*'"authorization"'*) fail "a credential reached the app: $BODY" ;;
+            *) pass "the owner reaches the app on the data plane, credentials stripped" ;;
+        esac
+    else
+        fail "the owner's request for the app: $STATUS $BODY"
+    fi
+    [[ "$BODY" == *'"cookie":"theme=dark"'* ]] || fail "the app's own cookies did not arrive: $BODY"
+    [[ "$(header Content-Security-Policy)" == sandbox* ]] || fail "no sandbox on the app's answer: $(header Content-Security-Policy)"
+    grant="$(grep -i '^set-cookie: __Secure-agentbox-app=' "$HEADERS" | head -n1 | tr -d '\r')"
+    for attr in "Path=/a/$APP/" HttpOnly Secure 'SameSite=None'; do
+        [[ "$grant" == *"$attr"* ]] || fail "the app grant lacks $attr: $grant"
+    done
+    GRANT="$(printf '%s' "$grant" | sed 's/^[^:]*: //; s/;.*//')"
+    req GET "/a/$APP/y" -H "Cookie: $GRANT" -H 'Origin: null'
+    { [ "$STATUS" = 200 ] && [ "$(header Access-Control-Allow-Origin)" = null ]; } || fail "the grant from the app's own page: $STATUS"
+    req GET /api/health -H "Cookie: $GRANT"
+    [ "$STATUS" = 401 ] || fail "an app grant opened the control plane: $STATUS"
+    ws "/a/$APP/?token=x" -H "Cookie: $GRANT" -H 'Origin: null'
+    { [ "$STATUS" = 101 ] && [[ "$ECHOED" == *'"url":"/app/5173/?token=x"'* ]]; } || fail "the app's WebSocket: $STATUS $ECHOED"
+    ws "/a/$APP/" -H "Cookie: $GRANT" -H 'Origin: https://evil.example'
+    [ "$STATUS" = 403 ] || fail "an app's WebSocket from another site -> $STATUS"
+
+    # Shared by the owner: anyone reaches it, and only it; stopped, nobody.
+    req PUT "/_gate/apps/$APP/visibility" -H "Cookie: $SESSION" -H "Origin: $ORIGIN" -H 'Content-Type: application/json' \
+        --data '{"mode":"link","expiresIn":3600}'
+    [ "$STATUS" = 200 ] || fail "sharing the app: $STATUS $BODY"
+    req GET "/a/$APP/public"
+    { [ "$STATUS" = 200 ] && [[ "$BODY" == *'"url":"/app/5173/public"'* ]]; } || fail "a shared app, signed out: $STATUS $BODY"
+    before="$(hits)"
+    for p in "/a/$APP/../../api/health" "/a/$APP/..%2f..%2fapi/health"; do
+        req GET "$p" -H 'Accept: application/json'
+        # Whatever Caddy made of it, it may reach this app and nothing else.
+        case "$BODY" in *'"port":7800'*|*'"port":8080'*|*'"port":768'*) fail "a shared app's path trick reached a service: $p -> $BODY" ;; esac
+    done
+    pass "a shared app opens for anyone, and its path leads nowhere else"
+    req DELETE "/_gate/apps/$APP/visibility" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 200 ] || fail "stopping sharing: $STATUS"
+    req GET "/a/$APP/public" -H 'Accept: application/json'
+    [ "$STATUS" = 404 ] || fail "a stopped share still opens: $STATUS"
+
+    # Tunnels: a device token only, to any port — agentbox's own included —
+    # and to herdr, on the data plane, with the token left behind.
+    if [ -n "$TOKEN" ]; then
+        ok=1
+        for t in tcp:5173 tcp:8080 herdr; do
+            want="/tunnel/tcp/${t#tcp:}"
+            [ "$t" = herdr ] && want=/tunnel/herdr
+            ws "/_gate/tunnel?target=$t" -H "Authorization: Bearer $TOKEN"
+            if [ "$STATUS" = 101 ] && [[ "$ECHOED" == *'"port":7801,'* ]] && [[ "$ECHOED" == *"\"url\":\"$want\""* ]] \
+                && [[ "$ECHOED" != *'"authorization"'* ]]; then :; else fail "tunnel to $t: $STATUS $ECHOED"; ok=0; fi
+        done
+        for t in "tcp:0" "tcp:99999" "unix:/run/docker.sock" "tcp:5173/../7800"; do
+            ws "/_gate/tunnel?target=$t" -H "Authorization: Bearer $TOKEN"
+            [ "$STATUS" = 400 ] || { fail "tunnel target $t -> $STATUS"; ok=0; }
+        done
+        [ "$ok" = 0 ] || pass "a device token opens tunnels to ports and herdr, and only well-formed ones"
     fi
 
     # --- service workers ----------------------------------------------------------

@@ -13,6 +13,8 @@
 //     parameter), which must never reach a browser as that: the gate drops
 //     it, or for the editor turns exactly `/` into /vscode/.
 //
+//   node harness.mjs call <method> <url> [json]    (see call() below)
+//
 //   node harness.mjs signins <base-url> <n> <password> [Header=value ...]
 //     A client: n sign-in attempts at <base-url>, wrong passwords and then the
 //     right one last; prints the statuses. `{i}` in a header value becomes the
@@ -83,10 +85,30 @@ async function signins(base, n, password, headerArgs) {
   console.log(codes.join(" "));
 }
 
+// node harness.mjs call <method> <url> [json]
+//   One request, as a process in the sandbox makes it (to the gate's app API,
+//   say); prints the status and the body on one line, or "unreachable".
+async function call(method, url, body) {
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: body ? { "content-type": "application/json" } : {},
+      body: body || undefined,
+      signal: AbortSignal.timeout(5_000),
+    });
+    console.log(`${res.status} ${(await res.text()).replace(/\n/g, " ")}`);
+  } catch {
+    console.log("unreachable");
+  }
+}
+
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "signins") {
   const [base, n, password, ...headers] = rest;
   await signins(base, Number(n), password, headers);
+} else if (mode === "call") {
+  const [method, url, body] = rest;
+  await call(method, url, body);
 } else {
   serve();
 }
