@@ -1,29 +1,16 @@
 import type { Browser, Cookie, Page } from "@playwright/test";
-import { signIn } from "./gate.ts";
+import { clientIp, signIn } from "./gate.ts";
 
 /**
- * Sign in once for a whole spec file and hand the session to every test.
- * The gate allows thirty sign-in attempts a minute across all clients, and a
- * suite that signed in for every test would spend them; the journeys that
- * are about signing in still do it for real.
+ * Sign in once for a whole spec file and hand the session to every test, as a
+ * client address of its own. Signing in costs a bcrypt check and a share of
+ * the gate's budget, and most specs are not about signing in; the journeys
+ * that are still do it for real.
  */
-export async function sharedSession(browser: Browser, clientIp: string): Promise<Cookie[]> {
-  const context = await browser.newContext({ extraHTTPHeaders: { "x-agentbox-client-ip": clientIp } });
+export async function sharedSession(browser: Browser): Promise<Cookie[]> {
+  const context = await browser.newContext({ extraHTTPHeaders: { "x-agentbox-client-ip": clientIp() } });
   const page = await context.newPage();
-  // The suite spends most of the gate's sign-in budget for all clients (some
-  // specs must sign in for real); a sign-in the gate turns away as busy waits
-  // out the pause it names and goes again.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await signIn(page);
-      break;
-    } catch (err) {
-      const said = (await page.locator("[role=alert], .login-error").first().textContent().catch(() => "")) ?? "";
-      const wait = Number(/(\d+) seconds?/.exec(said)?.[1] ?? 0);
-      if (attempt >= 3 || !wait) throw err;
-      await page.waitForTimeout((wait + 1) * 1000);
-    }
-  }
+  await signIn(page);
   const cookies = await context.cookies();
   await context.close();
   return cookies;

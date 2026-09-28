@@ -18,7 +18,7 @@ let project = "";
 let cookies: Cookie[] = [];
 
 test.beforeAll(async ({ browser }) => {
-  cookies = await sharedSession(browser, "203.0.113.140");
+  cookies = await sharedSession(browser);
 });
 
 async function workspaceRoot(page: Page): Promise<string> {

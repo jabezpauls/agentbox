@@ -2,9 +2,9 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { expect, test, type Cookie, type Page } from "@playwright/test";
-import { GATE, signIn } from "./gate.ts";
+import { GATE, clientIp, signIn } from "./gate.ts";
 import { resume, sharedSession } from "./session.ts";
-import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
+import { closeAllWorkspaces, paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
 
 /**
  * The app as one app: J1 (arrive on Home), J5 (move between surfaces and
@@ -15,14 +15,12 @@ import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./
 
 test.describe.configure({ mode: "serial" });
 
-let client = 0;
 let cookies: Cookie[] = [];
 test.beforeAll(async ({ browser }) => {
-  cookies = await sharedSession(browser, "203.0.113.170");
+  cookies = await sharedSession(browser);
 });
 test.beforeEach(async ({ page }) => {
-  client += 1;
-  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${170 + client}` });
+  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": clientIp() });
 });
 
 async function workspaceRoot(page: Page): Promise<string> {
@@ -162,11 +160,13 @@ test("J5: moving between surfaces reloads nothing — the editor keeps its text,
   await page.evaluate(() => ((window as unknown as { __sameDocument: boolean }).__sameDocument = true));
 
   await test.step("a terminal is running in the Workbench", async () => {
-    if ((await paneIds(page)).length === 0) {
-      await runFromPalette(page, "New workspace");
-      await page.getByRole("button", { name: /use this folder/i }).click();
-    }
-    await expect.poll(async () => (await paneIds(page)).length).toBeGreaterThan(0);
+    // A workspace of its own, from nothing open: panes an earlier test (or
+    // run) left behind are not this test's to type into.
+    await closeAllWorkspaces(page);
+    await expect.poll(async () => (await paneIds(page)).length).toBe(0);
+    await runFromPalette(page, "New workspace");
+    await page.getByRole("button", { name: /use this folder/i }).click();
+    await expect.poll(async () => (await paneIds(page)).length).toBe(1);
     await runCommand(page, "echo J5_$((6*7))");
     await waitForOutput(page, "J5_42");
   });
@@ -222,16 +222,7 @@ test("J5: moving between surfaces reloads nothing — the editor keeps its text,
   });
 
   // Leave herdr as it was found: the Workbench spec starts from nothing open.
-  await page.evaluate(async () => {
-    const session = (await (await fetch("/api/session")).json()) as { workspaces: { workspace_id: string }[] };
-    for (const w of session.workspaces) {
-      await fetch("/api/rpc", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ method: "workspace.close", params: { workspace_id: w.workspace_id } }),
-      });
-    }
-  });
+  await closeAllWorkspaces(page);
 });
 
 test("every route is a deep link that survives a reload, and back and forward", async ({ page }) => {

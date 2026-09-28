@@ -11,7 +11,7 @@ import { resume, sharedSession } from "./session.ts";
 
 let cookies: Cookie[] = [];
 test.beforeAll(async ({ browser }) => {
-  cookies = await sharedSession(browser, "203.0.113.150");
+  cookies = await sharedSession(browser);
 });
 
 const badGateway = (route: Route) => route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });

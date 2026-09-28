@@ -6,8 +6,28 @@ export const USER = process.env.E2E_USER ?? "e2e";
 export const PASSWORD = process.env.E2E_PASSWORD ?? "e2e-password-1";
 export const GATE = `http://127.0.0.1:${process.env.GATE_PORT ?? 7900}`;
 
-/** Sign in through the real page, and land where `next` points. */
+// Where the next client address starts: random, so a suite repeated on one
+// stack (`--repeat-each`, or a worker restarted after a failure) never meets
+// the failures, pauses or lockouts an earlier run left on an address.
+let nextClient = Math.floor(Math.random() * 0x10000);
+
+/**
+ * An address no other test in this stack's life has used, for the header the
+ * harness trusts in place of a proxy's (`x-agentbox-client-ip`): each test is
+ * its own client, with its own sign-in budget. From 198.18.0.0/15, a range
+ * reserved for testing.
+ */
+export function clientIp(): string {
+  const n = nextClient++ % 0x20000;
+  return `198.${18 + (n >> 16)}.${(n >> 8) & 0xff}.${n & 0xff}`;
+}
+
+/**
+ * Sign in through the real page, and land where `next` points — as a client
+ * address of its own, so no earlier test's attempts count against it.
+ */
 export async function signIn(page: Page, next = "/"): Promise<void> {
+  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": clientIp() });
   await page.goto(`${GATE}/login?next=${encodeURIComponent(next)}`);
   await page.getByLabel("Username").fill(USER);
   await page.getByLabel("Password").fill(PASSWORD);

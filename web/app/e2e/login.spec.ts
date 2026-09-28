@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { GATE, PASSWORD, USER, gateApi, signIn, totp } from "./gate.ts";
+import { GATE, PASSWORD, USER, clientIp, gateApi, signIn, totp } from "./gate.ts";
 
 // The gate trusts the loopback address as its proxy in this harness, so a test
 // can be its own client by sending the header the proxy would set — which keeps
@@ -27,7 +27,7 @@ test("a page load without a session lands on the sign-in page", async ({ page })
 });
 
 test("a wrong password is refused calmly, without saying which half was wrong", async ({ page }) => {
-  await asClient(page, "203.0.113.11");
+  await asClient(page, clientIp());
   await page.goto("/workbench");
   await submit(page, "not-the-password");
   await expect(message(page)).toHaveText("That username and password don’t match. Check both and try again.");
@@ -38,7 +38,7 @@ test("a wrong password is refused calmly, without saying which half was wrong", 
 });
 
 test("repeated failures pause sign-in, and say for how long — even for the right password", async ({ page }) => {
-  await asClient(page, "203.0.113.10");
+  await asClient(page, clientIp());
   await page.goto(`${GATE}/login`);
   for (let i = 0; i < 5; i++) {
     await submit(page, `wrong-${i}`);
@@ -50,7 +50,6 @@ test("repeated failures pause sign-in, and say for how long — even for the rig
 });
 
 test("with two-factor on, sign-in asks for the code and accepts it", async ({ page }) => {
-  await asClient(page, "203.0.113.12");
   await signIn(page);
   // Enrolling is a sensitive change: it takes the password again, in the request.
   const setup = await gateApi(page, "POST", "/_gate/totp/setup", { password: PASSWORD });
@@ -65,7 +64,7 @@ test("with two-factor on, sign-in asks for the code and accepts it", async ({ pa
     // Signing in and enrolling spent three of this address's five password
     // checks a minute (setup and confirm each take the password); the sign-in
     // below takes three more, so it comes from an address of its own.
-    await asClient(page, "203.0.113.15");
+    await asClient(page, clientIp());
     await page.goto("/workbench");
     await expect(page).toHaveURL(/\/login\?next=/);
 
@@ -89,7 +88,7 @@ test("with two-factor on, sign-in asks for the code and accepts it", async ({ pa
     // another recovery code gets back in first. Run from /login, which the
     // app's session guard does not watch, as a client of its own: the password
     // checks above have spent this test's budget of five a minute.
-    await asClient(page, "203.0.113.22");
+    await asClient(page, clientIp());
     await page.goto(`${GATE}/login`);
     let off = await gateApi(page, "DELETE", "/_gate/totp", { password: PASSWORD, code: recoveryCodes[1] });
     if (off.status !== 204) {
@@ -119,7 +118,7 @@ test("signing out ends the session, and the open app goes back to sign in", asyn
 });
 
 test("with JavaScript off, signing in is a plain form post that lands where it was going", async ({ browser }) => {
-  const context = await browser.newContext({ javaScriptEnabled: false, extraHTTPHeaders: { "x-agentbox-client-ip": "203.0.113.13" } });
+  const context = await browser.newContext({ javaScriptEnabled: false, extraHTTPHeaders: { "x-agentbox-client-ip": clientIp() } });
   const page = await context.newPage();
   try {
     await page.goto("/workbench");
@@ -140,7 +139,7 @@ test("with JavaScript off, signing in is a plain form post that lands where it w
 });
 
 test("approving a CLI login on /settings/devices asks for the password, then hands the CLI its token", async ({ page, request }) => {
-  await asClient(page, "203.0.113.14");
+  await asClient(page, clientIp());
   // The CLI's side: start a login (no session, no Origin — as the CLI sends it).
   const started = await request.post(`${GATE}/_gate/device/start`, { data: { name: "e2e laptop" } });
   expect(started.status()).toBe(200);

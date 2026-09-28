@@ -135,7 +135,9 @@ fs.mkdirSync(gateDir, { recursive: true });
 const { hashPassword } = await import(path.resolve(appDir, "../gate/dist/password.js"));
 // A cheap cost for the seed: every sign-in in the suite verifies against it.
 const seed = await hashPassword(process.env.E2E_PASSWORD ?? "e2e-password-1", 4);
-const gate = spawn(process.execPath, [gateEntry], {
+// Through the harness entry, which raises only the all-addresses sign-in
+// ceiling (see e2e/gate-harness.mjs).
+const gate = spawn(process.execPath, [path.join(here, "gate-harness.mjs")], {
   env: {
     ...process.env,
     GATE_HOST: "127.0.0.1",

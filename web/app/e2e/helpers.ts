@@ -49,6 +49,23 @@ export async function runCommand(page: Page, command: string): Promise<void> {
   await page.keyboard.press("Enter");
 }
 
+/**
+ * Close every herdr workspace, so a test that starts from "nothing open"
+ * does, whatever an earlier test (or an earlier run on this stack) left.
+ */
+export async function closeAllWorkspaces(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const session = (await (await fetch("/api/session")).json()) as { workspaces: { workspace_id: string }[] };
+    for (const w of session.workspaces) {
+      await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: "workspace.close", params: { workspace_id: w.workspace_id } }),
+      });
+    }
+  });
+}
+
 /** Open the command palette and run the entry whose label matches. */
 export async function runFromPalette(page: Page, label: string): Promise<void> {
   // The chord: Ctrl+K is left to a terminal being typed into.

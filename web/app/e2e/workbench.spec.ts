@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { signIn } from "./gate.ts";
-import { paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
+import { clientIp, signIn } from "./gate.ts";
+import { closeAllWorkspaces, paneIds, runCommand, runFromPalette, termText, waitForOutput } from "./helpers.ts";
 
 // The bridge's own port: the in-sandbox CLI calls it directly, never through
 // the gate. The browser only ever sees the gate.
@@ -58,15 +58,15 @@ test.describe.configure({ mode: "serial" });
 // test signs in as a client of its own (the harness trusts loopback as the
 // proxy, see e2e/gate.ts): the gate allows five password checks a minute per
 // address, and the whole suite signs in more often than that.
-let client = 0;
 test.beforeEach(async ({ page }) => {
-  client += 1;
-  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": `203.0.113.${100 + client}` });
+  await page.context().setExtraHTTPHeaders({ "x-agentbox-client-ip": clientIp() });
   await signIn(page);
 });
 
 test("the Workbench drives herdr end to end", async ({ page }) => {
   await page.goto("/workbench");
+  // Nothing open, whatever an earlier test or run on this stack left.
+  await closeAllWorkspaces(page);
 
   await test.step("it starts empty and connected", async () => {
     await expect(page.getByText("Nothing open.")).toBeVisible();

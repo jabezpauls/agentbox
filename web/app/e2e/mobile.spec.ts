@@ -13,7 +13,7 @@ test.describe.configure({ mode: "serial" });
 
 let cookies: Cookie[] = [];
 test.beforeAll(async ({ browser }) => {
-  cookies = await sharedSession(browser, "203.0.113.200");
+  cookies = await sharedSession(browser);
 });
 test.beforeEach(async ({ page }) => {
   await resume(page, cookies);
