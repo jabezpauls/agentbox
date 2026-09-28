@@ -39,7 +39,7 @@ test.beforeAll(async ({}, testInfo) => {
 
 test.afterAll(() => stopServers());
 
-async function tinyApp(page: Page, mode: "storage" | "login", name: string): Promise<{ id: string; port: number }> {
+async function tinyApp(page: Page, mode: "storage" | "login" | "sprite", name: string): Promise<{ id: string; port: number }> {
   const port = await freePort();
   startServer(process.execPath, [TINY_APPS, mode], dir, { PORT: String(port) });
   await waitPort(port);
@@ -53,6 +53,19 @@ test("an app using localStorage and document.cookie runs, in the panel and full 
   await expect(previewFrame(page).locator("#result")).toHaveText("storage ok v w c=1");
   await page.goto(`${BASE}/a/${await appId(page, `storage-${tag}`)}/`);
   await expect(page.locator("#result")).toHaveText("storage ok v w c=1");
+});
+
+test("icons from an SVG sprite in another file show, in the panel and full screen", async ({ page }) => {
+  // An opaque page may not <use> a sprite from another file (to it, another
+  // origin); the shim puts the sprite in the page instead.
+  const drawn = (scope: { locator: Page["locator"] }) =>
+    Promise.all(["#static", "#scripted"].map((sel) => scope.locator(sel).evaluate((el) => (el as SVGGraphicsElement).getBBox().width)));
+  await signIn(page);
+  await tinyApp(page, "sprite", `sprite-${tag}`);
+  await pickApp(page, `sprite-${tag}`);
+  await expect.poll(() => drawn(previewFrame(page))).toEqual([16, 16]);
+  await page.goto(`${BASE}/a/${await appId(page, `sprite-${tag}`)}/`);
+  await expect.poll(() => drawn(page)).toEqual([16, 16]);
 });
 
 async function appId(page: Page, name: string): Promise<string> {

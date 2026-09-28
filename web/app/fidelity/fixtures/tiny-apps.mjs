@@ -5,6 +5,9 @@
 //   node tiny-apps.mjs storage   a page that uses localStorage and document.cookie
 //   node tiny-apps.mjs login     an app with its own cookie sign-in and a live
 //                                event stream for signed-in visitors
+//   node tiny-apps.mjs sprite    icons from an SVG sprite in another file
+//                                (<use href="/icons.svg#…">), as create-vite's
+//                                React template has them
 import { randomBytes } from "node:crypto";
 import http from "node:http";
 
@@ -25,6 +28,24 @@ const STORAGE = `<!doctype html>
     document.getElementById("result").textContent = "storage crashed: " + e.name;
   }
 </script></body></html>`;
+
+const SPRITE = `<!doctype html>
+<html><head><meta charset="utf-8"><title>sprite</title></head>
+<body>
+<svg width="20" height="20"><use id="static" href="/icons.svg#dot"></use></svg>
+<svg width="20" height="20" id="later"></svg>
+<script>
+  // As React renders it: the element made in script, its href set as an attribute.
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "/icons.svg#square");
+  use.id = "scripted";
+  document.getElementById("later").appendChild(use);
+</script></body></html>`;
+
+const ICONS = `<svg xmlns="http://www.w3.org/2000/svg">
+<symbol id="dot" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8"/></symbol>
+<symbol id="square" viewBox="0 0 20 20"><rect width="16" height="16" x="2" y="2"/></symbol>
+</svg>`;
 
 const sessions = new Set();
 
@@ -56,6 +77,11 @@ const server = http.createServer((req, res) => {
   };
   const url = new URL(req.url ?? "/", "http://x");
   if (mode === "storage") return html(STORAGE);
+  if (mode === "sprite") {
+    if (url.pathname !== "/icons.svg") return html(SPRITE);
+    res.writeHead(200, { "content-type": "image/svg+xml" });
+    return res.end(ICONS);
+  }
 
   if (url.pathname === "/login" && req.method === "POST") {
     req.resume();

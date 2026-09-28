@@ -486,16 +486,55 @@ export function shimSource(prefix: string): string {
     ["HTMLButtonElement", "formAction"],
   ].forEach(function (p) { patch(p[0], p[1]); });
 
+  // <use href="/icons.svg#x">: to an opaque page a sprite in another file is
+  // another origin, and browsers refuse to draw it. Fetch each sprite once,
+  // put its contents in the page, and point the <use> at the copy.
+  var setAttr = Element.prototype.setAttribute;
+  var sprites = {};
+  function useSprite(el, name, value) {
+    attempt(function () {
+      if (typeof SVGUseElement === "undefined" || !(el instanceof SVGUseElement)) return;
+      var v = String(value), hash = v.indexOf("#");
+      if (hash <= 0 || !isApp(v.slice(0, hash))) return;
+      var file = new URL(v.slice(0, hash), location.href).href, id = v.slice(hash + 1);
+      if (!sprites[file]) {
+        sprites[file] = window.fetch(file, { credentials: "include" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (text) {
+          var root = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
+          if (!root || root.namespaceURI !== "http://www.w3.org/2000/svg") return;
+          var holder = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          setAttr.call(holder, "aria-hidden", "true");
+          setAttr.call(holder, "style", "position:absolute;width:0;height:0;overflow:hidden");
+          Array.prototype.forEach.call(root.childNodes, function (n) { holder.appendChild(document.importNode(n, true)); });
+          (document.body || document.documentElement).appendChild(holder);
+        });
+      }
+      sprites[file].then(function () {
+        if (el.getAttribute(name) === v && document.getElementById(id)) setAttr.call(el, name, "#" + id);
+      }, function () {});
+    });
+  }
+  attempt(function () {
+    function scan() {
+      var uses = document.getElementsByTagNameNS("http://www.w3.org/2000/svg", "use");
+      for (var i = 0; i < uses.length; i++) {
+        ["href", "xlink:href"].forEach(function (a) { if (uses[i].getAttribute(a)) useSprite(uses[i], a, uses[i].getAttribute(a)); });
+      }
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scan);
+    else scan();
+  });
+
   attempt(function () {
     var names = { src: 1, href: 1, action: 1, formaction: 1, poster: 1, srcset: 2, imagesrcset: 2 };
-    var set = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (name, value) {
       var n = String(name).toLowerCase();
       if (names[n] && (this instanceof HTMLElement || (typeof SVGElement !== "undefined" && this instanceof SVGElement))) {
         value = names[n] === 2 ? fixSrcset(value) : fix(String(value));
         credentials(this, value);
       }
-      return set.call(this, name, value);
+      var result = setAttr.call(this, name, value);
+      if (n === "href" || n === "xlink:href") useSprite(this, name, value);
+      return result;
     };
   });
 
