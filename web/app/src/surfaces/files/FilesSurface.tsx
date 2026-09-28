@@ -38,7 +38,7 @@ import { useSystem } from "../../system/model.ts";
 import { formatBytes, plural } from "../../lib/format.ts";
 import { Menu, type MenuAnchor, type MenuEntry } from "../../components/ui/Menu.tsx";
 import { Empty } from "../../components/ui/Page.tsx";
-import { focusOnArrival, useOnActivate, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
+import { focusOnArrival, openModal, useOnActivate, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { useNarrow } from "../../shell/Dock.tsx";
@@ -281,7 +281,7 @@ export function FilesSurface() {
     navigate({ surface: "files", path: dir }, { replace: true });
     requestAnimationFrame(() => {
       // Back to the list — unless something opened over it meanwhile.
-      if (!document.querySelector('[aria-modal="true"]')) grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true });
+      if (!openModal()) grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true });
     });
   };
 

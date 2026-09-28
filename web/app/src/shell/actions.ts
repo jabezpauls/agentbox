@@ -1,6 +1,7 @@
 import { useApp } from "../store/app.ts";
 import { chordAction, GoSequence, isBareKey, isMacPlatform, isPaletteKey, type KeyLike, type ShellAction } from "./keys.ts";
 import { useRouter } from "./router.ts";
+import { openModal } from "./activity.tsx";
 
 /** Open or close the dock on the current surface. */
 export function toggleDock(open?: boolean): void {
@@ -80,7 +81,7 @@ export function handleShellKey(e: KeyboardEvent): boolean {
   }
   if (isTextEntry(e.target) || !isBareKey(e)) return false;
   const { ui } = useApp.getState();
-  if (ui.palette || ui.dialog || document.querySelector('[aria-modal="true"]')) return false;
+  if (ui.palette || ui.dialog || openModal()) return false;
   if (e.key === "?") {
     e.preventDefault();
     openKeymap();

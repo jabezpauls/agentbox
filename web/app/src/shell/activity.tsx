@@ -84,6 +84,15 @@ export function useOnActivate(onActivate: () => void): void {
 }
 
 /**
+ * A modal that is open where you can see it. One left open inside a surface
+ * you moved away from is inert and hidden, and does not count.
+ */
+export function openModal(): Element | null {
+  if (typeof document === "undefined") return null;
+  return Array.from(document.querySelectorAll('[aria-modal="true"]')).find((el) => !el.closest("[inert]")) ?? null;
+}
+
+/**
  * Give a surface that just came into view the keyboard — but only if nothing
  * else has taken it meanwhile: a palette or dialog opened on the way, or a
  * field the user is already in. Focus left on the rail, on nothing, or inside
@@ -91,7 +100,7 @@ export function useOnActivate(onActivate: () => void): void {
  */
 export function focusOnArrival(focus: () => void): void {
   requestAnimationFrame(() => {
-    if (document.querySelector('[aria-modal="true"]')) return;
+    if (openModal()) return;
     const at = document.activeElement as HTMLElement | null;
     if (!at || at === document.body || at.closest(".rail, .bottombar, [inert]")) focus();
   });
