@@ -164,6 +164,8 @@ export interface AppState {
   portsReadable: boolean;
   /** Every app, with its live state; null until first loaded. */
   apps: AppView[] | null;
+  /** Why the apps could not be read last time, in words; null when they were. */
+  appsError: string | null;
   health: HealthInfo | null;
   ui: UiState;
   seenDone: Record<string, number>;
@@ -272,6 +274,7 @@ export const useApp = create<AppState>((set, get) => ({
   ports: [],
   portsReadable: true,
   apps: null,
+  appsError: null,
   health: null,
   ui: initialUi,
   seenDone: readSeen(),
@@ -380,8 +383,16 @@ export const useApp = create<AppState>((set, get) => ({
 
   async refreshApps() {
     try {
-      set({ apps: await listApps() });
-    } catch {
+      set({ apps: await listApps(), appsError: null });
+    } catch (err) {
+      set({
+        appsError:
+          err instanceof RpcError
+            ? err.status >= 500
+              ? "The box is not answering right now — it may be restarting."
+              : "The box turned the request down."
+            : "The box could not be reached. Check the connection.",
+      });
       // The list stays as it was; the panel says so if it never loaded.
       if (get().apps === null) set({ apps: [] });
     }

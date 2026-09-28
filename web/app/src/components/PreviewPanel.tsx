@@ -359,7 +359,7 @@ interface SharePanelProps {
 }
 
 /** Who may open the app: private, anyone with the link, or the link and a passcode — until when. */
-function SharePanel({ app, copied, onCopy, onChanged, onClose }: SharePanelProps) {
+export function SharePanel({ app, copied, onCopy, onChanged, onClose }: SharePanelProps) {
   const reportRpcError = useApp((s) => s.reportRpcError);
   const [mode, setMode] = useState<AppVisibilityMode>(app.visibility.mode === "private" ? "link" : app.visibility.mode);
   const [expiry, setExpiry] = useState(DEFAULT_EXPIRY);

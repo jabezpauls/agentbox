@@ -54,7 +54,7 @@ async function makeApp(port: number, suggested?: string | null): Promise<void> {
     const app = await appsApi.create({ port, name });
     void useApps.getState().refresh();
     useRouter.getState().navigate({ surface: "apps", appId: app.id });
-    openAppInDock(app);
+    useApp.getState().openApp(app.id);
   } catch (err) {
     toastError(`Couldn't make an app of port ${port}.`, err);
   }
@@ -316,15 +316,9 @@ export function AppsSurface() {
                     </span>
                   </span>
                   <span className="app-row-actions">
-                    {supported ? (
-                      <button className="btn btn-small" onClick={() => void makeApp(p.port, p.process)}>
-                        Make an app
-                      </button>
-                    ) : (
-                      <button className="btn btn-small btn-ghost" onClick={() => useApp.getState().setInspector({ open: true, tab: "preview", port: p.port, path: "/" } as never)}>
-                        Preview
-                      </button>
-                    )}
+                    <button className="btn btn-small" onClick={() => void makeApp(p.port, p.process)}>
+                      Make an app
+                    </button>
                   </span>
                 </li>
               ))}

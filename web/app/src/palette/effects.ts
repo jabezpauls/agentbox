@@ -30,11 +30,7 @@ export const paletteEffects: PaletteEffects = {
   runAction: (id) => runAction(id, actionCtx()),
   openApp: openAppInDock,
   openReview: (key) => useApp.getState().setInspector({ open: true, tab: "review", reviewKey: key }),
-  openPort: (port) => {
-    const s = useApp.getState() as ReturnType<typeof useApp.getState> & { openPort?: (p: number) => Promise<void> };
-    if (typeof s.openPort === "function") void s.openPort(port);
-    else s.setInspector({ open: true, tab: "preview", port, path: "/" } as never);
-  },
+  openPort: (port) => void useApp.getState().openPort(port),
   openInEditor: (p) => void openInEditor(p),
   terminalHere: (p) => void terminalHere(p),
   newProject: () => {
