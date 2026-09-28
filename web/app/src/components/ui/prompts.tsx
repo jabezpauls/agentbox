@@ -43,6 +43,12 @@ function settleCurrent(): void {
   else if (p?.kind === "text") p.resolve(null);
 }
 
+/** Answer "no" to whatever is being asked, and close it (moving to another surface). */
+export function dismissPrompts(): void {
+  settleCurrent();
+  usePrompts.setState({ pending: null });
+}
+
 export function confirm(opts: ConfirmOpts): Promise<boolean> {
   settleCurrent();
   return new Promise((resolve) => usePrompts.setState({ pending: { kind: "confirm", opts, resolve } }));

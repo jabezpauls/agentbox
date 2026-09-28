@@ -9,7 +9,7 @@ import { useSystem } from "../../system/model.ts";
 import { formatBytes, formatCores, formatDuration, formatMemory, greeting, plural } from "../../lib/format.ts";
 import { Empty, PageHeader, Section } from "../../components/ui/Page.tsx";
 import { Meter } from "../../components/ui/Meter.tsx";
-import { usePolling } from "../../shell/activity.tsx";
+import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
 import { useNeeds } from "../../shell/attention.ts";
 import { navigate } from "../../shell/router.ts";
 import { useGateSession } from "../../shell/session.ts";
@@ -71,6 +71,7 @@ export function HomeSurface() {
   const appsSupported = useApps((s) => s.supported);
   const system = useSystem((s) => s.info);
   const [newProject, setNewProject] = useState<null | "clone" | "empty">(null);
+  useWhenHidden(() => setNewProject(null));
 
   // "New project" from the palette lands here — even before Home was built.
   const requested = useRequests((s) => s.newProject);

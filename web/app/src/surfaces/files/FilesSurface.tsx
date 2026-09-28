@@ -38,7 +38,7 @@ import { useSystem } from "../../system/model.ts";
 import { formatBytes, plural } from "../../lib/format.ts";
 import { Menu, type MenuAnchor, type MenuEntry } from "../../components/ui/Menu.tsx";
 import { Empty } from "../../components/ui/Page.tsx";
-import { focusOnArrival, openModal, useOnActivate, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
+import { focusOnArrival, openModal, useOnActivate, usePolling, useSurfaceActive, useWhenHidden } from "../../shell/activity.tsx";
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { useNarrow } from "../../shell/Dock.tsx";
@@ -171,6 +171,10 @@ export function FilesSurface() {
   const [selection, setSelection] = useState<sel.Selection>(sel.EMPTY);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ entries: FileEntry[] | null; anchor: MenuAnchor } | null>(null);
+  useWhenHidden(() => {
+    setMenu(null);
+    setRenaming(null);
+  });
   const [version, setVersion] = useState(0);
   const [trashItems, setTrashItems] = useState<TrashItem[] | null>(null);
   const [trashError, setTrashError] = useState<string | null>(null);

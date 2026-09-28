@@ -3,7 +3,7 @@ import { Check, Copy, Laptop, TerminalSquare } from "lucide-react";
 import { errorText, HttpError } from "../../api/http.ts";
 import { formatAgo } from "../../lib/format.ts";
 import { Empty, Section } from "../../components/ui/Page.tsx";
-import { usePolling } from "../../shell/activity.tsx";
+import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
 import { useGateSession } from "../../shell/session.ts";
 import { toast } from "../../shell/toast.ts";
 import { CredentialsDialog } from "../../settings/CredentialsDialog.tsx";
@@ -53,6 +53,7 @@ export function DevicesSection() {
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<TokenRow | null>(null);
+  useWhenHidden(() => setRevoking(null));
 
   const load = useCallback(async () => {
     try {

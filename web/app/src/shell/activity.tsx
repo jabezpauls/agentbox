@@ -84,6 +84,20 @@ export function useOnActivate(onActivate: () => void): void {
 }
 
 /**
+ * Run `fn` when the surface goes out of view. Surface-local dialogs close
+ * with it — above all ones holding a typed password — rather than wait,
+ * hidden and inert, for someone to come back to them.
+ */
+export function useWhenHidden(fn: () => void): void {
+  const active = useSurfaceActive();
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    if (!active) ref.current();
+  }, [active]);
+}
+
+/**
  * A modal that is open where you can see it. One left open inside a surface
  * you moved away from is inert and hidden, and does not count.
  */

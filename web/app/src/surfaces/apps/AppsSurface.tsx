@@ -27,7 +27,7 @@ import { formatAgo } from "../../lib/format.ts";
 import { Empty, PageHeader, Section } from "../../components/ui/Page.tsx";
 import { Menu, type MenuAnchor, type MenuEntry } from "../../components/ui/Menu.tsx";
 import { confirm, promptText } from "../../components/ui/prompts.tsx";
-import { usePolling } from "../../shell/activity.tsx";
+import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { toast, toastError } from "../../shell/toast.ts";
@@ -217,6 +217,10 @@ export function AppsSurface() {
   const ports = useApp((s) => s.ports);
   const [sharing, setSharing] = useState<AppView | null>(null);
   const [menu, setMenu] = useState<{ app: AppView; anchor: MenuAnchor } | null>(null);
+  useWhenHidden(() => {
+    setSharing(null);
+    setMenu(null);
+  });
 
   usePolling(() => useApps.getState().refresh(), 5000, supported !== false);
 

@@ -10,7 +10,7 @@ import { Toasts } from "../components/Toasts.tsx";
 import { NewWorkspaceDialog } from "../components/dialogs/NewWorkspaceDialog.tsx";
 import { RenameDialog } from "../components/dialogs/RenameDialog.tsx";
 import { ConfirmDialog } from "../components/dialogs/ConfirmDialog.tsx";
-import { PromptHost } from "../components/ui/prompts.tsx";
+import { dismissPrompts, PromptHost } from "../components/ui/prompts.tsx";
 import { useApps } from "../apps/model.ts";
 import { HomeSurface } from "../surfaces/home/HomeSurface.tsx";
 import { WorkbenchSurface } from "../surfaces/workbench/WorkbenchSurface.tsx";
@@ -78,6 +78,8 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
     const from = previous.current;
     if (from === surface) return;
     previous.current = surface;
+    // A question asked on the way out is not answered by leaving.
+    dismissPrompts();
     const { open, width } = useApp.getState().ui.inspector;
     const next = dockOnSwitch(from, surface, { open, width });
     if (next.open !== open || next.width !== width) useApp.getState().setInspector(next);
