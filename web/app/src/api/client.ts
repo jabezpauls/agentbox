@@ -1,7 +1,9 @@
 import type {
+  App,
+  AppView,
+  AppVisibilityMode,
   DirEntry,
   ListeningPort,
-  PreviewShare,
   ReviewComment,
   ReviewSession,
   ReviewSessionDetail,
@@ -22,6 +24,31 @@ async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(apiUrl(path), { headers: { accept: "application/json" } });
   if (!res.ok) throw new RpcError(res.status, `${path} → ${res.status}`);
   return (await res.json()) as T;
+}
+
+/**
+ * A JSON call whose refusal carries a sentence for a person (the gate's and
+ * the app API's `{error, message}`): that sentence becomes the error.
+ */
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    method,
+    headers: body === undefined ? { accept: "application/json" } : { "content-type": "application/json", accept: "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    const d = (data ?? {}) as { message?: unknown; error?: unknown };
+    const message = typeof d.message === "string" ? d.message : typeof d.error === "string" ? d.error : `${path} → ${res.status}`;
+    throw new RpcError(res.status, message);
+  }
+  return data as T;
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -46,18 +73,12 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
   return body.result as T;
 }
 
-async function del(path: string): Promise<void> {
-  const res = await fetch(apiUrl(path), { method: "DELETE", headers: { accept: "application/json" } });
-  if (!res.ok) throw new RpcError(res.status, `${path} → ${res.status}`);
-}
-
 export interface HealthInfo {
   ok: boolean;
   herdr: { connected: boolean; version: string | null; protocol: number | null };
   workspaceRoot: string;
-  previewDomain: string | null;
-  /** Whether the operator has enabled public sharing; the panel hides Share if not. */
-  previewSharing: boolean;
+  /** Whether the operator allows sharing apps; the Preview panel hides Share if not. */
+  sharing: boolean;
 }
 
 export function getHealth(): Promise<HealthInfo> {
@@ -102,41 +123,75 @@ export function listDirs(path: string): Promise<DirEntry[]> {
   return getJson<DirEntry[]>(`/api/fs/dirs?path=${encodeURIComponent(path)}`);
 }
 
-/** The live public shares the owner has minted. */
-export function listShares(): Promise<PreviewShare[]> {
-  return getJson<PreviewShare[]>("/api/preview/shares");
-}
+// --- apps ---------------------------------------------------------------------
 
-/** Mint a public share for a port; the returned `url` is the link to hand out. */
-export function createShare(port: number): Promise<PreviewShare> {
-  return postJson<PreviewShare>("/api/preview/shares", { port });
+/** Every app, with what is live of it in the sandbox. */
+export function listApps(): Promise<AppView[]> {
+  return getJson<AppView[]>("/api/apps");
 }
-
-/** Revoke a share by id; the link 404s immediately afterwards. */
-export function revokeShare(id: string): Promise<void> {
-  return del(`/api/preview/shares/${id}`);
-}
-
-/** Push a share's expiry back out to the default window. */
-export function extendShare(id: string): Promise<PreviewShare> {
-  return postJson<PreviewShare>(`/api/preview/shares/${id}/extend`, {});
-}
-
-/** The state of a preview port, as the panel's probe reads it. */
-export type ProbeState = "ready" | "down";
 
 /**
- * Probe a preview port by asking the proxy for it with a HEAD. The bridge marks
- * every answer it gives on the upstream's behalf — nothing listening, nothing
- * answering — with `X-Preview-Upstream: down`. Anything else came from the app
- * itself, error statuses included, and is the app's to show, so it is "ready".
+ * Make an app of a listening port, as the owner. Through the gate's own side:
+ * the sandbox's side would record it as an agent's.
  */
-export async function probePreview(port: number, path: string): Promise<ProbeState> {
-  const url = `/preview/${port}/${path.replace(/^\/+/, "")}`;
+export function makeApp(port: number, name?: string): Promise<App & { url: string }> {
+  return send("POST", "/_gate/apps", { port, ...(name ? { name } : {}) });
+}
+
+/** Change what the sandbox may change of an app: its name, port, path fixes, pin. */
+export function updateApp(id: string, fields: Partial<Pick<App, "name" | "port" | "compat" | "pinned">>): Promise<AppView> {
+  return send("PATCH", `/api/apps/${id}`, fields);
+}
+
+export interface ShareRequest {
+  mode: AppVisibilityMode;
+  /** Seconds from now; null for until sharing is stopped. */
+  expiresIn: number | null;
+  /** For `passcode`; left out to keep the current one. */
+  passcode?: string;
+}
+
+/** Start an app's command again (in the herdr tab it ran in, or a new one). */
+export function restartApp(id: string): Promise<unknown> {
+  return send("POST", `/api/apps/${id}/restart`, {});
+}
+
+/** Who may open the app: the owner's decision, on the gate's side. */
+export function shareApp(id: string, req: ShareRequest): Promise<App> {
+  return send("PUT", `/_gate/apps/${id}/visibility`, req);
+}
+
+/** Private again; anyone still connected as the public is cut off. */
+export function stopSharing(id: string): Promise<App> {
+  return send("DELETE", `/_gate/apps/${id}/visibility`);
+}
+
+/** The state of an app, as the panel's probe reads it. */
+export interface Probe {
+  state: "ready" | "down";
+  /** The gate could not fix every path the page names: it assumes it runs at `/`. */
+  hint: string | null;
+}
+
+/**
+ * Probe an app before framing it. The data plane marks every answer it gives
+ * on the app's behalf — nothing listening, nothing answering — with
+ * `X-Preview-Upstream: down`. Anything else came from the app itself, error
+ * statuses included, and is the app's to show, so it is "ready". A GET for a
+ * page (the body is dropped unread) so the gate's path fixes run, and say
+ * whether they reached everything.
+ */
+export async function probeApp(url: string): Promise<Probe> {
   try {
-    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
-    return res.headers.get("x-preview-upstream") === "down" ? "down" : "ready";
+    const ctl = new AbortController();
+    const res = await fetch(url, { cache: "no-store", headers: { accept: "text/html" }, signal: ctl.signal });
+    const probe: Probe = {
+      state: res.headers.get("x-preview-upstream") === "down" ? "down" : "ready",
+      hint: res.headers.get("x-agentbox-hint"),
+    };
+    ctl.abort();
+    return probe;
   } catch {
-    return "down";
+    return { state: "down", hint: null };
   }
 }

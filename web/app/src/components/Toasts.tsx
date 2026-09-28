@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertCircle, AlertTriangle, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, AlertTriangle, AppWindow, X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import type { StoredToast } from "../store/app.ts";
 
@@ -23,6 +23,7 @@ interface RowProps {
 function ToastRow({ toast, depth, expanded }: RowProps) {
   const dismiss = useApp((s) => s.dismissToast);
   const focusPane = useApp((s) => s.focusPane);
+  const openApp = useApp((s) => s.openApp);
 
   const isError = toast.kind === "error";
 
@@ -36,6 +37,8 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
 
   const icon = isError ? (
     <AlertTriangle size={15} />
+  ) : toast.kind === "app" ? (
+    <AppWindow size={15} />
   ) : toast.kind === "blocked" ? (
     <AlertCircle size={15} />
   ) : (
@@ -43,9 +46,11 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
   );
   const sub = isError
     ? (toast.detail ?? "The bridge refused the call.")
-    : toast.kind === "blocked"
-      ? "Waiting on you."
-      : "Finished.";
+    : toast.kind === "app"
+      ? "Showing in Preview."
+      : toast.kind === "blocked"
+        ? "Waiting on you."
+        : "Finished.";
 
   // The newest row is nearest the viewer, so depth also drives the stacking
   // order — without it the rows behind print their text through the front one.
@@ -80,7 +85,8 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
         <button
           className="toast-body"
           onClick={() => {
-            focusPane(toast.paneId);
+            if (toast.appId) openApp(toast.appId);
+            else focusPane(toast.paneId);
             dismiss(toast.id);
           }}
         >

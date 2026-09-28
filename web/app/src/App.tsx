@@ -26,11 +26,12 @@ export function App() {
     return () => setThemeCycle(null);
   }, [cycle, setThemeCycle]);
 
-  // Learn the preview configuration and the picker's root once.
+  // Learn the sharing setting and the picker's root once, and the apps.
   useEffect(() => {
     getHealth()
       .then(setHealth)
       .catch(() => {});
+    void useApp.getState().refreshApps();
   }, [setHealth]);
 
   // `agentbox-review open` prints a link of the form /workbench?review=<key>.

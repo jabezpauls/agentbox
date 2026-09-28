@@ -1,13 +1,18 @@
 import type { AgentStatus } from "@workbench/shared";
 import { paneTitle, type Session } from "./store/session.ts";
 
-/** `error` carries an RPC failure; the others are agent state transitions. */
-export type ToastKind = "blocked" | "done" | "error";
+/**
+ * `error` carries an RPC failure; `app` says an app was put in Preview; the
+ * others are agent state transitions.
+ */
+export type ToastKind = "blocked" | "done" | "error" | "app";
 
 export interface Toast {
   kind: ToastKind;
   /** The pane a click should focus; empty for toasts with no pane. */
   paneId: string;
+  /** For `app`: the app a click shows in Preview. */
+  appId?: string;
   title: string;
   /** Secondary line — the server's message on an error toast. */
   detail?: string;
@@ -74,6 +79,9 @@ const VERBS: Record<string, string> = {
 /** Calls that are not herdr methods and carry their own sentence. */
 const PHRASES: Record<string, string> = {
   session: "Couldn't refresh the session.",
+  "app.create": "Couldn't make an app of that port.",
+  "app.share": "Couldn't change who can open the app.",
+  "app.update": "Couldn't change the app.",
   "review feedback": "Couldn't send your feedback.",
   "review end": "Couldn't end the review session.",
 };

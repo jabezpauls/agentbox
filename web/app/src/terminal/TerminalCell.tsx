@@ -192,7 +192,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
   );
 }
 
-/** localhost links open the inspector's preview; everything else opens a tab. */
+/** localhost links open that server as an app in Preview; everything else opens a tab. */
 function openLink(uri: string): void {
   let url: URL;
   try {
@@ -202,12 +202,7 @@ function openLink(uri: string): void {
   }
   if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
     const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
-    useApp.getState().setInspector({
-      open: true,
-      tab: "preview",
-      port,
-      path: url.pathname + url.search + url.hash,
-    });
+    void useApp.getState().openPort(port, url.pathname + url.search + url.hash);
   } else {
     window.open(uri, "_blank", "noopener,noreferrer");
   }

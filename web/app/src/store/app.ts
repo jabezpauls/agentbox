@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { EventsMessage, HerdrEvent, ListeningPort } from "@workbench/shared";
+import type { AppView, EventsMessage, HerdrEvent, ListeningPort } from "@workbench/shared";
 import type { ConnStatus } from "../api/events.ts";
-import { getSession, rpc, RpcError, type HealthInfo } from "../api/client.ts";
+import { getSession, listApps, makeApp, rpc, RpcError, type HealthInfo } from "../api/client.ts";
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
 import { blockedCount, notifyTransitions, rpcErrorTitle, type Toast } from "../notify.ts";
 import type { Theme } from "../theme/useTheme.ts";
@@ -36,9 +36,9 @@ export interface DialogState { kind: string; [k: string]: unknown }
 
 /**
  * The inspector drawer's state, kept as one object so it can be persisted and
- * updated atomically via `setInspector`. `port`/`path` are the preview target a
- * localhost link click writes here; `reviewKey` is the review session the
- * Review panel is showing, or null for its session list.
+ * updated atomically via `setInspector`. `path` is where the Preview panel is
+ * within its app (the app itself is `ui.previewAppId`); `reviewKey` is the
+ * review session the Review panel is showing, or null for its session list.
  */
 export type PreviewDevice = "auto" | 390 | 768 | 1024;
 
@@ -46,13 +46,32 @@ export interface InspectorState {
   open: boolean;
   tab: InspectorTab;
   width: number;
-  port: number | null;
   path: string;
   device: PreviewDevice;
   reviewKey: string | null;
 }
 
 const INSPECTOR_KEY = "workbench.inspector";
+const PREVIEW_APP_KEY = "workbench.previewApp";
+
+/** The app the Preview panel showed last, so a reload shows it again. */
+function readPreviewApp(): string | null {
+  try {
+    const v = localStorage.getItem(PREVIEW_APP_KEY);
+    return v && /^[a-z2-7]{26}$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistPreviewApp(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(PREVIEW_APP_KEY, id);
+    else localStorage.removeItem(PREVIEW_APP_KEY);
+  } catch {
+    // Private mode or blocked storage; the choice holds for this session only.
+  }
+}
 const SIDEBAR_KEY = "workbench.sidebarWidth";
 
 export const SIDEBAR_MIN = 200;
@@ -97,6 +116,8 @@ export interface UiState {
   sidebarOpen: boolean;
   sidebarWidth: number;
   inspector: InspectorState;
+  /** The app the Preview panel shows; null for its picker alone. */
+  previewAppId: string | null;
   palette: null | PaletteState;
   dialog: null | DialogState;
   theme: Theme;
@@ -109,6 +130,8 @@ export interface AppState {
   ports: ListeningPort[];
   /** False when the bridge could not read `/proc` to enumerate ports at all. */
   portsReadable: boolean;
+  /** Every app, with its live state; null until first loaded. */
+  apps: AppView[] | null;
   health: HealthInfo | null;
   ui: UiState;
   seenDone: Record<string, number>;
@@ -131,6 +154,18 @@ export interface AppState {
    * hundreds of synchronous writes per gesture.
    */
   setSidebarWidth(width: number, opts?: { persist?: boolean }): void;
+  /** Read the apps again (the bridge says `apps.changed`, or the panel changed one). */
+  refreshApps(): Promise<void>;
+  /**
+   * Show an app in the right-hand panel's Preview: open the panel on Preview,
+   * with that app, at `path` within it (its root by default).
+   */
+  openApp(appId: string, path?: string): void;
+  /**
+   * Show whatever serves `port` in Preview: its app, or — for a port that is
+   * not one yet — a new app made of it (the owner's; private).
+   */
+  openPort(port: number, path?: string): Promise<void>;
   pushToast(toast: Toast, opts?: { retry?: () => void; dedupe?: string }): void;
   reportRpcError(method: string, err: unknown, retry?: () => void): void;
   focusPane(id: string): void;
@@ -186,7 +221,8 @@ let previewAutoOpened = false;
 const initialUi: UiState = {
   sidebarOpen: wideViewport,
   sidebarWidth: readSidebarWidth(),
-  inspector: { open: false, tab: "preview", width: 420, port: null, path: "/", device: "auto", reviewKey: null, ...readInspector() },
+  inspector: { open: false, tab: "preview", width: 420, path: "/", device: "auto", reviewKey: null, ...readInspector() },
+  previewAppId: readPreviewApp(),
   palette: null,
   dialog: null,
   theme: "system",
@@ -198,6 +234,7 @@ export const useApp = create<AppState>((set, get) => ({
   session: emptySession(),
   ports: [],
   portsReadable: true,
+  apps: null,
   health: null,
   ui: initialUi,
   seenDone: {},
@@ -227,16 +264,33 @@ export const useApp = create<AppState>((set, get) => ({
         break;
       }
       case "ports": {
+        const before = new Set(get().ports.map((p) => p.port));
         set({ ports: m.ports, portsReadable: m.readable !== false });
         // The first time a real (non-system) port appears while the inspector
-        // is closed, open it on that port — once per session.
+        // is closed, open it on Preview — once per session — where the port
+        // is one click from being shown.
         if (!previewAutoOpened) {
           const port = m.ports.find((p) => !p.system);
           if (port && !get().ui.inspector.open) {
             previewAutoOpened = true;
-            get().setInspector({ open: true, tab: "preview", port: port.port, path: "/" });
+            get().setInspector({ open: true, tab: "preview" });
           }
         }
+        // A server coming up or going away changes what the apps show.
+        if (m.ports.some((p) => !before.has(p.port)) || m.ports.length !== before.size) void get().refreshApps();
+        break;
+      }
+      case "app.open": {
+        get().openApp(m.id, m.path ?? "/");
+        get().pushToast(
+          { kind: "app", paneId: "", appId: m.id, title: `${m.by} opened ${m.name} in Preview` },
+          { dedupe: `app:${m.id}` },
+        );
+        void get().refreshApps();
+        break;
+      }
+      case "apps.changed": {
+        void get().refreshApps();
         break;
       }
       case "reset": {
@@ -283,6 +337,33 @@ export const useApp = create<AppState>((set, get) => ({
       }
     }
     set((s) => ({ ui: { ...s.ui, sidebarWidth: clamped } }));
+  },
+
+  async refreshApps() {
+    try {
+      set({ apps: await listApps() });
+    } catch {
+      // The list stays as it was; the panel says so if it never loaded.
+      if (get().apps === null) set({ apps: [] });
+    }
+  },
+
+  openApp(appId, path = "/") {
+    persistPreviewApp(appId);
+    set((s) => ({ ui: { ...s.ui, previewAppId: appId } }));
+    get().setInspector({ open: true, tab: "preview", path });
+  },
+
+  async openPort(port, path = "/") {
+    const known = get().apps?.find((a) => a.port === port);
+    if (known) return get().openApp(known.id, path);
+    try {
+      const app = await makeApp(port);
+      await get().refreshApps();
+      get().openApp(app.id, path);
+    } catch (err) {
+      get().reportRpcError("app.create", err);
+    }
   },
 
   pushToast(toast, opts) {

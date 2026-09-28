@@ -1,23 +1,28 @@
-// URLs for the preview panel. The bridge proxies `/preview/<port>/…` to
-// `127.0.0.1:<port>`; when a preview domain is configured each port also gets
-// its own hostname for full-screen viewing.
+// URLs for the Preview panel. Every app has one URL, `/a/<id>/`, on the box's
+// own origin: the panel frames it, full screen opens it, and sharing makes the
+// same URL public.
 
-function stripLeadingSlashes(path: string): string {
-  return path.replace(/^\/+/, "");
+/** A path within an app, always starting with `/`. */
+export function normalisePath(path: string): string {
+  const t = path.trim();
+  if (t === "") return "/";
+  return t.startsWith("/") ? t : `/${t}`;
 }
 
-/** The in-app iframe URL: the bridge's port proxy. */
-export function previewUrl(port: number, path: string): string {
-  return `/preview/${port}/${stripLeadingSlashes(path)}`;
+/** The app's URL at `path`, relative to the box: `/a/<id>/<path>`. */
+export function appUrl(id: string, path = "/"): string {
+  return `/a/${id}/${normalisePath(path).replace(/^\/+/, "")}`;
+}
+
+/** The absolute link to hand someone, on the origin this page was loaded from. */
+export function appLink(id: string, origin: string = location.origin): string {
+  return `${origin}${appUrl(id, "/")}`;
 }
 
 /**
- * Where a preview is actually loaded from — both the panel's iframe and "open
- * full screen". With a preview domain the port becomes a subdomain, which is a
- * separate origin: the page gets its cookies and storage back and the iframe
- * needs no sandbox. Without one it is the bridge's proxied path on this origin.
+ * The command that serves an app on the owner's own machine, at full fidelity
+ * (its own origin, storage, service workers): the CLI's tunnel.
  */
-export function previewTarget(port: number, path: string, previewDomain: string | null): string {
-  if (previewDomain) return `https://${port}.${previewDomain}/${stripLeadingSlashes(path)}`;
-  return previewUrl(port, path);
+export function forwardCommand(port: number): string {
+  return `agentbox forward ${port}`;
 }

@@ -84,7 +84,7 @@ function buildItems(session: Session, mode: string, query: string): PaletteItem[
       id: `preview:${port}`,
       kind: "action",
       label: `Open preview on port ${port}`,
-      run: () => s.setInspector({ open: true, tab: "preview", port, path: "/" }),
+      run: () => void s.openPort(port),
     });
   }
   return searchItems(query, items);

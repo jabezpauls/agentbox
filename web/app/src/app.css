@@ -1773,6 +1773,9 @@
 .toast.is-error {
   --st: var(--danger);
 }
+.toast.is-app {
+  --st: var(--accent);
+}
 .toast-icon {
   flex: none;
   display: grid;
@@ -2111,8 +2114,8 @@
   max-width: 32ch;
 }
 
-/* The public-share affordance: a persistent banner so a live share is never a
-   surprise, the link with a copy button, and the expiry / extend / revoke row. */
+/* Sharing: a persistent banner so a public app is never a surprise, the link
+   with a copy button, who may open it and for how long, and stop sharing. */
 .prev-share {
   flex: none;
   border-bottom: 1px solid var(--border);
@@ -2158,18 +2161,132 @@
   align-items: center;
   gap: var(--sp-2);
 }
-.prev-share-expiry {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
 .port-tag.is-public {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   background: var(--warning-soft);
   color: var(--warning);
+}
+.port-row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Is anything serving the app: a light, with its meaning in its label. */
+.port-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--st-idle);
+}
+.port-dot.is-up {
+  background: var(--success);
+}
+.prev-origin {
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prev-note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.prev-note > span {
+  flex: 1;
+  min-width: 0;
+}
+.prev-note code,
+.prev-info code,
+.empty-sub code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+.prev-share-banner > span {
+  flex: 1;
+  min-width: 0;
+}
+.prev-share-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.prev-share-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.prev-share-mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.prev-share-mode.is-active {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+.prev-share-mode:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.prev-share-passcode {
+  height: 28px;
+  font-size: var(--fs-xs);
+}
+.prev-share-expiry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.prev-share-expiry .input {
+  flex: 1;
+  height: 28px;
+  font-size: var(--fs-xs);
+}
+.prev-share-error {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.prev-info {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.prev-info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.prev-info-row input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.prev-info-row strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.prev-info-limits {
+  margin: 0;
+  color: var(--text-3);
 }
 
 /* --- review panel ---------------------------------------------------------- */

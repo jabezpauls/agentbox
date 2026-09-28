@@ -1,27 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { previewTarget, previewUrl } from "./url.ts";
+import { appLink, appUrl, forwardCommand, normalisePath } from "./url.ts";
 
-describe("previewUrl", () => {
-  it("builds a proxied path with the leading slash removed", () => {
-    expect(previewUrl(3005, "/app/page")).toBe("/preview/3005/app/page");
+const ID = "abcdefghijklmnopqrstuvwxyz";
+
+describe("an app's URL", () => {
+  it("puts the path under the app, keeping the query", () => {
+    expect(appUrl(ID, "/app/page")).toBe(`/a/${ID}/app/page`);
+    expect(appUrl(ID, "/app?q=1&x=2")).toBe(`/a/${ID}/app?q=1&x=2`);
+    expect(appUrl(ID, "about")).toBe(`/a/${ID}/about`);
   });
 
-  it("preserves the query string", () => {
-    expect(previewUrl(3005, "/app?q=1&x=2")).toBe("/preview/3005/app?q=1&x=2");
+  it("is the app's root for an empty or bare path", () => {
+    expect(appUrl(ID)).toBe(`/a/${ID}/`);
+    expect(appUrl(ID, "")).toBe(`/a/${ID}/`);
+    expect(appUrl(ID, "//x")).toBe(`/a/${ID}/x`);
   });
 
-  it("normalises a bare root path", () => {
-    expect(previewUrl(3005, "/")).toBe("/preview/3005/");
-    expect(previewUrl(8080, "")).toBe("/preview/8080/");
+  it("is a full link on the page's own origin", () => {
+    expect(appLink(ID, "https://box.example")).toBe(`https://box.example/a/${ID}/`);
   });
 });
 
-describe("previewTarget", () => {
-  it("uses the preview domain as a subdomain when configured", () => {
-    expect(previewTarget(3005, "/app?q=1", "preview.example.com")).toBe("https://3005.preview.example.com/app?q=1");
+describe("the helpers", () => {
+  it("normalise a typed path", () => {
+    expect(normalisePath("  ")).toBe("/");
+    expect(normalisePath("x")).toBe("/x");
+    expect(normalisePath("/x")).toBe("/x");
   });
 
-  it("falls back to the proxied path when no domain is configured", () => {
-    expect(previewTarget(3005, "/app", null)).toBe("/preview/3005/app");
+  it("say how to open the app on your own machine", () => {
+    expect(forwardCommand(5173)).toBe("agentbox forward 5173");
   });
 });
