@@ -482,6 +482,10 @@ describe("with sharing turned off", () => {
       expect(res.status).toBe(403);
       expect(res.json()).toMatchObject({ error: "sharing_off" });
       expect((await request(off.base, "GET", "/_gate/apps", { headers: { cookie: c } })).json()).toMatchObject({ sharing: false });
+      // And for good: the store says so, so sharing turned back on opens nothing.
+      await off.gate.core.store.flush();
+      const saved = JSON.parse(fs.readFileSync(path.join(copy, "gate.json"), "utf8")) as { apps: Array<{ id: string; visibility: { mode: string } }> };
+      expect(saved.apps.find((a) => a.id === app.id)?.visibility.mode).toBe("private");
     } finally {
       await off.close();
       fs.rmSync(copy, { recursive: true, force: true });

@@ -127,9 +127,14 @@ export class AppRegistry {
   ) {
     for (const app of store.apps) normalise(app);
     // Sharing turned off (the installer's --sharing off) makes every app
-    // private again, rather than leaving links that open when it comes back.
+    // private again, for good, rather than leaving links that open when it
+    // comes back.
     if (!opts.sharing) {
-      for (const app of store.apps) if (app.visibility.mode !== "private") this.makePrivate(app);
+      const shared = store.apps.filter((app) => app.visibility.mode !== "private");
+      for (const app of shared) this.makePrivate(app);
+      if (shared.length > 0) {
+        store.save().catch((err: unknown) => console.error("[gate] could not save apps made private", err));
+      }
     }
   }
 
