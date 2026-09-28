@@ -10,6 +10,7 @@ import "./styles/surfaces.css";
 import "./styles/files.css";
 import "./styles/system.css";
 import "./styles/settings.css";
+import "./styles/apps.css";
 import { App } from "./App.tsx";
 import { installSessionGuard } from "./api/session-guard.ts";
 

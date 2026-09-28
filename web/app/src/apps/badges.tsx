@@ -1,6 +1,6 @@
 import { Globe, KeyRound, Lock } from "lucide-react";
 import { formatUntil } from "../lib/format.ts";
-import { isPublic, type AppView } from "./model.ts";
+import { isCrashed, isPublic, type AppView } from "./model.ts";
 
 /** Who can open an app: private, anyone with the link, or with a passcode — and until when. */
 export function VisibilityBadge({ app, now = Date.now() }: { app: AppView; now?: number }) {
@@ -28,12 +28,18 @@ export function VisibilityBadge({ app, now = Date.now() }: { app: AppView; now?:
   );
 }
 
-/** Whether something answers on the app's port. */
+/**
+ * When nothing answers on the app's port: a quiet "Not running", or a warning
+ * for a pinned app that should be. A running app shows no badge — its light
+ * says so, and the row names the process.
+ */
 export function LiveBadge({ app }: { app: AppView }) {
+  if (app.live.listening) return <span className="sr-only">Running</span>;
+  const crashed = isCrashed(app);
   return (
-    <span className={`pill live-badge ${app.listening ? "is-live" : "is-down"}`}>
+    <span className={`pill live-badge ${crashed ? "is-crashed" : "is-down"}`} title={crashed ? "Pinned to run with the box, but nothing is serving" : undefined}>
       <span className="pill-dot" aria-hidden="true" />
-      {app.listening ? "Running" : "Not running"}
+      Not running
     </span>
   );
 }

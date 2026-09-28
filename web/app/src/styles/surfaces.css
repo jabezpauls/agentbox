@@ -70,6 +70,10 @@ p code,
   background: var(--success-soft);
   color: var(--success);
 }
+.live-badge.is-crashed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
 .live-badge.is-down {
   background: var(--surface-2);
   color: var(--text-2);

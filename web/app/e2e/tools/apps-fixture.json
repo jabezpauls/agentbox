@@ -1,0 +1,45 @@
+[
+  {
+    "id": "k3m2vq7xa4bd6fhj2npr5tsuwy",
+    "name": "goofy",
+    "port": 5173,
+    "keepPrefix": true,
+    "cwd": "/workspace/goofy-app",
+    "command": "npm run dev",
+    "pinned": false,
+    "createdBy": "agent",
+    "createdAt": 1790000000000,
+    "visibility": { "mode": "link", "expiresAt": 1791000000000, "sharedAt": 1790000500000 },
+    "compat": "auto",
+    "url": "/a/k3m2vq7xa4bd6fhj2npr5tsuwy/",
+    "live": { "listening": true, "pid": 4312, "process": "node", "cwd": "/workspace/goofy-app", "paneId": null, "tabId": null, "workspaceId": null }
+  },
+  {
+    "id": "a7c2de5fg3hj4km6np7qr2st3u",
+    "name": "staging",
+    "port": 8080,
+    "keepPrefix": false,
+    "cwd": "/workspace/site",
+    "command": "npm run preview",
+    "pinned": true,
+    "createdBy": "owner",
+    "createdAt": 1789000000000,
+    "visibility": { "mode": "private", "expiresAt": null },
+    "compat": "auto",
+    "url": "/a/a7c2de5fg3hj4km6np7qr2st3u/",
+    "live": { "listening": false, "pid": null, "process": null, "cwd": null, "paneId": null, "tabId": null, "workspaceId": null }
+  },
+  {
+    "id": "z2y3x4w5v6u7t2s3r4q5p6o7n2",
+    "name": "docs",
+    "port": 4321,
+    "keepPrefix": false,
+    "pinned": false,
+    "createdBy": "owner",
+    "createdAt": 1790050000000,
+    "visibility": { "mode": "passcode", "expiresAt": null, "sharedAt": 1790060000000 },
+    "compat": "off",
+    "url": "/a/z2y3x4w5v6u7t2s3r4q5p6o7n2/",
+    "live": { "listening": true, "pid": 991, "process": "astro", "cwd": "/workspace/docs", "paneId": null, "tabId": null, "workspaceId": null }
+  }
+]

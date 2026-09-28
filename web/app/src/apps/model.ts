@@ -6,8 +6,9 @@ import { http, HttpError } from "../api/http.ts";
  * each app merged with what the bridge sees live (is anything listening on
  * its port, which process, which pane).
  *
- * TODO(one-app/c-apps): this mirrors the spec's App record until Phase C's
- * `AppView` lands in @workbench/shared; switch to that type then.
+ * TODO(one-app/c-apps): these mirror Phase C's types (App, AppLive, AppView
+ * in @workbench/shared on its branch) until it merges; import them from there
+ * then.
  */
 export type AppVisibilityMode = "private" | "link" | "passcode";
 
@@ -18,7 +19,7 @@ export interface AppVisibility {
   sharedAt?: number;
 }
 
-export interface AppView {
+export interface App {
   id: string;
   name: string;
   port: number;
@@ -30,13 +31,24 @@ export interface AppView {
   createdAt: number;
   visibility: AppVisibility;
   compat: "auto" | "off";
+}
+
+export interface AppLive {
   /** Something is answering on the port right now. */
   listening: boolean;
-  pid?: number;
-  /** The herdr pane the listening process runs in. */
-  paneId?: string;
+  pid: number | null;
+  process: string | null;
+  cwd: string | null;
+  /** The herdr pane the server runs in, when it can be told. */
+  paneId: string | null;
+  tabId: string | null;
+  workspaceId: string | null;
+}
+
+export interface AppView extends App {
   /** The app's own URL, `/a/<id>/`. */
   url: string;
+  live: AppLive;
 }
 
 export interface AppCreate {
@@ -58,8 +70,8 @@ export interface AppPatch {
 
 export interface ShareRequest {
   mode: AppVisibilityMode;
-  /** Seconds; omitted means until stopped. */
-  expiresIn?: number;
+  /** Seconds from now; null means until stopped. */
+  expiresIn?: number | null;
   passcode?: string;
 }
 
@@ -79,8 +91,9 @@ export const appsApi = {
   update: (id: string, patch: AppPatch) => http.patch<AppView>(`/api/apps/${enc(id)}`, patch),
   remove: (id: string) => http.del<void>(`/api/apps/${enc(id)}`),
   open: (id: string) => http.post<void>(`/api/apps/${enc(id)}/open`),
-  restart: (id: string) => http.post<void>(`/api/apps/${enc(id)}/restart`),
-  stop: (id: string) => http.post<void>(`/api/apps/${enc(id)}/stop`),
+  restart: (id: string) => http.post<unknown>(`/api/apps/${enc(id)}/restart`),
+  /** Stop what serves it; with `remove`, forget the app as well. */
+  stop: (id: string, remove = false) => http.post<{ stopped: boolean; removed: boolean }>(`/api/apps/${enc(id)}/stop`, { remove }),
   /** Make an app public — the owner's call alone, so it goes to the gate. */
   share: (id: string, req: ShareRequest) => http.put<AppView>(`/_gate/apps/${enc(id)}/visibility`, req),
   unshare: (id: string) => http.del<void>(`/_gate/apps/${enc(id)}/visibility`),
@@ -115,7 +128,7 @@ export const useApps = create<AppsState>((set) => ({
 
 /** An app a pinned command should be running but nothing answers on its port. */
 export function isCrashed(app: AppView): boolean {
-  return app.pinned && Boolean(app.command) && !app.listening;
+  return app.pinned && Boolean(app.command) && !app.live.listening;
 }
 
 /** Shared publicly right now (not expired). */

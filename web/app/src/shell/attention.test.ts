@@ -42,20 +42,23 @@ const review = (key: string, status: "open" | "ended", pending = 0): ReviewSessi
   pending,
 });
 
-const app = (id: string, over: Partial<AppView>): AppView => ({
-  id,
-  name: id,
-  port: 5173,
-  keepPrefix: false,
-  pinned: false,
-  createdBy: "agent",
-  createdAt: 0,
-  visibility: { mode: "private", expiresAt: null },
-  compat: "auto",
-  listening: true,
-  url: `/a/${id}/`,
-  ...over,
-});
+const app = (id: string, over: Partial<AppView> & { listening?: boolean }): AppView => {
+  const { listening = true, ...rest } = over;
+  return {
+    id,
+    name: id,
+    port: 5173,
+    keepPrefix: false,
+    pinned: false,
+    createdBy: "agent",
+    createdAt: 0,
+    visibility: { mode: "private", expiresAt: null },
+    compat: "auto",
+    url: `/a/${id}/`,
+    live: { listening, pid: null, process: null, cwd: null, paneId: null, tabId: null, workspaceId: null },
+    ...rest,
+  };
+};
 
 describe("needsYou", () => {
   it("leads with blocked agents, then reviews, crashed apps and finished agents", () => {

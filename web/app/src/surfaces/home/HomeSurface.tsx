@@ -42,7 +42,7 @@ function AppRow({ app }: { app: AppView }) {
       <LiveBadge app={app} />
       <VisibilityBadge app={app} />
       <span className="app-row-actions">
-        <button className="btn btn-small btn-ghost" onClick={() => openAppInDock(app)} disabled={!app.listening}>
+        <button className="btn btn-small btn-ghost" onClick={() => openAppInDock(app)} disabled={!app.live.listening}>
           Preview
         </button>
         <button className="icon-btn" aria-label={`Open ${app.name} in a new tab`} title="Open in a new tab" onClick={() => openAppFullScreen(app)}>
@@ -75,7 +75,7 @@ export function HomeSurface() {
   usePolling(() => useSystem.getState().refresh(), 5_000);
 
   const working = Object.values(session.agents).filter((a) => a.agent_status === "working").length;
-  const running = (apps ?? []).filter((a) => a.listening).length;
+  const running = (apps ?? []).filter((a) => a.live.listening).length;
   const agents = useMemo(() => launchableAgents(system?.versions.agents ?? [{ name: "claude" }]), [system]);
 
   const summary = [

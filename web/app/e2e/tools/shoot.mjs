@@ -23,6 +23,11 @@ const context = await browser.newContext({
   extraHTTPHeaders: { "x-agentbox-client-ip": "203.0.113.250" },
 });
 const page = await context.newPage();
+// Stand in for an app API this bridge may not have yet.
+if (process.env.MOCK_APPS) {
+  const body = fs.readFileSync(process.env.MOCK_APPS, "utf8");
+  await page.route(/\/api\/apps$/, (route) => route.fulfill({ contentType: "application/json", body }));
+}
 page.on("pageerror", (e) => console.error("pageerror:", e.message));
 page.on("response", (r) => r.status() >= 400 && console.error("http:", r.status(), r.request().method(), r.url()));
 await page.goto(`${base}/login?next=${encodeURIComponent(route)}`);
