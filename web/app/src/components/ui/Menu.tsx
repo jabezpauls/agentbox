@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
 
@@ -71,10 +71,16 @@ export function Menu({ anchor, items, label, onClose, align = "start" }: Props) 
     left = Math.max(MARGIN, left);
     top = Math.max(MARGIN, Math.min(top, vh - MARGIN - h));
     setPos({ left, top, origin: `${originY} ${originX}` });
-    menu.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')?.focus({ preventScroll: true });
     // Positioned once, on open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Focus the first item once the menu is placed and visible: before then it
+  // is hidden (it is measured first), and a hidden element cannot take focus.
+  const placed = pos !== null;
+  useEffect(() => {
+    if (placed) ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')?.focus({ preventScroll: true });
+  }, [placed]);
 
   const close = (restore = true) => {
     onClose();
