@@ -40,7 +40,8 @@ function position(raw: unknown, what: string): number | undefined {
 
 /**
  * The editor channel: `/ws/editor`, which the `agentbox-connect` extension
- * holds open; `POST /api/editor/open {path, line?, column?, wait?, fresh?}`,
+ * holds open; `POST /api/editor/open {path, line?, column?, wait?, fresh?,
+ * starting?}`,
  * which asks it to open a file and answers whether it did; and
  * `POST /api/editor/theme {kind}`, the app's resolved light or dark, which
  * every editor window follows.
@@ -73,6 +74,7 @@ export function registerEditorRoutes(app: FastifyInstance, channel: EditorChanne
         ...(column !== undefined ? { column } : {}),
         waitMs: wait,
         fresh: body.fresh === true,
+        starting: body.starting === true,
       });
     } catch (err) {
       return sendError(reply, err);

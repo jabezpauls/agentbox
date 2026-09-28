@@ -131,6 +131,36 @@ describe("the editor channel", () => {
     await ghost.close();
   });
 
+  it("waits for the app's own window while its frame is still loading, however many others there are", async () => {
+    await connectedCount(0);
+    // Windows of tabs long closed, one of them focused last.
+    const ghostA = await fakeEditor({ answer: () => null });
+    const ghostB = await fakeEditor({ answer: () => null });
+    await ghostB.say({ type: "focus", focused: true });
+    const pending = open({ path: "src/main.ts", fresh: true, starting: true, wait: 5000 });
+    // The app's frame takes a couple of seconds to load its window.
+    await new Promise((r) => setTimeout(r, 300));
+    const mine = await fakeEditor();
+    expect((await pending).json()).toEqual({ delivered: true });
+    expect(mine.got).toHaveLength(1);
+    expect(ghostA.got).toHaveLength(0);
+    expect(ghostB.got).toHaveLength(0);
+    await Promise.all([ghostA.close(), ghostB.close(), mine.close()]);
+  });
+
+  it("passes over a window that let an open go unanswered, until it stirs", async () => {
+    await connectedCount(0);
+    const live = await fakeEditor();
+    const ghost = await fakeEditor({ answer: () => null });
+    await ghost.say({ type: "focus", focused: true });
+    // The ghost was seen last, so it is asked first, and says nothing.
+    expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: false, error: "the editor did not answer" });
+    // Next time the live one is asked.
+    expect((await open({ path: "src/main.ts" })).json()).toEqual({ delivered: true });
+    expect(live.got).toHaveLength(1);
+    await Promise.all([live.close(), ghost.close()]);
+  });
+
   it("drops a window that says it is closing", async () => {
     await connectedCount(0);
     const leaving = await fakeEditor({ focused: true });

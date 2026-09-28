@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { followAppTheme, openInEditor } from "./editor.ts";
+import { followAppTheme, openInEditor, useEditorState } from "./editor.ts";
 import { useRouter } from "./router.ts";
 
 const calls: { url: string; body: unknown }[] = [];
@@ -27,9 +27,16 @@ describe("the app's side of the editor channel", () => {
   });
 
   it("asks for a fresh window when it brings its own editor forward", async () => {
+    useEditorState.setState({ frameLoaded: true });
     await openInEditor("/workspace/demo/README.md", { line: 3 });
     expect(useRouter.getState().route.surface).toBe("editor");
-    expect(calls[0]).toMatchObject({ url: "/api/editor/open", body: { path: "/workspace/demo/README.md", line: 3, fresh: true } });
+    expect(calls[0]).toMatchObject({ url: "/api/editor/open", body: { path: "/workspace/demo/README.md", line: 3, fresh: true, starting: false } });
+  });
+
+  it("asks for a window yet to connect while its frame is still loading", async () => {
+    useEditorState.setState({ frameLoaded: false });
+    await openInEditor("/workspace/demo/README.md");
+    expect(calls[0]).toMatchObject({ body: { fresh: true, starting: true } });
   });
 
   it("keeps quiet when the bridge cannot take the theme", async () => {

@@ -12,6 +12,12 @@ interface Editor {
    * proves nothing; one that just connected or was just focused does.
    */
   seenAt: number;
+  /**
+   * When it last let an open go unanswered: a window whose tab is gone
+   * cannot open anything. It is passed over until it shows a sign of life
+   * again.
+   */
+  silentAt: number;
   pending: Map<string, (r: EditorOpenResult) => void>;
 }
 
@@ -65,7 +71,7 @@ export class EditorChannel {
 
   /** Take over a freshly upgraded socket from the extension. */
   attach(socket: WebSocket): void {
-    const editor: Editor = { socket, version: "", seenAt: this.now(), pending: new Map() };
+    const editor: Editor = { socket, version: "", seenAt: this.now(), silentAt: 0, pending: new Map() };
     this.editors.add(editor);
     socket.on("message", (raw: Buffer) => {
       let m: EditorClientMessage;
@@ -120,7 +126,7 @@ export class EditorChannel {
   private pick(since = 0): Editor | null {
     let best: Editor | null = null;
     for (const e of this.editors) {
-      if (e.version === "" || e.socket.readyState !== e.socket.OPEN || e.seenAt < since) continue;
+      if (e.version === "" || e.socket.readyState !== e.socket.OPEN || e.seenAt < since || e.silentAt > e.seenAt) continue;
       if (!best || e.seenAt > best.seenAt) best = e;
     }
     return best;
@@ -153,16 +159,21 @@ export class EditorChannel {
    * `fresh`, the app has just brought its editor frame forward, which takes
    * focus: a window that shows a sign of life from now on is preferred, for
    * a moment, over one merely known — a closed tab's lingering window above
-   * all.
+   * all. With `starting`, the app's frame is still loading: only a window
+   * that connects from now on will do, however long (within `waitMs`) it
+   * takes, since every window known already belongs to some other tab.
    */
   async open(
     path: string,
-    opts: { line?: number; column?: number; waitMs?: number; fresh?: boolean } = {},
+    opts: { line?: number; column?: number; waitMs?: number; fresh?: boolean; starting?: boolean } = {},
   ): Promise<EditorOpenResult> {
     const asked = this.now();
     let editor: Editor | null = null;
-    if (opts.fresh) editor = await this.waitForEditor(Math.min(this.freshMs, opts.waitMs ?? this.freshMs), asked);
-    editor ??= await this.waitForEditor(opts.waitMs ?? 0);
+    if (opts.starting) editor = await this.waitForEditor(opts.waitMs ?? 0, asked);
+    else {
+      if (opts.fresh) editor = await this.waitForEditor(Math.min(this.freshMs, opts.waitMs ?? this.freshMs), asked);
+      editor ??= await this.waitForEditor(opts.waitMs ?? 0);
+    }
     if (!editor) return { delivered: false, error: "no editor is open" };
     const id = randomBytes(6).toString("hex");
     const msg: Extract<EditorServerMessage, { type: "open" }> = { type: "open", id, path };
@@ -172,6 +183,7 @@ export class EditorChannel {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         target.pending.delete(id);
+        target.silentAt = this.now();
         resolve({ delivered: false, error: "the editor did not answer" });
       }, this.ackMs);
       target.pending.set(id, (r) => {

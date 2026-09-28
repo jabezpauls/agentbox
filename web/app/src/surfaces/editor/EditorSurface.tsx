@@ -61,6 +61,7 @@ export function EditorSurface() {
       // the listener goes on again each time.
       el.addEventListener("load", () => {
         setLoaded(true);
+        useEditorState.setState({ frameLoaded: true });
         attach();
       });
     },

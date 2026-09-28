@@ -7,8 +7,11 @@ import { toast, toastError } from "./toast.ts";
 /** How long the bridge may wait for an editor that is still starting up. */
 const WAIT_MS = 25_000;
 
-/** What the editor surface is being asked to show, for its progress line. */
-export const useEditorState = create<{ opening: string | null }>(() => ({ opening: null }));
+/**
+ * What the editor surface is being asked to show, for its progress line, and
+ * whether its frame has loaded yet.
+ */
+export const useEditorState = create<{ opening: string | null; frameLoaded: boolean }>(() => ({ opening: null, frameLoaded: false }));
 
 function basename(path: string): string {
   return path.replace(/\/+$/, "").split("/").pop() || path;
@@ -27,7 +30,10 @@ export async function openInEditor(path: string, at: { line?: number; column?: n
     // `fresh`: the app has just brought its own editor frame forward, which
     // takes focus and so says "here I am" — the bridge waits a moment for
     // that rather than send the file to a closed tab's lingering window.
-    const res = await http.post<EditorOpenResult>("/api/editor/open", { path, ...at, wait: WAIT_MS, fresh: true });
+    // `starting`: the frame is still loading, so only a window that connects
+    // from now on is this tab's.
+    const starting = !useEditorState.getState().frameLoaded;
+    const res = await http.post<EditorOpenResult>("/api/editor/open", { path, ...at, wait: WAIT_MS, fresh: true, starting });
     if (!res.delivered) {
       toast("error", `Couldn't open ${basename(path)} in the editor.`, res.error ? capitalise(res.error) : undefined, {
         retry: () => void openInEditor(path, at),
