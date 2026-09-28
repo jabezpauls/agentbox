@@ -183,7 +183,9 @@ COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
 
 COPY --chown=1000:1000 images/workspace/agentbox-workbench /usr/local/bin/agentbox-workbench
 COPY --chown=1000:1000 images/workspace/agentbox-review /usr/local/bin/agentbox-review
-COPY --chown=1000:1000 images/workspace/agentbox-preview /usr/local/bin/agentbox-preview
+# Root-owned, as every other binary on PATH: the sandbox user runs it and
+# cannot change it.
+COPY --chmod=0755 images/workspace/agentbox-preview /usr/local/bin/agentbox-preview
 COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 
