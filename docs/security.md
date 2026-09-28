@@ -192,12 +192,17 @@ proxy.
   public URL, or the request's `Host`) only when it is a plain
   `scheme://host[:port]`, between single quotes where the shell expands
   nothing. On the laptop the CLI keeps the device token in one file, readable
-  by its owner alone, and never prints it. `agentbox mount` needs the token
-  carried for the OS's WebDAV client, so it serves the box's `/api/dav/` on
-  `127.0.0.1` only, under a random 128-bit path, answering only a loopback
-  `Host` (no DNS rebinding), and forwarding nothing a normalising proxy could
-  turn into a path outside `/api/dav/` (dot segments, encoded or not, slashes,
-  backslashes). See [docs/cli.md](cli.md).
+  by its owner alone, and never prints anything the box sends as terminal
+  control. `agentbox mount` needs the token carried for the OS's WebDAV
+  client, so it serves the box's `/api/dav/` on `127.0.0.1` only, answering
+  only a loopback `Host` (no DNS rebinding), under a random 128-bit path, and
+  only to HTTP Basic credentials made for that run (a random 192-bit
+  password) that reach the mount helper outside its command line — except on
+  Windows, whose WebClient sends Basic credentials only over https, so there
+  the path is the only secret. It forwards nothing a normalising proxy could
+  turn into a path outside `/api/dav/`. `agentbox forward` of one of
+  agentbox's own ports hands that service to the laptop's loopback without
+  the gate, and warns first. See [docs/cli.md](cli.md).
 - **Headers.** Everything the gate serves carries `X-Content-Type-Options:
   nosniff` and — except its own pages, above — `Referrer-Policy: no-referrer`,
   and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing

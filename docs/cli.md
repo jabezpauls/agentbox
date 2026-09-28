@@ -26,8 +26,11 @@ and run it with `node agentbox.mjs …`. From a checkout: `cd web && npm ci &&
 npm run build -w cli && npm i -g ./cli`.
 
 `agentbox update` replaces the CLI with the build your box serves: it
-downloads `/cli/agentbox.mjs`, checks that it is an agentbox build and that it
-starts, and swaps it in with one rename. Once a day the CLI asks the box which
+downloads `/cli/agentbox.mjs`, checks that it is an agentbox build (and not
+larger than any build is) and that it starts, and swaps it in with one rename.
+From a box on plain http that is not this machine it refuses, since anyone on
+the way could swap what runs next; `--insecure-http` says the network is yours.
+The install script, likewise, downloads from an https box over https only. Once a day the CLI asks the box which
 version it runs (`/_gate/version`) and says so when they differ.
 
 ## Sign in
@@ -37,7 +40,8 @@ agentbox login https://work.example.com
 ```
 
 The CLI shows a code and opens your box's `/settings/devices?code=…` page (or
-prints it, over ssh or with `--no-browser`). Sign in there if you are not
+prints it, over ssh or with `--no-browser`) — only ever that page on the
+address you typed, whatever the box names. Sign in there if you are not
 already, check the code matches, enter your password and approve. The CLI
 never sees your password: it collects a **device token** of its own, which
 Settings → Devices lists and can revoke.
@@ -49,7 +53,9 @@ Settings → Devices lists and can revoke.
 
 `agentbox logout` revokes the token at the box and forgets it here. If the box
 cannot be reached, `logout --local` forgets it anyway; revoke it in Settings
-→ Devices. Signing in to the same box again revokes the token it replaces.
+→ Devices. Signing in to the same box again — under its name or a new
+`--name` — revokes the token it replaces, and a sign-in the CLI cannot confirm
+is revoked rather than kept.
 
 `agentbox whoami` says who and where you are signed in.
 
@@ -67,11 +73,14 @@ agentbox --box home status  # one command against another box
 
 ### Where the token is kept
 
-In `~/.config/agentbox/config.json` (or `$XDG_CONFIG_HOME/agentbox/`), and
-nowhere else: the file is created readable by you alone (`0600`, in a `0700`
-folder), and if it is ever found open to others the CLI closes it again and
-says so. The token is never printed, `--json` included. Treat the file like an
-ssh key: anyone who reads it has your box until you revoke the device.
+In `~/.config/agentbox/config.json` (or `$XDG_CONFIG_HOME/agentbox/`; on
+Windows `%APPDATA%\agentbox\config.json`), and nowhere else: the file is
+created readable by you alone (`0600`, in a `0700` folder), and if it is ever
+found open to others the CLI closes it again and says so. The token is never
+printed, `--json` included. Treat the file like an ssh key: anyone who reads it
+has your box until you revoke the device. Two `agentbox` commands changing it
+at once (a `login` while a `mount` runs) take turns through a lock file beside
+it, so neither loses the other's change.
 
 A few uploads may leave `uploads.json` beside it, so an interrupted upload can
 resume (see below); it holds upload ids, never a token.
@@ -116,15 +125,19 @@ or you detached, 1 otherwise.
 
 `agentbox attach` is the same herdr session as `/terminal` in the browser —
 every workspace, pane and agent — in your local terminal. **Ctrl-] then q**
-detaches and leaves everything running; Ctrl-] twice sends one Ctrl-]. Quitting
-herdr ends the command.
+detaches and leaves everything running; Ctrl-] twice sends one Ctrl-]. It
+works however your terminal sends the keys — the classic bytes, kitty's
+keyboard protocol (kitty, WezTerm, foot, Ghostty, once herdr turns it on) or
+xterm's modifyOtherKeys. Quitting herdr ends the command.
 
 `agentbox shell` is a login bash, as `/shell` in the browser. `--cwd <dir>`
 starts it somewhere else (it types a `cd` first). `exit` or Ctrl-] q leaves.
 
 Both speak ttyd's own WebSocket protocol through the gate, with your device
 token. The terminal runs raw, follows your window size, and asks the box to
-pause when it cannot keep up with the output. Whichever way the session ends
+pause when it cannot keep up with the output. If the box stops answering
+(a laptop that slept, a network that changed), the CLI notices within about a
+minute of missed keepalives and says so instead of hanging. Whichever way the session ends
 — detaching, the program exiting, a dropped connection, a signal — your
 terminal is put back: raw mode off, and every mode the remote program switched
 on (the alternate screen, mouse reporting, bracketed paste, a hidden cursor,
@@ -169,8 +182,14 @@ agentbox files edit proj/.env          # in $VISUAL or $EDITOR
 - **`edit`** downloads the file (or starts a new one), opens your editor on a
   private copy, and saves it back when the editor exits with changes. If the
   file changed on the box while you were editing, nothing is overwritten: the
-  CLI keeps your copy and says how to save it anyway.
+  CLI keeps your copy and says how to save it anyway. Ctrl-C while the editor
+  runs is the editor's, as with git. A link is edited through: the file it
+  points at is saved, and the link stays a link.
 - `-r` is needed for folders in `get`, `put`, `cp` and `rm`.
+- **Links in a folder you `put -r`**: a link to a file inside the folder goes
+  up as that file. A link to a folder, or any link that leads out of the
+  folder — a `secrets -> ~/.ssh` in a project — is skipped, and the CLI says
+  which. `-L` (`--follow`) follows them all.
 - Names are shown with control characters escaped, so a file name cannot send
   commands to your terminal. A name that is not valid UTF-8 can be listed,
   fetched and removed; downloaded, it gets a replacement character.
@@ -179,16 +198,16 @@ agentbox files edit proj/.env          # in $VISUAL or $EDITOR
 
 ```bash
 agentbox mount              # macOS: ~/agentbox/<box>; Linux: gvfs; Windows: a free drive
-agentbox mount ~/box        # there (Linux: a link to gvfs's folder)
-agentbox mount --no-mount   # just serve it, and print the URL
+agentbox mount ~/box        # there (Linux: a link to gvfs's folder, in a folder only you can open)
+agentbox mount --no-mount   # just serve it, and print the URL, user and password
 ```
 
 The workspace becomes a folder in Finder, your file manager or Explorer. Keep
 the command running while you use it; Ctrl-C unmounts.
 
 Your operating system's WebDAV client cannot carry a device token, so the CLI
-serves the box's WebDAV (`/api/dav/`) on `127.0.0.1` behind a random 128-bit
-path, adds the token itself, and mounts that with what the system has:
+serves the box's WebDAV (`/api/dav/`) on this machine, adds the token to what
+it forwards, and mounts that with what the system has:
 
 | System | Mounted with | Where |
 | --- | --- | --- |
@@ -200,18 +219,48 @@ When the helper is missing it says so and how to install it — on Debian or
 Ubuntu, `sudo apt install gvfs-backends libglib2.0-bin`. On Linux the folder
 is gvfs's FUSE view (under `$XDG_RUNTIME_DIR/gvfs/`), which a desktop session
 runs; without it (a server, a container) the mount is still there for GIO
-applications such as Files, at the `dav://` address the command prints. `--no-mount` works
-anywhere: point any WebDAV client at the URL it prints (`rclone` with
-`:webdav,url=<url>,vendor=other:`, `cadaver`, a file manager's "connect to
-server"). `--port` picks the local port.
+applications such as Files, at the `dav://` address the command prints.
+`--no-mount` works anywhere: point any WebDAV client at the URL it prints and
+sign in with the user and password it prints (`rclone`:
+`:webdav,url=<url>,vendor=other,user=agentbox,pass=<rclone obscure password>:`;
+`cadaver`; a file manager's "connect to server"). `--port` picks the local
+port.
 
-The local server answers only on loopback, only under its secret path, and
-only to a `Host` that is loopback (so a web page cannot reach it by DNS
-rebinding). It never forwards anything that could climb out of `/api/dav/`
-on the way to the box. Deleting sends things to the box's trash. Finder
-litters network folders with `._*` and `.DS_Store` files; those are deleted
-for good rather than trashed, and
-`defaults write com.apple.desktopservices DSDontWriteNetworkStores true`
+### What guards the mount
+
+Anyone who can talk to the local server reaches the box as this device, so it
+is guarded, while it runs, by:
+
+- **Loopback only.** It listens on `127.0.0.1`, and answers only a `Host` that
+  is loopback, so a web page cannot reach it by DNS rebinding.
+- **A secret path.** Nothing is answered outside a random 128-bit path. That
+  path is not a password: it appears in the helper's command line (`ps`), in
+  the mount table (`mount` on macOS), and in the name of gvfs's folder.
+- **A password.** Every request must carry HTTP Basic credentials: the user
+  `agentbox` and a random 192-bit password made for this run. The helper gets
+  it outside any command line — `mount_webdav` reads it from a file descriptor
+  (`-a`, from a file that has no name on disk), `gio mount` from its standard
+  input — and `--no-mount` prints it for you. So another user of this
+  machine who learns the address still cannot use it.
+- **On Windows, the secret path alone.** Windows' WebClient sends Basic
+  credentials only over https, so a `net use` mount is served without a
+  password. Another user of the same Windows machine who can read your
+  processes' command lines, or guess the path, could use it while it runs; on
+  a shared Windows machine, prefer `agentbox files`. (`--no-mount` on Windows
+  still asks for the password.)
+- **The Linux link.** Its target names the secret path, and anyone who can
+  list a folder can read a link in it, so `mount` makes the link only in a
+  folder that is yours and closed to everyone else (`chmod 700`), and refuses
+  otherwise.
+
+The token itself never leaves the CLI: the OS's client sees only the local
+server. Nothing that could climb out of `/api/dav/` (dot segments, encoded or
+not, slashes, NUL) is forwarded. A request may take as long as it needs — a
+large copy over a slow link is not cut off after five minutes.
+
+Deleting sends things to the box's trash. Finder litters network folders with
+`._*` and `.DS_Store` files; those are deleted for good rather than trashed,
+and `defaults write com.apple.desktopservices DSDontWriteNetworkStores true`
 stops them. Windows' WebClient refuses files over 50 MB unless
 `FileSizeLimitInBytes` is raised; use `agentbox files` for large files there.
 
@@ -227,6 +276,13 @@ gate to that port in the box, so a dev server works at full fidelity — its own
 origin, cookies, service workers and HMR. It needs a box whose gate has the
 tunnel endpoint; an older box says so. `herdr call`, `herdr socket` and the
 `apps` commands arrive with it.
+
+The local port listens on `127.0.0.1` only, but there it is the box's port
+with no sign-in in front: while `forward` runs, anyone on this machine can use
+it, and so can a web page, by DNS rebinding, when the service does not check
+its `Host`. Forwarding one of agentbox's own services (the editor on 8080, the
+terminals on 7681–7683, the bridge on 7800/7801, the gate on 7900/7901) hands
+out that service as this device, and the CLI warns before it does.
 
 ## Troubleshooting
 
