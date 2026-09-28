@@ -80,8 +80,24 @@ export function fakeStdin(isTTY = true): FakeStdin {
   return s;
 }
 
+const made: string[] = [];
+
+/** A fresh temporary folder, removed when the test file is done (see setup.ts). */
 export function tmpDir(prefix = "agentbox-cli-test-"): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+}
+
+export function removeTmpDirs(): void {
+  for (const dir of made.splice(0)) {
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch {
+      // gone already
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export interface Seen {
@@ -168,7 +184,8 @@ export async function runCli(
   const code = await run(argv, {
     io,
     configDir: opts.configDir,
-    env: { PATH: process.env.PATH, ...(opts.env ?? {}) },
+    // Temporary files (files edit) go where the tests clean up.
+    env: { PATH: process.env.PATH, TMPDIR: tmpDir(), ...(opts.env ?? {}) },
     platform: opts.platform ?? "linux",
     ...(opts.signal ? { signal: opts.signal } : {}),
   });
