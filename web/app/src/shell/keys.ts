@@ -112,6 +112,11 @@ export class GoSequence {
     return { consumed: false };
   }
 
+  /** Whether `key` would complete an armed sequence (without feeding it). */
+  takes(key: string): boolean {
+    return this.armed && key.toLowerCase() in LETTERS;
+  }
+
   reset(): void {
     this.armedAt = null;
   }

@@ -4,6 +4,8 @@ import type { FileEntry } from "@workbench/shared";
 import { formatAgo, formatBytes } from "../../lib/format.ts";
 import { splitExt } from "../../files/paths.ts";
 import { carriesFiles } from "../../files/drop.ts";
+import { stepTypeAhead } from "../../files/typeahead.ts";
+import { goSequence } from "../../shell/actions.ts";
 import * as sel from "../../files/selection.ts";
 import type { Selection } from "../../files/selection.ts";
 import { GitMark, iconFor, isDirLike } from "./icons.tsx";
@@ -233,16 +235,18 @@ export function FileList(p: Props) {
       set(sel.selectAll(order));
       return;
     }
-    // Type to jump: letters typed together find the next name starting with them.
+    // Type to jump: letters typed together find the next name starting with
+    // them — sharing the keyboard with ? and the g sequences (typeahead.ts).
     if (!mod && !e.altKey && e.key.length === 1 && /\S/.test(e.key)) {
-      e.preventDefault();
-      const now = Date.now();
-      const t = typeahead.current;
-      t.text = now - t.at < 700 ? t.text + e.key.toLowerCase() : e.key.toLowerCase();
-      t.at = now;
-      const start = t.text.length === 1 ? cursorIndex + 1 : Math.max(0, cursorIndex);
+      const step = stepTypeAhead(typeahead.current, e.key, Date.now(), (k) => goSequence.takes(k));
+      if (step.kind === "pass") return;
+      if (!step.share) {
+        e.preventDefault();
+        goSequence.reset();
+      }
+      const start = step.fresh ? cursorIndex + 1 : Math.max(0, cursorIndex);
       const rotated = [...order.slice(start), ...order.slice(0, start)];
-      const hit = rotated.find((path) => (byPath.get(path)?.name.toLowerCase() ?? "").startsWith(t.text));
+      const hit = rotated.find((path) => (byPath.get(path)?.name.toLowerCase() ?? "").startsWith(step.query));
       if (hit) set(sel.only(hit));
     }
   };

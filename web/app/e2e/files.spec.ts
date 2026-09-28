@@ -201,6 +201,25 @@ test("a file is renamed in place with F2", async ({ page }) => {
   expect(fs.existsSync(path.join(project, "picked.txt"))).toBe(false);
 });
 
+test("with the list focused, letters jump, and ? and g-sequences still reach the shell", async ({ page }) => {
+  await page.goto(filesRoute(project));
+  await row(page, "README.md").click();
+  // Type to jump.
+  await page.keyboard.type("notes.");
+  await expect(row(page, "notes.txt")).toHaveAttribute("aria-selected", "true");
+  // ? opens the keymap sheet rather than being typed into the list.
+  await page.keyboard.press("Shift+Slash");
+  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  // g then h goes Home.
+  await row(page, "notes.txt").click();
+  await page.keyboard.press("g");
+  await page.keyboard.press("h");
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test("a folder downloads as a zip", async ({ page }) => {
   await page.goto(filesRoute(project));
   await row(page, "docs").click({ button: "right" });
