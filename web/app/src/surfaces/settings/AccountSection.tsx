@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Check, Copy, Download, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { errorText, HttpError } from "../../api/http.ts";
 import { formatAgo, formatUntil } from "../../lib/format.ts";
@@ -193,9 +193,13 @@ function TwoFactor({ on, refresh }: { on: boolean; refresh(): void }) {
   const [asking, setAsking] = useState<null | "enable" | "disable">(null);
   const [enrol, setEnrol] = useState<Enrol | null>(null);
   // Leaving Settings closes the password prompt and an unfinished
-  // enrolment. Not the recovery codes: they are shown once and cannot be
-  // shown again, so they wait for "I have saved them".
+  // enrolment, and forgets the password it held. Not the recovery codes:
+  // they are shown once and cannot be shown again, so they wait for "I have
+  // saved them" — even when the confirm that produced them lands after you
+  // left, since two-factor is on by then.
+  const left = useRef(0);
   useWhenHidden(() => {
+    left.current += 1;
     setAsking(null);
     setEnrol((e) => (e?.step === "codes" ? e : null));
   });
@@ -228,8 +232,13 @@ function TwoFactor({ on, refresh }: { on: boolean; refresh(): void }) {
           twoFactor={false}
           onClose={() => setAsking(null)}
           onSubmit={async (c) => {
+            const visit = left.current;
             try {
               const setup = await gateApi.totpSetup(c);
+              // Settings was left while this was on its way: nothing is
+              // committed until the code is confirmed, so drop it, and the
+              // password with it, rather than reopen a dialog nobody asked for.
+              if (left.current !== visit) return null;
               setAsking(null);
               setEnrol({ step: "setup", password: c.password, setup });
               return null;

@@ -51,6 +51,21 @@ describe("Settings → Account, leaving the surface", () => {
     expect(screen.getByRole("dialog").querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("");
   });
 
+  it("drops a two-factor setup that lands after Settings was left", async () => {
+    let finish: (v: unknown) => void = () => {};
+    gate.totpSetup.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+    const user = userEvent.setup();
+    const { rerender } = render(<Host active />);
+    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    await user.type(screen.getByRole("dialog").querySelector('input[type="password"]')!, "hunter2");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    // Away before the gate answers.
+    rerender(<Host active={false} />);
+    await act(async () => finish({ secret: "JBSWY3DPEHPK3PXP", otpauthUrl: "otpauth://x", qrSvg: "<svg/>" }));
+    rerender(<Host active />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("clears the change-password form", async () => {
     const user = userEvent.setup();
     const { container, rerender } = render(<Host active />);
