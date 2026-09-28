@@ -183,7 +183,7 @@ The list is drawn a screenful at a time, so a folder of thousands is as light
 as one of ten; a very large folder pages in as you scroll and sorts by name
 only, the order the box reads it in.
 
-## Apps
+## The Apps surface
 
 ![Apps, with their links and sharing](images/apps-light.png)
 
@@ -330,8 +330,8 @@ link printed in a terminal does the same. Exit codes: 0 ready, 1 error, 5 the
 server never answered (its last output is printed).
 
 A **pinned** app with a command is started again, in a tab of an **Apps**
-workspace, whenever the box starts; with a link that does not expire, that is
-a staging site.
+workspace (in place of the tab it had before), whenever the box starts; with
+a link that does not expire, that is a staging site.
 
 ### The panel
 
@@ -384,7 +384,10 @@ through — **path fixes**, on by default for every app:
    at runtime — `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`,
    workers, history, and URLs set on elements — and gives the page in-memory
    storage where its opaque origin has none;
-4. in CSS, `url(/…)` is put under the app.
+4. in CSS, `url(/…)` is put under the app;
+5. icons drawn from a sprite in another file (`<use href="/icons.svg#x">`,
+   as create-vite's React template does) are copied into the page, since an
+   opaque page may not use another file's SVG.
 
 Pages are requested uncompressed for this and nothing else is touched:
 scripts, images and streams pass through as the app sent them. If a page
@@ -411,6 +414,8 @@ While you have a private app open, a site that knows its address can reach it
 as you; keep private app addresses to yourself and sign out when you are done
 (see [the security model](security.md#apps)).
 
+Moving a shared app to another port makes it private again; share it anew.
+
 **Stop sharing** makes the app private again at once, and cuts off anyone
 still connected — their page, its streams and its live-reload socket. A link
 that expires does the same within 30 seconds (and opens for nobody from the
@@ -428,8 +433,9 @@ bridge (ports 8080, 7681–7683, 7800, 7801) and the box's front door (7900,
 
 `npm run fidelity -w app` runs the fidelity suite: the real gate and bridge
 behind TLS, with a checked-in create-vite React-TS app started both by
-`agentbox-preview` and plainly with `npm run dev`, and two small apps (browser
-storage; a cookie sign-in with a live event stream), in Chromium, Firefox and
+`agentbox-preview` and plainly with `npm run dev`, and three small apps
+(browser storage; a cookie sign-in with a live event stream; icons from an
+SVG sprite), in Chromium, Firefox and
 WebKit. Each app must render in the panel and full screen, load its images,
 reload live with its state kept, work shared with a visitor who is not signed
 in, and cut that visitor off when sharing stops; the passcode page and an
@@ -712,7 +718,10 @@ or bypass policy for the hostname, or use agentbox's own sign-in alone.
 The app is `web/app` (React, Vite, zustand); `cd web && npm ci && npm test`
 runs every package's unit tests, and `npm run e2e -w app` the Playwright suite
 against a real stack — herdr, the bridge serving the built app, and the gate in
-front — started by `web/app/e2e/start-stack.mjs`. The suite stands in a page
+front — started by `web/app/e2e/start-stack.mjs`. Each test signs in from an
+address of its own, and the harness starts the gate with a higher ceiling on
+sign-ins across all addresses (`e2e/gate-harness.mjs`, test-only), so the
+suite can be repeated on one stack (`--repeat-each`). The suite stands in a page
 with a text area for code-server; to check the editor against the real one,
 start the stack and a code-server from the workspace image sharing the host's
 loopback, so its extension reaches the bridge:

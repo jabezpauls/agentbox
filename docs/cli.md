@@ -101,7 +101,7 @@ clean.
 | `shell [--cwd <dir>]` | a bash shell in the box |
 | `files ls\|stat\|get\|put\|rm\|mv\|cp\|mkdir\|cat\|edit` | the workspace's files |
 | `mount [dir] [--no-mount]` | the workspace as a folder here (WebDAV) |
-| `forward <port>[:<local>]…` | a port in the box at `localhost` here (needs a box with tunnels) |
+| `forward <port>[:<local>]…` | a port in the box at `localhost` here |
 | `apps ls\|open\|share\|unshare\|forward` | the box's apps (`/a/<id>/`): list, open, share (`--expires 7d`, `--passcode`, `--set-passcode`), make private, forward to localhost |
 | `agents ls` · `review ls\|open` | the agents at work, and pages awaiting your review |
 | `herdr call <method> [json]` · `herdr socket [path]` | raw herdr RPC, and a local Unix socket that speaks to the box's herdr (not on Windows) |
@@ -266,7 +266,7 @@ and `defaults write com.apple.desktopservices DSDontWriteNetworkStores true`
 stops them. Windows' WebClient refuses files over 50 MB unless
 `FileSizeLimitInBytes` is raised; use `agentbox files` for large files there.
 
-## Forward (with tunnels)
+## Forward
 
 ```bash
 agentbox forward 5173           # the box's port 5173 at http://localhost:5173
@@ -275,8 +275,7 @@ agentbox forward 5173:3000 8080 # remote 5173 at local 3000, and 8080 as 8080
 
 Each connection to the local port gets its own WebSocket tunnel through the
 gate to that port in the box, so a dev server works at full fidelity — its own
-origin, cookies, service workers and HMR. It needs a box whose gate has the
-tunnel endpoint; an older box says so. `apps forward <app> [local]` does the
+origin, cookies, service workers and HMR. `apps forward <app> [local]` does the
 same for an app by name; `herdr socket` puts the box's herdr at a local Unix
 socket (`HERDR_SOCKET_PATH=<it> herdr`), private to you.
 

@@ -1,5 +1,7 @@
 # Previews, sharing, installer and agent selection
 
+> **Superseded by [2026-09-28-one-app-design.md](2026-09-28-one-app-design.md)** for previews, sharing and `--preview` (now apps under `/a/<id>/` and `--sharing`); agent selection still stands.
+
 Status: approved design, September 2026. Builds on the deployed agentbox +
 Workbench + Review stack. Implement as one phase after the `hardening` branch
 merges, since it touches the preview code that branch is changing.

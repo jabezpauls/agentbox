@@ -1,5 +1,7 @@
 # Review: an agent-to-human review surface inside Workbench
 
+> **Superseded in part by [2026-09-28-one-app-design.md](2026-09-28-one-app-design.md):** Review now lives in the app's dock, and its API is under `/api/review`, not `/workbench/api`.
+
 Status: approved design, September 2026. Supersedes the lavish-axi integration.
 
 ## Purpose

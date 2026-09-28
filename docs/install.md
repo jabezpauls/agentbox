@@ -114,13 +114,9 @@ can neither read nor change any of it. Any page you open without a session
 sends you to `/login`, which asks for the username and password — and a
 six-digit code once two-factor is on — and then returns you where you were
 going. Tick **Remember this device** to stay signed in for 30 days; otherwise a
-session ends after 12 hours unused. The paths behind it:
-
-| Path | What it is |
-| --- | --- |
-| `/vscode/` | VS Code in the browser |
-| `/workbench` | The Workbench |
-| `/terminal`, `/shell`, `/monitor` | herdr's TUI, a bash shell, btop |
+session ends after 12 hours unused. You land on **Home**; every surface is
+described in [the app](workbench.md). Settings → Account lists your sessions
+and ends any of them.
 
 **Changing the password.** `./scripts/agentbox passwd` prompts for a new one
 (leave it blank to generate one) and signs every session out. The gate's store
@@ -135,20 +131,13 @@ never enough for them, however recently you signed in. Everything else never
 asks.
 
 **Two-factor.** Optional, and recommended on a box reachable from the internet.
-The app's Settings screen will enrol it; until your version has that screen,
-use the gate's API from a signed-in tab. In the browser's developer console on
-any page of the box:
-
-```js
-const post = (p, b) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
-const { secret, otpauthUrl } = await post("/_gate/totp/setup", { password: "your password" });
-// Add `secret` (or `otpauthUrl`) to your authenticator app, then confirm with the code it shows:
-await post("/_gate/totp/confirm", { password: "your password", code: "123456" });   // returns your ten recovery codes
-```
-
-Keep the ten recovery codes it returns — each signs you in once in place of a
-code. Turning it on or off signs
-every other session out. Lost the phone and the codes? On the server:
+**Settings → Account → Two-factor → Turn on**: enter your password, scan the
+QR code with an authenticator app (or type the secret shown under it), and
+enter the six-digit code it shows. You are then given ten recovery codes —
+copy or download them before closing the dialog; each signs you in once in
+place of a code. From then on the sign-in page asks for a code after the
+password. Turning two-factor on or off signs every other session out. Lost
+the phone and the codes? On the server:
 
 ```bash
 ./scripts/agentbox totp reset     # two-factor off, every session signed out
@@ -234,6 +223,7 @@ to prefer behind-proxy mode there.
 
 ```bash
 ./scripts/agentbox status
+./scripts/agentbox restart         # the whole stack, in order
 ./scripts/agentbox logs code
 ./scripts/agentbox workbench       # the Workbench bridge's log
 ./scripts/agentbox logs gate       # sign-ins, lockouts, admin commands

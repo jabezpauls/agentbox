@@ -72,7 +72,10 @@ proxy.
   exactly `/cli/install` and `/cli/agentbox.mjs` (the CLI, below) and the
   device-approval page stay in the gate; `/a/<id>/…` is an app, decided by the
   app policy (below) and served from the bridge's data plane; `/vscode/*` goes
-  to code-server with the prefix stripped; `/terminal`, `/shell` and
+  to code-server with the prefix stripped — except code-server's own port
+  proxy (`/vscode/proxy/…`, `/vscode/absproxy/…`, in any letter case), which
+  would serve any sandbox port on the box's origin outside the app policy:
+  the gate answers `404`, and code-server runs with `--disable-proxy` besides; `/terminal`, `/shell` and
   `/monitor` go to their ttyd services unchanged; everything else goes to the
   bridge unchanged.
 - **Two exemptions, for names that are not the box's.** A WebDAV client names files in the path,
@@ -193,8 +196,8 @@ proxy.
 - **Device tokens.** The CLI signs in with a device flow: it asks the gate for a
   code, the owner — signed in, in a browser, entering the password again —
   approves it on `/settings/devices?code=XXXX-XXXX`, and the CLI collects a
-  token once. One client address may have three logins waiting, and a hundred
-  may wait in all. Tokens are `abx_` plus 256 random bits, stored as SHA-256 digests with a
+  token once. One client address (an IPv6 client: its /64) may have three
+  logins waiting, one IPv6 /48 ten, and a hundred may wait in all. Tokens are `abx_` plus 256 random bits, stored as SHA-256 digests with a
   name, when they were made and last used, and from where; they work as
   `Authorization: Bearer` on every authenticated route, ttyd included. They
   cannot manage the account — sessions, the password, two-factor, approving
@@ -222,9 +225,11 @@ proxy.
   the gate, and warns first. See [docs/cli.md](cli.md).
 - **Headers.** Everything the gate serves carries `X-Content-Type-Options:
   nosniff` and — except its own pages, above — `Referrer-Policy: no-referrer`,
-  and HTML carries `frame-ancestors 'self'`. The sign-in pages allow nothing
-  but their own files (`default-src 'none'`). HSTS stays with whatever
-  terminates TLS.
+  and HTML carries `frame-ancestors 'self'`. The gate's own pages — sign-in
+  and device approval — allow nothing but their own files (`default-src
+  'none'`) and can never be framed (`frame-ancestors 'none'`), not even by
+  the box's own origin, which also serves what the sandbox controls. HSTS
+  stays with whatever terminates TLS.
 - **Tunnels.** `GET /_gate/tunnel?target=tcp:<port>|herdr` is a WebSocket of
   raw bytes that `agentbox forward` and `agentbox herdr` ride. It takes a
   device token and nothing else — a page on another site can never attach
@@ -245,7 +250,9 @@ An app is a server in the sandbox with one URL, `/a/<id>/` on the box (the id
 is 128 random bits). The registry is the gate's, in its own store: the
 sandbox registers, changes and removes apps on the gate's :7901 listener —
 which the proxy never forwards to, and which refuses the proxy's own address —
-and every app it registers is private. Who may open an app is changed only on
+and every app it registers is private. Moving a shared app to another port
+makes it private again, so the sandbox cannot point a public link at a server
+the owner never shared. Who may open an app is changed only on
 the gate's public side (`/_gate/apps/<id>/visibility`), by the owner's session
 or device token. That takes no password in the request, unlike the account
 changes above: a sandbox with internet access can publish itself through a

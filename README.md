@@ -15,6 +15,12 @@ curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh
 That installs Docker if it is missing, generates a password, obtains a TLS
 certificate and starts the stack. It prints the password once.
 
+**First steps.** Open `https://code.example.com` and sign in as `admin` with
+that password ([signing in](docs/install.md#signing-in)). Turn on two-factor
+in Settings → Account. Install the CLI on your laptop from Settings → Devices
+& CLI ([docs/cli.md](docs/cli.md)). Ask an agent to put something in your
+preview, then press **Share** on it ([sharing an app](docs/workbench.md#sharing-an-app)).
+
 ## What you get
 
 | Path | What it is |

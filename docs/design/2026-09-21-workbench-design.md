@@ -1,5 +1,7 @@
 # Workbench: a browser client for herdr inside agentbox
 
+> **Superseded in part by [2026-09-28-one-app-design.md](2026-09-28-one-app-design.md):** the Workbench is now one surface of the app at `/`, previews are apps under `/a/<id>/`, and the gate does sign-in.
+
 > **Partly superseded.** Everything about lavish-axi below — the panel, the
 > `lavish` service, its hostname and its environment variables — was replaced
 > in September 2026 by Review, which agentbox owns and serves under the
