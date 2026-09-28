@@ -720,6 +720,23 @@ node e2e/tools/editor-check.mjs http://127.0.0.1:27900 <a file in the workspace>
 it, tours the other surfaces and checks the editor kept its frame and the
 unsaved text; then that VS Code turns dark and light with the app, and that
 with a second tab open and the first closed — code-server keeps a closed
-tab's window for hours — *Open in editor* lands in the tab in use. `e2e/tools/screenshots.mjs <gate url> docs/images` stages a
-believable box and takes this document's pictures, every surface in light and
-dark.
+tab's window for hours — *Open in editor* lands in the tab in use.
+
+This document's pictures are public, so they are taken of a clean box and
+never of a developer's machine:
+
+```bash
+cd web && npm run build && cd app
+e2e/tools/clean-box.sh up agentbox/workspace:<tag>
+MOCK_APPS=e2e/tools/apps-fixture.json node e2e/tools/screenshots.mjs http://127.0.0.1:27950 ../../docs/images
+e2e/tools/clean-box.sh down
+```
+
+`clean-box.sh` starts the sandbox in a container of its own — host `agentbox`,
+user `coder`, fixture projects in `/workspace`, its own process table,
+network, limits and disks — with this checkout's bridge, app and editor
+extension, and the gate beside it. `screenshots.mjs` checks what it is
+pointed at (the paths, the user, a process table and ports with nothing of a
+desktop in them) and refuses anything else, then stages the box and takes
+every surface in light and dark. `MOCK_APPS` stands in for the app API until
+the bridge has one.

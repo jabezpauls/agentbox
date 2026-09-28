@@ -69,6 +69,35 @@ export function seed(root) {
   } catch {
     // No git here: the project is still a folder of files.
   }
+  // What the dev server shows, built: served as-is in the pictures' preview.
+  write(
+    "dist/index.html",
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>goofy-app</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif;
+             background: radial-gradient(circle at 30% 20%, #ffe36e, #ff8fb1 45%, #8b7cff); color: #1d1638; }
+      main { text-align: center; padding: 32px; }
+      h1 { font-size: 44px; margin: 0 0 8px; letter-spacing: -0.02em; }
+      p { margin: 0 0 24px; font-size: 17px; }
+      button { font: inherit; font-weight: 600; padding: 12px 22px; border: 0; border-radius: 999px; background: #1d1638; color: #fff;
+               box-shadow: 0 6px 0 #0006; transform: rotate(-3deg); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Hello from goofy-app</h1>
+      <p>A small React page, running in the box.</p>
+      <button>Make it goofier</button>
+    </main>
+  </body>
+</html>
+`,
+  );
   fs.mkdirSync(path.join(root, "notes"), { recursive: true });
   fs.writeFileSync(path.join(root, "notes/ideas.txt"), "Things to try next.\n");
   return demo;
