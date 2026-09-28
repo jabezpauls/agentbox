@@ -1,21 +1,19 @@
 import { GLOBAL_OPTIONS, type OptionSpec } from "../args.js";
 import { EXIT } from "../errors.js";
 import { VERSION } from "../version.js";
+import { AGENT_COMMANDS } from "./agents.js";
+import { APPS_COMMANDS } from "./apps.js";
 import { AUTH_COMMANDS } from "./auth.js";
 import { FILES_COMMANDS } from "./files.js";
 import { FORWARD_COMMANDS } from "./forward.js";
+import { HERDR_COMMANDS } from "./herdr.js";
 import { MOUNT_COMMANDS } from "./mount.js";
 import { STATUS_COMMANDS } from "./status.js";
 import { TERMINAL_COMMANDS } from "./terminal.js";
 import type { Command } from "./types.js";
 import { UPDATE_COMMANDS } from "./update.js";
 
-/**
- * Every command, in the order `agentbox --help` lists them. Still to come,
- * with the box's app registry and herdr tunnel (see tunnel.ts): `herdr call`
- * and `herdr socket` (target `herdr`), and `apps ls|open|share|unshare|forward`
- * over `/api/apps` and `/_gate/apps/:id/visibility`.
- */
+/** Every command, in the order `agentbox --help` lists them. */
 export const COMMANDS: Command[] = [
   ...AUTH_COMMANDS,
   ...STATUS_COMMANDS,
@@ -23,6 +21,9 @@ export const COMMANDS: Command[] = [
   ...FILES_COMMANDS,
   ...MOUNT_COMMANDS,
   ...FORWARD_COMMANDS,
+  ...APPS_COMMANDS,
+  ...AGENT_COMMANDS,
+  ...HERDR_COMMANDS,
   ...UPDATE_COMMANDS,
 ];
 

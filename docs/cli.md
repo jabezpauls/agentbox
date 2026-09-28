@@ -102,6 +102,9 @@ clean.
 | `files ls\|stat\|get\|put\|rm\|mv\|cp\|mkdir\|cat\|edit` | the workspace's files |
 | `mount [dir] [--no-mount]` | the workspace as a folder here (WebDAV) |
 | `forward <port>[:<local>]…` | a port in the box at `localhost` here (needs a box with tunnels) |
+| `apps ls\|open\|share\|unshare\|forward` | the box's apps (`/a/<id>/`): list, open, share (`--expires 7d`, `--passcode`, `--set-passcode`), make private, forward to localhost |
+| `agents ls` · `review ls\|open` | the agents at work, and pages awaiting your review |
+| `herdr call <method> [json]` · `herdr socket [path]` | raw herdr RPC, and a local Unix socket that speaks to the box's herdr (not on Windows) |
 | `update` | the CLI your box serves, in place of this one |
 
 `agentbox <command> --help` has the details.
@@ -198,7 +201,7 @@ agentbox files edit proj/.env          # in $VISUAL or $EDITOR
 
 ```bash
 agentbox mount              # macOS: ~/agentbox/<box>; Linux: gvfs; Windows: a free drive
-agentbox mount ~/box        # there (Linux: a link to gvfs's folder, in a folder only you can open)
+agentbox mount ~/box        # there (Linux: a link to gvfs's folder)
 agentbox mount --no-mount   # just serve it, and print the URL, user and password
 ```
 
@@ -248,10 +251,9 @@ is guarded, while it runs, by:
   processes' command lines, or guess the path, could use it while it runs; on
   a shared Windows machine, prefer `agentbox files`. (`--no-mount` on Windows
   still asks for the password.)
-- **The Linux link.** Its target names the secret path, and anyone who can
-  list a folder can read a link in it, so `mount` makes the link only in a
-  folder that is yours and closed to everyone else (`chmod 700`), and refuses
-  otherwise.
+- **The Linux link** names the secret path in its target, which anyone who
+  can list its folder can read; the password above is what that leaves them
+  short of.
 
 The token itself never leaves the CLI: the OS's client sees only the local
 server. Nothing that could climb out of `/api/dav/` (dot segments, encoded or
@@ -274,8 +276,9 @@ agentbox forward 5173:3000 8080 # remote 5173 at local 3000, and 8080 as 8080
 Each connection to the local port gets its own WebSocket tunnel through the
 gate to that port in the box, so a dev server works at full fidelity — its own
 origin, cookies, service workers and HMR. It needs a box whose gate has the
-tunnel endpoint; an older box says so. `herdr call`, `herdr socket` and the
-`apps` commands arrive with it.
+tunnel endpoint; an older box says so. `apps forward <app> [local]` does the
+same for an app by name; `herdr socket` puts the box's herdr at a local Unix
+socket (`HERDR_SOCKET_PATH=<it> herdr`), private to you.
 
 The local port listens on `127.0.0.1` only, but there it is the box's port
 with no sign-in in front: while `forward` runs, anyone on this machine can use
