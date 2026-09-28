@@ -1,36 +1,92 @@
-# The Workbench
+# The app
 
-The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
-the agent multiplexer that runs inside the sandbox. The app it belongs to is
-served at the root of your box, behind the same sign-in as everything else, and
-the Workbench is its `/workbench` route. Links from before the app moved to the
-root — `/workbench/…`, including old review links — redirect there.
+agentbox is one app, served at the root of your box behind the same sign-in as
+everything else. A rail on the left — a bottom bar on a phone — moves between
+its surfaces:
 
-The editor at `/vscode/` is where you read and write code. The TUI at `/terminal` is
-where you drive agents from a keyboard on a small screen. The Workbench is the
-surface in between: several agents across several workspaces, all visible at
-once, each in a live terminal, with the web apps they build running beside
-them. herdr owns the session — the panes, the layouts, the agent processes —
-so closing the tab detaches rather than kills, and the TUI and the Workbench
-are two views of one session rather than two sessions.
+| Surface | Route | What it is for |
+| --- | --- | --- |
+| **Home** | `/` | what needs you, your projects, your apps and how the box is doing |
+| **Workbench** | `/workbench` | every agent in a live terminal, across workspaces and tabs |
+| **Editor** | `/editor` | VS Code (code-server), kept running while you use the rest |
+| **Files** | `/files/<path>` | the workspace as a file manager: upload, download, trash, quick look |
+| **Apps** | `/apps`, `/apps/<id>` | the dev servers in the box, their links and who can open them |
+| **System** | `/system`, `/system/monitor` | CPU, memory, disks, processes, versions; btop in full |
+| **Settings** | `/settings/<section>` | account and two-factor, devices and the CLI, sharing, appearance |
 
-![The Workbench in light mode](images/workbench-light.png)
+![Home in light mode](images/home-light.png)
 
-Everything it shows comes from herdr over a local socket. The bridge that
-serves the app holds one connection to herdr and fans its events out to every
-open tab, so two browsers, a phone and the TUI all stay in step. Nothing is
-stored in the browser except your theme, the sidebar's width and the
-inspector's own shape — whether it is open, which tab it shows and how wide it
-is.
+Every route is a real address: reload, bookmark, send it to yourself, press
+back. Files takes the absolute path — `/files/workspace/proj/src` is
+`/workspace/proj/src`, and a link to a file opens it in quick look over its
+folder — the same shape `agentbox open <path>` uses from a laptop. Links from
+before the app moved to the root — `/workbench/…`, including old review links —
+redirect to `/workbench`.
+
+**Nothing reloads when you move.** A surface is built the first time you visit
+it and kept after: the editor's frame is never recreated (unsaved text stays
+unsaved, not lost), the Workbench's terminals keep their sockets, a preview
+keeps running. A surface you are not looking at stops polling — System reads
+the box every two seconds only while it is showing — but keeps its sockets.
+
+**The dock** on the right holds **Preview** and **Review** on every surface.
+`⌃⌥D` (Ctrl+Alt+D) or the rail's dock button opens and closes it; drag its edge
+to resize it. Whether it is open and how wide it is are remembered per surface —
+open beside the terminals, closed over Files, say. On a phone it is a
+full-screen sheet.
+
+**The palette**, `⌘K` / `Ctrl+K` (or `⌃⌥K` from anywhere, the editor
+included), searches everything: the surfaces, projects, files by name (asked of
+the box as you type), agents, apps, open reviews, the Workbench's workspaces,
+tabs and panes, and every command — theme, settings, the trash, the monitor,
+sign out. Type a port number to preview it, or a path to open it in Files.
+
+Nothing is stored in the browser but conveniences: the theme, the dock's shape
+per surface, the Workbench sidebar's width, Files' sort and view options, the
+default share expiry, which finished agents you have already looked at. What
+matters — sessions, apps, sharing — lives in the gate and the box.
+
+## Home
+
+What needs you comes first, with the count as the page's one big number: an
+agent blocked on a question, a review waiting for your comments, a pinned app
+that should be running and is not, an agent that finished and you have not
+looked at since. Each row is one step from the thing itself — the pane, the
+review in the dock, the app. A finished agent leaves the list once you focus
+its pane, or when you dismiss it.
+
+**Projects** are the workspace's top-level folders, each a card with its git
+branch, uncommitted changes, ahead and behind, when it last changed, the agents
+working in it and the servers it runs. From a card: **Editor**, **Files**,
+**Terminal** (a tab in the project's own workspace, or a new workspace named
+after the project) and **Agent** (the same, with Claude Code, Codex or another
+agent the box has started in it). **New project** clones a Git repository —
+its card shows git's progress and can stop it — or makes an empty folder.
+
+Below: your **apps** with whether they are running and who can open them, and
+a **system** strip — the sandbox's CPU and memory against the host's, and the
+workspace disk.
+
+## The Workbench
 
 ![The Workbench in dark mode](images/workbench-dark.png)
 
-## The layout
+The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
+the agent multiplexer that runs inside the sandbox: several agents across
+several workspaces, all visible at once, each in a live terminal. herdr owns
+the session — the panes, the layouts, the agent processes — so closing the tab
+detaches rather than kills, and the TUI at `/terminal` and the Workbench are
+two views of one session rather than two sessions.
+
+Everything it shows comes from herdr over a local socket. The bridge that
+serves the app holds one connection to herdr and fans its events out to every
+open tab, so two browsers, a phone and the TUI all stay in step.
 
 - **Sidebar** — workspaces, their tabs, and a flat list of every agent with its
   status. A workspace rolls up the worst status inside it, so a blocked agent
   is visible without expanding anything. `prefix+b` or `⌘B` hides it, and the
-  edge between it and the grid can be dragged to resize it.
+  edge between it and the grid can be dragged to resize it. On a narrow screen
+  it is a sheet over the terminals.
 - **Tab bar** — the tabs of the focused workspace. Rename in place with `F2`,
   close with `Delete`, walk them with the arrow keys.
 - **Pane grid** — herdr's layout, rendered as live terminals. Drag a split to
@@ -39,17 +95,15 @@ is.
 - **Composer** — appears under the grid when the focused pane holds an agent.
   `Enter` sends, `Shift+Enter` starts a new line, and `Escape` puts focus back
   in the terminal.
-- **Inspector** — a column on the right with two panels: **Preview** for the
-  apps running in the box, and **Review** for the pages agents publish for you
-  to comment on.
 
-## Working with agents
+### Working with agents
 
-Create a workspace from the palette (`⌘/Ctrl+K` → *New workspace*) or with
-`prefix+⇧N`. The picker is confined to `/workspace`; tick *Create a git
+Create a workspace from the palette (*New workspace*), with the sidebar's `+`,
+or with `prefix+⇧N`. The picker is confined to `/workspace`; tick *Create a git
 worktree* to branch an existing repository into a workspace of its own, which
 is the usual way to put two agents on the same codebase without them fighting
-over the index.
+over the index. Home's and Files' *Terminal* and *Agent* buttons open a tab in
+the right place for you.
 
 Then run an agent in a pane like you would anywhere else:
 
@@ -57,24 +111,153 @@ Then run an agent in a pane like you would anywhere else:
 claude          # or codex
 ```
 
-herdr notices the agent and the Workbench starts tracking it: its status
-appears beside the pane title, in the tab, in the workspace rollup and in the
-agent list. When an agent blocks on a question in a pane you are not looking
-at, a toast appears and the document title picks up a count, so a background
-tab still tells you. *Next blocked agent* in the palette jumps to the one
-waiting longest.
+herdr notices the agent and the app starts tracking it: its status appears
+beside the pane title, in the tab, in the workspace rollup, in the agent list,
+on Home and as a dot on the rail. When an agent blocks on a question in a pane
+you are not looking at, a toast appears and the document title picks up a
+count, so a background tab still tells you. *Next blocked agent* in the palette
+jumps to the one waiting longest.
 
 Closing a pane, a tab or a workspace that still has a working agent asks first.
 
+## The editor
+
+![The editor, kept running inside the app](images/editor-dark.png)
+
+`/editor` frames VS Code (code-server, served by the gate at `/vscode/`). The
+frame is built the first time you open the editor and never rebuilt, so VS Code
+keeps its state — open files, unsaved edits, its own terminals — while you use
+the rest of the app. **Open in editor**, from a file in Files, a project on
+Home, an app or the palette, brings the editor forward (starting it if it has
+not been opened yet) and asks it to open the file, at a line when there is one:
+the **agentbox connect** extension baked into the image holds a socket to the
+bridge and opens what it is sent, and the bridge waits for it while a cold
+editor starts.
+
+Inside the editor VS Code owns the keyboard, `⌘K` included. The app's `⌃⌥`
+chords still work there — the app listens on the editor's frame, which is on
+the same origin — and VS Code binds none of them by default.
+
+## Files
+
+![Files, with the folder tree and git marks](images/files-light.png)
+
+Files is the workspace as a file manager would show it: a folder tree beside a
+list, breadcrumbs, sort by name, size or date, a filter, and git status marks
+(`M` modified, `A` added, `U` untracked, `D` deleted, `R` renamed, `C`
+conflicted). Hidden files and the home folder (`/home/coder`) are one switch
+away under the view options.
+
+- **Upload** by dropping files or whole folders anywhere on the list (or on a
+  folder, to put them there), or with *Upload*. Uploads go up in chunks and
+  keep going while you use the rest of the app; a dropped connection resumes
+  where the server says it got to. A name that is already taken asks, once for
+  all of them: *Replace* (the old one goes to the trash), *Keep both* (`name
+  (2).ext`) or *Skip*.
+- **Download** a file as itself, a folder or several things as a zip.
+- **Rename** in place with `F2`. **Drag** rows onto a folder, the tree or a
+  breadcrumb to move them; hold `Alt` or `Ctrl` to copy.
+- **Delete** sends to the trash, with an *Undo* in the toast. The **Trash**
+  (`/files?trash=1`) restores things to where they were, or deletes them for
+  good; nothing else deletes outright.
+- **Quick look** (`Space`, or a click on a file) shows text and code, rendered
+  Markdown, pictures and PDFs over the list; `←` and `→` walk the folder. HTML
+  and SVG show as their source, never as a live page, and rendered Markdown is
+  sanitised.
+- From any file or folder: **Open in editor**, **Terminal here**, **Claude
+  Code here** (or another agent), **Copy path**, **Download**, **Duplicate**,
+  and for a folder **Serve as an app**.
+
+The list is drawn a screenful at a time, so a folder of thousands is as light
+as one of ten; a very large folder pages in as you scroll and sorts by name
+only, the order the box reads it in.
+
+## Apps
+
+![Apps, with their links and sharing](images/apps-light.png)
+
+Every app the box knows: its name and port, whether something is answering on
+it (and which process, in which pane), who made it and when, and who can open
+it until when. **Preview** puts it in the dock; the arrow opens its own link;
+**Share** chooses private, anyone with the link, or link and passcode, and for
+how long — and copies the link as soon as it is public. A menu per app
+restarts, stops, renames, pins it to start with the box, turns the path fixes
+off or on, and deletes it. Ports that are listening but are not apps yet are
+listed below, one click from being one. Settings → Sharing lists everything
+that is public in one place.
+
+## System
+
+![System](images/system-dark.png)
+
+How the box is doing, in two honest views. **The sandbox** is every process
+the sandbox runs — the editor, the terminals, the agents and what they start,
+across its containers — summed from `/proc`, against the host's cores and
+memory. **The Workbench container** is that one container's own cgroup, against
+its own limits: it is where the bridge runs and where the agents the
+Workbench starts run, and the only container whose limits the bridge can read.
+Then the disks, the busiest processes, what is listening, versions and uptime.
+**Detailed monitor** (`/system/monitor`) is btop, full size.
+
+## Settings
+
+- **Account** — the password, two-factor sign-in (a QR code to scan, then ten
+  recovery codes to copy or download), and every session with its browser,
+  address and when it was last seen; end one, or all but this one.
+- **Devices & CLI** — the one-line install for the `agentbox` command on a
+  laptop (`curl -fsSL https://<box>/cli/install | sh`), a box for the code it
+  shows when it signs in (approval happens on the gate's own page,
+  `/settings/devices?code=`, outside the sandbox), and the devices that hold a
+  token, each of which you can revoke.
+- **Sharing** — how long a new share lasts, and every public app.
+- **Appearance** — light, dark, or follow the system.
+- **About** — versions, and the keyboard shortcuts.
+
+Anything that could hand the box to someone else or lock you out — a new
+password, two-factor on or off, revoking a device — asks for your password
+(and a code, with two-factor on) in the moment, and it is sent with that one
+request only.
+
+## On a phone
+
+![Home on a phone, with the More sheet](images/mobile-more-light.png)
+
+At 700 px and narrower the rail becomes a bottom bar — Home, Workbench, Files,
+Apps and **More**, which holds the editor, System, Settings, the dock, search,
+the theme and sign-out. The dock, quick look and the palette fill the screen;
+the Workbench's sidebar is a sheet; a tap opens a folder or looks at a file;
+rows carry a checkbox for choosing several. The first dev server to start does
+not open the dock on its own there — it would take the whole screen.
+
 ## Keyboard
 
-The prefix is `Ctrl+B`, as in herdr's TUI and tmux. Press it, see the HUD pill,
-then press the binding. It works inside a terminal and outside one; only a text
-field takes precedence.
+The app's own keys were chosen to collide with neither the browser nor VS
+Code's default keymap, because they must work inside the editor too. `⌃⌥` is
+Control+Option on a Mac and Ctrl+Alt elsewhere; where Ctrl+Alt is AltGr and
+types a character (AltGr+7 is `{` on a German keyboard), the character wins.
+`?` shows every shortcut.
 
 | Keys | Action |
 | --- | --- |
-| `⌘/Ctrl+K` | command palette |
+| `⌘K` / `Ctrl+K` | the palette (not in the editor, where it is VS Code's) |
+| `⌃⌥K` | the palette, from anywhere |
+| `⌃⌥1` … `⌃⌥6` | Home, Workbench, Editor, Files, Apps, System |
+| `⌃⌥,` | Settings |
+| `⌃⌥D` | open or close the dock |
+| `?` or `⌃⌥/` | the keymap sheet |
+| `g` then `h` `w` `e` `f` `a` `s` `,` | go to a surface, wherever nothing is being typed |
+
+In Files: `↑` `↓` move (with `⇧`, select), `↵` opens, `Space` quick look,
+`⌫` or `⌘↑` goes up, `F2` renames, `Delete` or `⌘⌫` moves to the trash, `⌘A`
+selects everything, typing jumps to a name.
+
+In the Workbench the prefix is `Ctrl+B`, as in herdr's TUI and tmux. Press it,
+see the HUD pill, then press the binding. It works inside a terminal and
+outside one while the Workbench is showing; only a text field takes
+precedence.
+
+| Keys | Action |
+| --- | --- |
 | `prefix+c` | new tab |
 | `prefix+v` / `prefix+-` | split right / split down |
 | `prefix+h` `j` `k` `l` | focus the pane left / down / up / right |
@@ -87,7 +270,7 @@ field takes precedence.
 | `prefix+b` or `⌘B` | toggle the sidebar |
 | `prefix+q` | blur the terminal (the browser's equivalent of detach) |
 | `prefix+Ctrl+B` | send a literal `Ctrl+B` to the program in the pane |
-| `prefix+?` | show this keymap |
+| `prefix+?` | show the keymap |
 
 ## Apps
 
@@ -241,7 +424,7 @@ the official Playwright image that matches the repository's
 Some of what an agent has to say is a place in a document rather than a
 paragraph: a plan you want reordered, a table with one wrong row, a diagram
 missing an arrow. Review is that conversation. The agent writes an HTML file
-and publishes it; you see it in the drawer, click the heading or select the
+and publishes it; you see it in the dock, click the heading or select the
 phrase you mean, say what you think, and send. The agent's command was blocked
 all along and returns with your comments attached to what they refer to.
 
@@ -253,7 +436,7 @@ agentbox-review poll plan.html          # blocks until you press Send
 ```
 
 `open` prints a link — `<your box>/workbench?review=<key>` — and the session
-appears in the **Review** panel of the inspector. The CLI talks to the bridge
+appears in the **Review** panel of the dock. The CLI talks to the bridge
 at `http://127.0.0.1:7800` inside the sandbox (`AGENTBOX_REVIEW_URL` overrides
 it). Choose it and the page renders there, beside the terminals — no
 second hostname and no second login, which is what the old lavish-axi service
@@ -458,7 +641,7 @@ worktree bookkeeping rather than firstmate's.
 
 ## Troubleshooting
 
-**The connection pill says disconnected.** The bridge could not reach herdr.
+**The connection light at the foot of the rail is red.** The bridge could not reach herdr.
 `./scripts/agentbox workbench` shows its log; it starts a herdr server itself
 if none is answering and retries with backoff, so this usually clears on its
 own. If it does not, `./scripts/agentbox shell` and run `herdr` to see whether
@@ -487,10 +670,45 @@ fidelity.
 
 **The page went back to sign in.** The session ended: 12 hours unused (unless
 "Remember this device" was ticked), a password or two-factor change, or a
-sign-out elsewhere. The Workbench notices on its next request, or when the tab
-comes back into view, and returns you where you were after signing in.
+sign-out elsewhere. The app notices on its next request, or when the tab comes
+back into view, and returns you where you were after signing in.
+
+**Open in editor says no editor is open.** The editor's **agentbox connect**
+extension had not connected within the wait — code-server still starting, or
+the extension disabled. Open the editor once, then try again; its *Output* →
+*agentbox* channel says what it is doing.
+
+**A shortcut does nothing.** `⌃⌥` chords are ignored where Ctrl+Alt types a
+character (AltGr layouts); use the palette or the `g` letters instead. Browser
+extensions that bind the same chords take them first.
 
 **Cloudflare Access in front of the tunnel.** Access intercepts the websocket
 upgrade for anything without a session, so the Workbench's event stream and its
 terminals will not connect from an unauthenticated context. Add a service-token
 or bypass policy for the hostname, or use agentbox's own sign-in alone.
+
+## Working on the app
+
+The app is `web/app` (React, Vite, zustand); `cd web && npm ci && npm test`
+runs every package's unit tests, and `npm run e2e -w app` the Playwright suite
+against a real stack — herdr, the bridge serving the built app, and the gate in
+front — started by `web/app/e2e/start-stack.mjs`. The suite stands in a page
+with a text area for code-server; to check the editor against the real one,
+start the stack and a code-server from the workspace image sharing the host's
+loopback, so its extension reaches the bridge:
+
+```bash
+cd web/app
+WORKBENCH_PORT=27800 GATE_PORT=27900 E2E_CODE_PORT=27808 node e2e/start-stack.mjs &
+docker run -d --name ab-editor --network host \
+  -e AGENTBOX_BRIDGE_URL=ws://127.0.0.1:27800/ws/editor \
+  -v /tmp:/tmp --entrypoint code-server agentbox/workspace \
+  --bind-addr 127.0.0.1:27808 --auth none --disable-workspace-trust <workspace root>
+node e2e/tools/editor-check.mjs http://127.0.0.1:27900 <a file in the workspace>
+```
+
+`editor-check.mjs` opens the file from Files with *Open in editor*, types into
+it, tours the other surfaces and checks the editor kept its frame and the
+unsaved text. `e2e/tools/screenshots.mjs <gate url> docs/images` stages a
+believable box and takes this document's pictures, every surface in light and
+dark.

@@ -63,6 +63,8 @@ function freePort() {
 
 const setup = await browser.newContext({ extraHTTPHeaders: { "x-agentbox-client-ip": ip() } });
 const stage = await signIn(setup);
+// A short sessions list in Settings: end every other session.
+await stage.evaluate(() => fetch("/_gate/sessions?others=1", { method: "DELETE" }));
 const root = await stage.evaluate(async () => (await (await fetch("/api/health")).json()).workspaceRoot);
 const project = fs.existsSync(path.join(root, "goofy-app")) ? path.join(root, "goofy-app") : seed(root);
 
@@ -145,7 +147,12 @@ for (const scheme of ["light", "dark"]) {
   await shoot("workbench");
 
   await go("/editor");
-  await page.frameLocator("iframe.editor-frame").locator("body").waitFor();
+  const editor = page.frameLocator("iframe.editor-frame");
+  await editor.locator(".monaco-workbench").waitFor({ timeout: 90_000 });
+  // Focus this window first: code-server keeps a closed tab's window alive
+  // for a while, and the bridge sends to the one focused most recently.
+  await editor.locator(".monaco-workbench").click({ position: { x: 600, y: 400 } });
+  await settle(page, 1500);
   // A file open, the way "Open in editor" leaves it.
   await page.evaluate(async (file) => {
     await fetch("/api/editor/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: file, line: 2, wait: 30000 }) });
