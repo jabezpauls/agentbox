@@ -17,6 +17,8 @@ export interface FakePlane {
   close(): Promise<void>;
 }
 
+const BOMB = zlib.gzipSync(Buffer.alloc(256 * 1024 * 1024, 0x20), { level: 9 });
+
 export const PAGE = `<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/vite.svg"><script type="module" src="/@vite/client"></script></head><body><img src="/logo.png"><script type="module" src="/src/main.tsx"></script></body></html>`;
 
 export async function startPlane(): Promise<FakePlane> {
@@ -33,6 +35,8 @@ export async function startPlane(): Promise<FakePlane> {
     };
     if (rest === "/" || rest.endsWith("/index.html")) return send(200, "text/html; charset=utf-8", PAGE, { etag: '"page-1"' });
     if (rest.endsWith("/gz.html")) return send(200, "text/html", zlib.gzipSync(PAGE), { "content-encoding": "gzip" });
+    // A few KiB of gzip that says 256 MiB.
+    if (rest.endsWith("/bomb.html")) return send(200, "text/html", BOMB, { "content-encoding": "gzip" });
     if (rest.endsWith("/own-map.html")) {
       return send(200, "text/html", `<head><script type="importmap">{"imports":{}}</script></head><body>x</body>`);
     }

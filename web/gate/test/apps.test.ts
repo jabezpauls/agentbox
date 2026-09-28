@@ -3,7 +3,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { EXPIRY_SWEEP_MS } from "../src/app-access.js";
+import zlib from "node:zlib";
+import { EXPIRY_SWEEP_MS, MAX_REWRITE, decode } from "../src/app-access.js";
 import { NAV, PAGE, grantFrom, registerApp, startPlane, type FakePlane } from "./app-helpers.js";
 import { PASSWORD, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
 
@@ -384,6 +385,19 @@ describe("path fidelity", () => {
     const res = await request(h.base, "GET", `/a/${app.id}/gz.html`, { headers: { cookie } });
     expect(res.headers["content-encoding"]).toBeUndefined();
     expect(res.body).toContain(`/a/${app.id}/__agentbox/shim.js`);
+  });
+
+  it("never decodes more than it will hold: a compression bomb goes on as it came", async () => {
+    const app = await registerApp(h, { port: 5405 });
+    const before = process.memoryUsage().rss;
+    const res = await request(h.base, "GET", `/a/${app.id}/bomb.html`, { headers: { cookie, ...NAV, "accept-encoding": "gzip" } });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-encoding"]).toBe("gzip");
+    expect(process.memoryUsage().rss - before).toBeLessThan(64 * 1024 * 1024);
+    expect(decode(zlib.gzipSync(Buffer.alloc(MAX_REWRITE + 1, 0x20)), "gzip")).toBeNull();
+    expect(decode(zlib.brotliCompressSync(Buffer.alloc(MAX_REWRITE + 1, 0x20)), "br")).toBeNull();
+    expect(decode(zlib.deflateSync(Buffer.alloc(MAX_REWRITE + 1, 0x20)), "deflate")).toBeNull();
+    expect(decode(zlib.gzipSync(Buffer.from("<p>fine</p>")), "gzip")?.toString()).toBe("<p>fine</p>");
   });
 
   it("rewrites CSS, and serves the shim", async () => {

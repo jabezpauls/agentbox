@@ -67,7 +67,13 @@ import type { AppRecord } from "./store.js";
  */
 
 /** HTML or CSS larger than this streams through unedited. */
-export const MAX_REWRITE = 8 * 1024 * 1024;
+export const MAX_REWRITE = 2 * 1024 * 1024;
+/**
+ * Pages being edited at once. Each holds its page a few times over (as it
+ * came, decoded, as text, edited), so this many at MAX_REWRITE stay well
+ * inside the gate's memory cap; a page past it is passed on unedited.
+ */
+export const MAX_REWRITES = 6;
 /** A passcode form is small. */
 const MAX_FORM = 4 * 1024;
 /** The expiry sweep: links that run out are made private this often. */
@@ -131,17 +137,24 @@ function flatten(pairs: ReadonlyArray<readonly [string, string]>): string[] {
   return out;
 }
 
-function decode(body: Buffer, encoding: string | undefined): Buffer | null {
+/**
+ * A compressed page, decoded — never to more than MAX_REWRITE: a few KiB of
+ * gzip can say gigabytes, and the gate would hold them all. `null` when it
+ * cannot be read or would be larger; the page then goes on as it came.
+ */
+export function decode(body: Buffer, encoding: string | undefined): Buffer | null {
   const e = (encoding ?? "").trim().toLowerCase();
+  const opts = { maxOutputLength: MAX_REWRITE };
   try {
     if (e === "" || e === "identity") return body;
-    if (e === "gzip" || e === "x-gzip") return zlib.gunzipSync(body);
-    if (e === "br") return zlib.brotliDecompressSync(body);
+    if (e === "gzip" || e === "x-gzip") return zlib.gunzipSync(body, opts);
+    if (e === "br") return zlib.brotliDecompressSync(body, opts);
     if (e === "deflate") {
       try {
-        return zlib.inflateSync(body);
-      } catch {
-        return zlib.inflateRawSync(body);
+        return zlib.inflateSync(body, opts);
+      } catch (err) {
+        if (err instanceof RangeError) return null;
+        return zlib.inflateRawSync(body, opts);
       }
     }
   } catch {
@@ -172,6 +185,8 @@ export interface AppGatewayDeps {
 
 export class AppGateway {
   private readonly live = new Map<string, Set<Live>>();
+  /** Pages being read whole to be edited, now. */
+  private rewriting = 0;
   private readonly sweep: ReturnType<typeof setInterval>;
   private styles: string | null = null;
 
@@ -411,13 +426,24 @@ export class AppGateway {
       let pairs = appResponseHeaders(filterResponseHeaders(upRes), this.policy(app, req));
       if (opts.grant) pairs.push(["Set-Cookie", opts.grant]);
       const status = upRes.statusCode ?? 502;
-      const kind = edit && req.method !== "HEAD" && status !== 204 && status !== 304 && status >= 200 ? editableType(upRes.headers["content-type"]) : null;
+      let kind = edit && req.method !== "HEAD" && status !== 204 && status !== 304 && status >= 200 ? editableType(upRes.headers["content-type"]) : null;
+      // Too many pages being edited at once: this one goes on unedited
+      // rather than the gate holding more than it can.
+      if (kind && this.rewriting >= MAX_REWRITES) kind = null;
       if (!kind) {
         res.writeHead(status, upRes.statusMessage, flatten(pairs));
         pipeline(upRes, res, () => {});
         return;
       }
       // HTML or CSS: read it whole (up to a bound), edit it, send it.
+      this.rewriting += 1;
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        this.rewriting -= 1;
+      };
+      res.once("close", release);
       const chunks: Buffer[] = [];
       let size = 0;
       let streaming = false;
@@ -432,6 +458,7 @@ export class AppGateway {
           res.writeHead(status, upRes.statusMessage, flatten(pairs.filter(([n]) => n.toLowerCase() !== "content-length")));
           for (const b of chunks) res.write(b);
           chunks.length = 0;
+          release();
           upRes.removeAllListeners("data");
           upRes.removeAllListeners("end");
           pipeline(upRes, res, () => {});
@@ -443,7 +470,9 @@ export class AppGateway {
         const encoding = upRes.headers["content-encoding"];
         const plainBody = decode(raw, typeof encoding === "string" ? encoding : undefined);
         if (plainBody === null) {
-          // An encoding the gate cannot read: pass it on as it is.
+          // An encoding the gate cannot read, or one that decodes to more than
+          // it will hold: pass it on as it is.
+          release();
           res.writeHead(status, upRes.statusMessage, flatten(pairs));
           res.end(raw);
           return;
@@ -471,10 +500,14 @@ export class AppGateway {
         });
         pairs.push(["Content-Length", String(body.length)]);
         if (hint) pairs.push([HINT_HEADER, hint]);
+        release();
         res.writeHead(status, upRes.statusMessage, flatten(pairs));
         res.end(body);
       });
-      upRes.on("error", () => res.destroy());
+      upRes.on("error", () => {
+        release();
+        res.destroy();
+      });
     });
 
     upReq.on("error", () => {
