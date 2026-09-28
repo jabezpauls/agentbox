@@ -52,7 +52,14 @@ export class TunnelStream extends Duplex {
         } catch {
           // Not ours to read.
         }
-        if (control?.type === "error") this.destroy(new TunnelError(control.message ?? "the tunnel failed"));
+        // Destroyed on the next turn, not this one: the box sends the error
+        // the moment the far end refuses, which can be in the same breath as
+        // the socket opening — before whoever awaited openTunnel has had the
+        // chance to listen for it, which would make it an uncaught error.
+        if (control?.type === "error") {
+          const err = new TunnelError(control.message ?? "the tunnel failed");
+          setImmediate(() => this.destroy(err));
+        }
         return;
       }
       if (!this.push(data)) ws.pause();
