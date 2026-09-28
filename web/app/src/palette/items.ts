@@ -21,13 +21,15 @@ import {
 import { agentsSorted, paneTitle, tabsOf, type Session } from "../store/session.ts";
 import type { ActionId } from "../keys/actions.ts";
 import type { AppView } from "../apps/model.ts";
-import type { Route, SettingsSection } from "../shell/routes.ts";
+import type { Route, SettingsSection, SurfaceId } from "../shell/routes.ts";
 import { SURFACES } from "../shell/surfaces.ts";
 import { chordLabel } from "../shell/keys.ts";
 import { searchItems, type PaletteItem, type PaletteKind } from "./search.ts";
 
 /** What the palette does with a choice. The component wires these to the stores. */
 export interface PaletteEffects {
+  /** Go to a surface, where it was last left — as the rail does. */
+  go(surface: SurfaceId): void;
   navigate(route: Route): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
@@ -117,7 +119,7 @@ export function buildItems(src: PaletteSources, fx: PaletteEffects, mode: string
       keywords: `go to ${s.id}`,
       keys: chordLabel(s.key),
       icon: s.icon,
-      run: () => fx.navigate(s.id === "settings" ? { surface: "settings", section: "account" } : ({ surface: s.id } as Route)),
+      run: () => fx.go(s.id),
     });
   }
 

@@ -6,6 +6,7 @@ import { buildItems, groupItems, type PaletteEffects, type PaletteSources } from
 
 function fx(): PaletteEffects {
   return {
+    go: vi.fn(),
     navigate: vi.fn(),
     focusPane: vi.fn(),
     focusTab: vi.fn(),

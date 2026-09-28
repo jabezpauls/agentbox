@@ -2,60 +2,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import type { FileEntry } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
-import { actionCtx } from "../api/call.ts";
-import { runAction } from "../keys/actions.ts";
 import { filesApi } from "../files/api.ts";
 import { useApps } from "../apps/model.ts";
-import { openAppInDock } from "../apps/open.ts";
 import { useProjects } from "../projects/model.ts";
 import { useReviews } from "../shell/attention.ts";
-import { showDock, toggleDock, openKeymap } from "../shell/actions.ts";
-import { openInEditor } from "../shell/editor.ts";
-import { navigate } from "../shell/router.ts";
-import { signOut } from "../shell/session.ts";
-import { terminalHere } from "../workbench/launch.ts";
-import { buildItems, groupItems, KIND_GLYPH, KIND_LABEL, type PaletteEffects } from "../palette/items.ts";
+import { openModal } from "../shell/activity.tsx";
+import { buildItems, groupItems, KIND_GLYPH, KIND_LABEL } from "../palette/items.ts";
+import { paletteEffects as effects } from "../palette/effects.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 /** The query the list is actually filtered by lags typing by this much. */
 const DEBOUNCE_MS = 120;
 /** Below this many characters, no file-name search is sent. */
 const FILE_QUERY_MIN = 2;
-
-const effects: PaletteEffects = {
-  navigate: (r) => navigate(r),
-  focusPane: (id) => {
-    navigate({ surface: "workbench" });
-    useApp.getState().focusPane(id);
-  },
-  focusTab: (id) => {
-    navigate({ surface: "workbench" });
-    useApp.getState().focusTab(id);
-  },
-  focusWorkspace: (id) => {
-    navigate({ surface: "workbench" });
-    useApp.getState().focusWorkspace(id);
-  },
-  runAction: (id) => runAction(id, actionCtx()),
-  openApp: openAppInDock,
-  openReview: (key) => useApp.getState().setInspector({ open: true, tab: "review", reviewKey: key }),
-  openPort: (port) => {
-    const s = useApp.getState() as ReturnType<typeof useApp.getState> & { openPort?: (p: number) => Promise<void> };
-    if (typeof s.openPort === "function") void s.openPort(port);
-    else s.setInspector({ open: true, tab: "preview", port, path: "/" } as never);
-  },
-  openInEditor: (p) => void openInEditor(p),
-  terminalHere: (p) => void terminalHere(p),
-  newProject: () => {
-    navigate({ surface: "home" });
-    window.dispatchEvent(new CustomEvent("agentbox:new-project"));
-  },
-  setTheme: (t) => useApp.getState().themeSet?.(t),
-  toggleDock: () => toggleDock(),
-  showDock,
-  keymap: openKeymap,
-  signOut: () => void signOut(),
-};
 
 /**
  * The command palette (⌘K, ⌃⌥K from anywhere, or prefix+w for workspaces):
@@ -105,6 +64,9 @@ function PaletteBody({ mode }: { mode: string }) {
 
   // The keyboard goes to the field before anything is painted; what the
   // palette lists is read again.
+  // Where the keyboard was, to give it back when the palette closes.
+  const [returnTo] = useState(() => (typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null)));
+
   useLayoutEffect(() => {
     inputRef.current?.focus();
     void useProjects.getState().refresh();
@@ -166,12 +128,33 @@ function PaletteBody({ mode }: { mode: string }) {
     listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const close = () => setUi({ palette: null });
+  const restore = () => {
+    if (returnTo && document.contains(returnTo) && !returnTo.closest("[inert]")) returnTo.focus({ preventScroll: true });
+  };
+  /** Dismissed: the keyboard goes back where it was. */
+  const close = () => {
+    setUi({ palette: null });
+    restore();
+  };
+  /**
+   * Chosen: the choice decides where the keyboard goes. One that went
+   * somewhere (another surface, a dialog) keeps it; one that changed nothing
+   * about where you are (a theme, the dock) hands it back.
+   */
+  const run = (item: { run(): void }) => {
+    const before = `${location.pathname}${location.search}`;
+    setUi({ palette: null });
+    item.run();
+    requestAnimationFrame(() => {
+      const moved = `${location.pathname}${location.search}` !== before;
+      const modal = openModal();
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (!moved && !modal && lost) restore();
+    });
+  };
   const choose = (i: number) => {
     const item = flat[i];
-    if (!item) return;
-    close();
-    item.run();
+    if (item) run(item);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -188,10 +171,7 @@ function PaletteBody({ mode }: { mode: string }) {
       // in the field now, not the row the old query left under the cursor.
       if (query !== debounced) {
         const best = rank(query).flatMap((g) => g.items)[0];
-        if (best) {
-          close();
-          best.run();
-        }
+        if (best) run(best);
         return;
       }
       choose(active);

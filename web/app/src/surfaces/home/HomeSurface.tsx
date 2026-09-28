@@ -13,6 +13,7 @@ import { usePolling } from "../../shell/activity.tsx";
 import { useNeeds } from "../../shell/attention.ts";
 import { navigate } from "../../shell/router.ts";
 import { useGateSession } from "../../shell/session.ts";
+import { useRequests } from "../../shell/requests.ts";
 import { launchableAgents } from "../../workbench/launch.ts";
 import { NeedsYou } from "./NeedsYou.tsx";
 import { CloneCard, ProjectCard } from "./ProjectCard.tsx";
@@ -71,12 +72,13 @@ export function HomeSurface() {
   const system = useSystem((s) => s.info);
   const [newProject, setNewProject] = useState<null | "clone" | "empty">(null);
 
-  // "New project" from the palette lands here.
+  // "New project" from the palette lands here — even before Home was built.
+  const requested = useRequests((s) => s.newProject);
   useEffect(() => {
-    const onNew = () => setNewProject("clone");
-    window.addEventListener("agentbox:new-project", onNew);
-    return () => window.removeEventListener("agentbox:new-project", onNew);
-  }, []);
+    if (!requested) return;
+    setNewProject(requested);
+    useRequests.setState({ newProject: null });
+  }, [requested]);
 
   usePolling(() => useProjects.getState().refresh(), 10_000);
   usePolling(() => useSystem.getState().refresh(), 5_000);
