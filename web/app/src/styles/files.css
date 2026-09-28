@@ -646,7 +646,37 @@
   padding: var(--sp-5);
 }
 
-/* Rendered Markdown: rubl's type scale, nothing louder than a page title. */
+/* Rendered Markdown: rubl's type scale, nothing louder than a page title.
+   Contained: nothing a file writes can be drawn outside its own box. */
+.ql-markdown {
+  position: relative;
+  overflow: auto;
+  contain: layout paint;
+  isolation: isolate;
+}
+.md-remote {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.ql-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
 .markdown {
   max-width: 76ch;
   margin: 0 auto;

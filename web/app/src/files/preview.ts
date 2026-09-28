@@ -1,8 +1,5 @@
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import type { FileEntry } from "@workbench/shared";
 import { rawUrl } from "./api.ts";
-import { dirname, join } from "./paths.ts";
 
 /**
  * Quick look: what a file can be shown as. Pictures and PDF are framed from
@@ -63,55 +60,7 @@ export async function readText(path: string, signal?: AbortSignal): Promise<Text
   return { text, truncated: Number.isFinite(total) && total > TEXT_LIMIT, binary: false };
 }
 
-/** Resolve a relative link in a Markdown file against the file's folder. */
-function resolveAgainst(base: string, href: string): string | null {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//") || href.startsWith("#")) return null;
-  const clean = href.split(/[?#]/)[0] ?? "";
-  if (!clean) return null;
-  const parts = (clean.startsWith("/") ? clean : join(dirname(base), clean)).split("/");
-  const out: string[] = [];
-  for (const p of parts) {
-    if (p === "" || p === ".") continue;
-    if (p === "..") out.pop();
-    else out.push(decodeURIComponentSafe(p));
-  }
-  return `/${out.join("/")}`;
-}
-
-function decodeURIComponentSafe(s: string): string {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
-}
-
-/**
- * Markdown as safe HTML. Sanitised with DOMPurify's HTML profile (no SVG, no
- * MathML, no script, no handlers, no forms or frames); links open in a new
- * tab without a referrer; a relative image is shown from the files API.
- */
-export function renderMarkdown(source: string, filePath: string): string {
-  const html = marked.parse(source, { async: false, gfm: true, breaks: false }) as string;
-  const clean = DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ["style", "form", "input", "button", "textarea", "select", "iframe", "object", "embed"],
-    FORBID_ATTR: ["style"],
-    RETURN_DOM_FRAGMENT: true,
-  }) as DocumentFragment;
-  for (const a of Array.from(clean.querySelectorAll("a[href]"))) {
-    const href = a.getAttribute("href") ?? "";
-    if (href.startsWith("#")) continue;
-    a.setAttribute("target", "_blank");
-    a.setAttribute("rel", "noopener noreferrer");
-  }
-  for (const img of Array.from(clean.querySelectorAll("img[src]"))) {
-    const local = resolveAgainst(filePath, img.getAttribute("src") ?? "");
-    if (local) img.setAttribute("src", rawUrl(local, true));
-    img.setAttribute("loading", "lazy");
-    img.setAttribute("referrerpolicy", "no-referrer");
-  }
-  const holder = document.createElement("div");
-  holder.appendChild(clean);
-  return holder.innerHTML;
+/** The Markdown renderer, fetched the first time a Markdown file is looked at. */
+export function loadMarkdown(): Promise<typeof import("./markdown.ts")> {
+  return import("./markdown.ts");
 }

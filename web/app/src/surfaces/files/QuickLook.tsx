@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Code2, Download, FileQuestion, X } from "lucide-react";
 import type { FileEntry } from "@workbench/shared";
 import { download, rawUrl } from "../../files/api.ts";
-import { previewKind, readText, renderMarkdown, type TextPreview } from "../../files/preview.ts";
+import { loadMarkdown, previewKind, readText, type TextPreview } from "../../files/preview.ts";
+import type { Rendered } from "../../files/markdown.ts";
 import { formatAgo, formatBytes } from "../../lib/format.ts";
 import { useFocusTrap } from "../../components/ui/focus.ts";
 import { openInEditor } from "../../shell/editor.ts";
@@ -80,10 +81,21 @@ export function QuickLook({ entry, siblings, onNavigate, onClose }: Props) {
     e.preventDefault();
   };
 
-  const html = useMemo(
-    () => (kind === "markdown" && text && !text.binary ? renderMarkdown(text.text, entry.path) : ""),
-    [kind, text, entry.path],
-  );
+  // Markdown is rendered by a module fetched the first time it is needed.
+  const [remoteImages, setRemoteImages] = useState(false);
+  const [rendered, setRendered] = useState<Rendered | null>(null);
+  useEffect(() => setRemoteImages(false), [entry.path]);
+  useEffect(() => {
+    setRendered(null);
+    if (kind !== "markdown" || !text || text.binary) return;
+    let live = true;
+    void loadMarkdown().then((m) => {
+      if (live) setRendered(m.renderMarkdown(text.text, entry.path, { remoteImages }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [kind, text, entry.path, remoteImages]);
 
   const Icon = iconFor(entry);
   let body: React.ReactNode;
@@ -113,7 +125,27 @@ export function QuickLook({ entry, siblings, onNavigate, onClose }: Props) {
       </div>
     );
   } else if (text && !text.binary && kind === "markdown" && !source) {
-    body = <div className="ql-markdown markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+    body = rendered ? (
+      <>
+        {rendered.blocked > 0 && (
+          <div className="ql-bar" role="status">
+            <span>
+              {rendered.blocked === 1 ? "A picture from another site was not loaded" : `${rendered.blocked} pictures from other sites were not loaded`}, so
+              nobody learns you looked.
+            </span>
+            <button className="btn btn-small" onClick={() => setRemoteImages(true)}>
+              Load remote images
+            </button>
+          </div>
+        )}
+        <div className="ql-markdown markdown" dangerouslySetInnerHTML={{ __html: rendered.html }} />
+      </>
+    ) : (
+      <div className="ql-loading" aria-busy="true">
+        <div className="skeleton" style={{ width: "40%", height: 18 }} />
+        <div className="skeleton" style={{ width: "80%", height: 12 }} />
+      </div>
+    );
   } else if (text && !text.binary) {
     body = text.text === "" ? <div className="empty"><p className="empty-title">This file is empty.</p></div> : <TextBody preview={text} />;
   } else {
