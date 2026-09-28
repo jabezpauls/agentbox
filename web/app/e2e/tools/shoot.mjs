@@ -20,7 +20,8 @@ const context = await browser.newContext({
   viewport: { width, height },
   colorScheme: scheme === "dark" ? "dark" : "light",
   deviceScaleFactor: 1,
-  extraHTTPHeaders: { "x-agentbox-client-ip": "203.0.113.250" },
+  // A client address of its own each run: sign-in is rate-limited per address.
+  extraHTTPHeaders: { "x-agentbox-client-ip": `198.51.100.${Math.floor(Math.random() * 250) + 1}` },
 });
 const page = await context.newPage();
 // Stand in for an app API this bridge may not have yet.

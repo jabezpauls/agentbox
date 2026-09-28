@@ -4,7 +4,7 @@ import { Sidebar } from "../../components/Sidebar.tsx";
 import { TabBar } from "../../components/TabBar.tsx";
 import { PaneGrid } from "../../components/PaneGrid.tsx";
 import { Composer } from "../../components/Composer.tsx";
-import { useOnActivate } from "../../shell/activity.tsx";
+import { focusOnArrival, useOnActivate } from "../../shell/activity.tsx";
 import { focusTerminal } from "../../terminal/registry.ts";
 
 /**
@@ -20,11 +20,7 @@ export function WorkbenchSurface({ resolved }: { resolved: Resolved }) {
   const sidebarWidth = useApp((s) => s.ui.sidebarWidth);
   const setUi = useApp((s) => s.setUi);
 
-  useOnActivate(() => {
-    const pane = useApp.getState().session.focusedPaneId;
-    // Wait a frame: the surface has only just become visible and focusable.
-    requestAnimationFrame(() => focusTerminal(pane));
-  });
+  useOnActivate(() => focusOnArrival(() => focusTerminal(useApp.getState().session.focusedPaneId)));
 
   return (
     <div className="wb" data-sidebar={sidebarOpen ? "open" : "closed"} style={{ ["--sidebar-w" as string]: `${sidebarWidth}px` }}>

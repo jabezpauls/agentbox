@@ -66,7 +66,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("the Workbench drives herdr end to end", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/workbench");
 
   await test.step("it starts empty and connected", async () => {
     await expect(page.getByText("Nothing open.")).toBeVisible();
@@ -104,10 +104,8 @@ test("the Workbench drives herdr end to end", async ({ page }) => {
   await test.step("the theme switch reaches the document", async () => {
     const html = page.locator("html");
     const before = await html.getAttribute("data-theme");
-    // The control cycles system → light → dark; press until dark is stamped.
-    for (let i = 0; i < 3 && (await html.getAttribute("data-theme")) !== "dark"; i++) {
-      await page.getByRole("button", { name: /theme$/i }).click();
-    }
+    // The theme is chosen in the palette (or Settings → Appearance).
+    await runFromPalette(page, "Theme: dark");
     await expect(html).toHaveAttribute("data-theme", "dark");
     expect(before).not.toBe("dark");
   });

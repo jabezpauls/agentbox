@@ -82,3 +82,17 @@ export function useOnActivate(onActivate: () => void): void {
     if (active) ref.current();
   }, [active]);
 }
+
+/**
+ * Give a surface that just came into view the keyboard — but only if nothing
+ * else has taken it meanwhile: a palette or dialog opened on the way, or a
+ * field the user is already in. Focus left on the rail, on nothing, or inside
+ * the surface just hidden is fair to move.
+ */
+export function focusOnArrival(focus: () => void): void {
+  requestAnimationFrame(() => {
+    if (document.querySelector('[aria-modal="true"]')) return;
+    const at = document.activeElement as HTMLElement | null;
+    if (!at || at === document.body || at.closest(".rail, .bottombar, [inert]")) focus();
+  });
+}

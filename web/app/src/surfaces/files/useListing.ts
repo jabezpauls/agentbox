@@ -33,6 +33,8 @@ export function useListing(target: string | null, hidden: boolean) {
   const current = useRef<Listing>(EMPTY);
   current.current = listing;
   const gen = useRef(0);
+  // A new folder being read: a refresh of the old one must not overtake it.
+  const navigating = useRef(false);
 
   const load = useCallback(
     async (path: string, keep: boolean, file: string | null = null) => {
@@ -72,13 +74,17 @@ export function useListing(target: string | null, hidden: boolean) {
     const t = setTimeout(() => {
       if (current.current.dir !== target) setListing((l) => (l.dir === target ? l : { ...EMPTY, dir: target }));
     }, 180);
-    void load(target, false).finally(() => clearTimeout(t));
+    navigating.current = true;
+    void load(target, false).finally(() => {
+      navigating.current = false;
+      clearTimeout(t);
+    });
     return () => clearTimeout(t);
   }, [target, load]);
 
   const refresh = useCallback(() => {
     const l = current.current;
-    if (!l.dir || l.status === "loading") return Promise.resolve();
+    if (!l.dir || l.status === "loading" || navigating.current) return Promise.resolve();
     return load(l.dir, true, l.file);
   }, [load]);
 

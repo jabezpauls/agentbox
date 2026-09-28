@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Code2 } from "lucide-react";
 import { handleChord } from "../../shell/actions.ts";
-import { useOnActivate } from "../../shell/activity.tsx";
+import { focusOnArrival, useOnActivate } from "../../shell/activity.tsx";
 import { useEditorState } from "../../shell/editor.ts";
 
 /**
@@ -67,9 +67,7 @@ export function EditorSurface() {
     [attach],
   );
 
-  useOnActivate(() => {
-    requestAnimationFrame(() => frame.current?.focus());
-  });
+  useOnActivate(() => focusOnArrival(() => frame.current?.focus()));
 
   // A frame that never finishes loading still gets the chords once it can.
   useEffect(() => {

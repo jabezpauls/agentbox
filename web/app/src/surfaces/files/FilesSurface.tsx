@@ -38,7 +38,7 @@ import { useSystem } from "../../system/model.ts";
 import { formatBytes, plural } from "../../lib/format.ts";
 import { Menu, type MenuAnchor, type MenuEntry } from "../../components/ui/Menu.tsx";
 import { Empty } from "../../components/ui/Page.tsx";
-import { useOnActivate, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
+import { focusOnArrival, useOnActivate, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { useNarrow } from "../../shell/Dock.tsx";
@@ -246,7 +246,7 @@ export function FilesSurface() {
     };
   }, [dir, changed]);
 
-  useOnActivate(() => requestAnimationFrame(() => grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true })));
+  useOnActivate(() => focusOnArrival(() => grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true })));
 
   // Quick look follows the route: a link to a file opens it.
   const lookPath = listing.file;
@@ -266,7 +266,10 @@ export function FilesSurface() {
   const quickLook = (e: FileEntry) => navigate({ surface: "files", path: e.path }, { replace: true });
   const closeLook = () => {
     navigate({ surface: "files", path: dir }, { replace: true });
-    requestAnimationFrame(() => grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      // Back to the list — unless something opened over it meanwhile.
+      if (!document.querySelector('[aria-modal="true"]')) grid.current?.querySelector<HTMLElement>(".flist")?.focus({ preventScroll: true });
+    });
   };
 
   const open = (e: FileEntry) => {

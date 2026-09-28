@@ -87,6 +87,8 @@ describe("buildItems", () => {
     expect(items[0]).toMatchObject({ kind: "project", label: "proj8" });
     expect(buildItems(sources(), fx(), "all", "files")[0]).toMatchObject({ kind: "surface", label: "Files" });
     expect(buildItems(sources(), fx(), "all", "new proj")[0]).toMatchObject({ label: "New project" });
+    expect(buildItems(sources(), fx(), "all", "settings: devices")[0]).toMatchObject({ label: "Settings: devices and the CLI" });
+    expect(buildItems(sources(), fx(), "all", "system")[0]).toMatchObject({ kind: "surface", label: "System" });
   });
 
   it("finds by keyword, below a label match", () => {

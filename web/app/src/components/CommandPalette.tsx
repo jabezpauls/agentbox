@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import type { FileEntry } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
@@ -68,6 +68,21 @@ const effects: PaletteEffects = {
  */
 export function CommandPalette() {
   const palette = useApp((s) => s.ui.palette);
+  if (!palette) return null;
+  // Each request is a fresh palette — built new, not reset — so nothing typed
+  // last time can reach the new field before a reset would have landed.
+  let key = requests.get(palette);
+  if (key === undefined) {
+    key = ++requestCount;
+    requests.set(palette, key);
+  }
+  return <PaletteBody key={key} mode={palette.mode} />;
+}
+
+const requests = new WeakMap<object, number>();
+let requestCount = 0;
+
+function PaletteBody({ mode }: { mode: string }) {
   const session = useApp((s) => s.session);
   const health = useApp((s) => s.health);
   const projects = useProjects((s) => s.projects);
@@ -86,21 +101,15 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const open = palette !== null;
-  const mode = palette?.mode ?? "all";
+  const open = true;
 
-  // Every open starts clean, and reads what may have changed.
-  useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setDebounced("");
-    setFiles(null);
-    setActive(0);
-    setPointerLive(false);
+  // The keyboard goes to the field before anything is painted; what the
+  // palette lists is read again.
+  useLayoutEffect(() => {
     inputRef.current?.focus();
     void useProjects.getState().refresh();
     void useReviews.getState().refresh();
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     if (query === debounced) return;
@@ -128,23 +137,24 @@ export function CommandPalette() {
     return () => abort.abort();
   }, [debounced, open, mode]);
 
-  const results = useMemo(() => {
-    if (!open) return [];
-    const ranked = buildItems(
-      {
-        session,
-        projects,
-        apps,
-        reviews,
-        files: files && files.q === debounced.trim() ? files.entries : null,
-        workspaceRoot: health?.workspaceRoot ?? "/workspace",
-      },
-      effects,
-      mode,
-      debounced,
+  const rank = (q: string) =>
+    groupItems(
+      buildItems(
+        {
+          session,
+          projects,
+          apps,
+          reviews,
+          files: files && files.q === q.trim() ? files.entries : null,
+          workspaceRoot: health?.workspaceRoot ?? "/workspace",
+        },
+        effects,
+        mode,
+        q,
+      ),
     );
-    return groupItems(ranked);
-  }, [open, mode, debounced, session, projects, apps, reviews, files, health]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const results = useMemo(() => (open ? rank(debounced) : []), [open, mode, debounced, session, projects, apps, reviews, files, health]);
   // One running order across every group, so ↑/↓ walk what is on screen.
   const flat = useMemo(() => results.flatMap((g) => g.items), [results]);
 
@@ -155,8 +165,6 @@ export function CommandPalette() {
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
-
-  if (!open) return null;
 
   const close = () => setUi({ palette: null });
   const choose = (i: number) => {
@@ -176,6 +184,16 @@ export function CommandPalette() {
       setActive((a) => (n === 0 ? 0 : (a - 1 + n) % n));
     } else if (e.key === "Enter") {
       e.preventDefault();
+      // Typed faster than the list follows: run the best match for what is
+      // in the field now, not the row the old query left under the cursor.
+      if (query !== debounced) {
+        const best = rank(query).flatMap((g) => g.items)[0];
+        if (best) {
+          close();
+          best.run();
+        }
+        return;
+      }
       choose(active);
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -197,6 +215,15 @@ export function CommandPalette() {
         aria-label="Command palette"
         onMouseDown={(e) => e.stopPropagation()}
         onMouseMove={() => setPointerLive(true)}
+        onBlur={(e) => {
+          // A modal keeps the keyboard: whatever takes focus from outside
+          // while the palette is open (a surface arriving, a dialog closing)
+          // hands it straight back.
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          requestAnimationFrame(() => {
+            if (useApp.getState().ui.palette) inputRef.current?.focus();
+          });
+        }}
       >
         <div className="palette-search">
           <Search size={17} aria-hidden="true" />
