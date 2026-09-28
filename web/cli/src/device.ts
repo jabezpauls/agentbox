@@ -52,8 +52,13 @@ export interface PollDeps {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
   signal?: AbortSignal;
-  /** Network failures tolerated in a row before giving up. */
+  /** Network failures, or 5xx answers, tolerated in a row before giving up. */
   maxNetworkErrors?: number;
+}
+
+/** The wait before retry `n` (1, 2, …) after a failure: doubling from the poll interval, at most 30 s. */
+export function backoff(interval: number, n: number): number {
+  return Math.min(30_000, interval * 2 ** (n - 1));
 }
 
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -74,18 +79,22 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /**
  * Poll until the owner approves (the token), denies, or the code lapses.
  * Follows the RFC's answers: `authorization_pending` waits, `slow_down`
- * waits five seconds longer from then on. A network blip is retried rather
- * than thrown away with the code the owner may be approving right now.
+ * waits five seconds longer from then on. A network blip, or the box
+ * answering 5xx between restarts, is retried with a growing wait rather than
+ * thrown away with the code the owner may be approving right now.
  */
 export async function pollForToken(client: BoxClient, start: DeviceStart, deps: PollDeps = {}): Promise<string> {
   const wait = deps.sleep ?? sleep;
   const now = deps.now ?? Date.now;
   const deadline = now() + start.expiresIn * 1000;
   let interval = Math.max(1, start.interval) * 1000;
-  let networkErrors = 0;
+  let failures = 0;
+  const maxFailures = deps.maxNetworkErrors ?? 5;
+  let delay = interval;
 
   for (;;) {
-    await wait(interval, deps.signal);
+    await wait(delay, deps.signal);
+    delay = interval;
     if (now() > deadline) throw new CliError("the code expired before it was approved; run `agentbox login` again");
 
     let status: number;
@@ -106,11 +115,19 @@ export async function pollForToken(client: BoxClient, start: DeviceStart, deps: 
       } catch {
         body = {};
       }
-      networkErrors = 0;
     } catch (err) {
-      if (err instanceof CliError && err.exitCode === EXIT.UNREACHABLE && ++networkErrors <= (deps.maxNetworkErrors ?? 5)) continue;
+      if (err instanceof CliError && err.exitCode === EXIT.UNREACHABLE && ++failures <= maxFailures) {
+        delay = backoff(interval, failures);
+        continue;
+      }
       throw err;
     }
+    if (status >= 500) {
+      if (++failures > maxFailures) throw new CliError(`the box kept failing to answer the sign-in (HTTP ${status}); try again later`);
+      delay = backoff(interval, failures);
+      continue;
+    }
+    failures = 0;
 
     if (status === 200) {
       if (typeof body.token === "string" && TOKEN_SHAPE.test(body.token)) return body.token;
@@ -126,6 +143,7 @@ export async function pollForToken(client: BoxClient, start: DeviceStart, deps: 
         continue;
       case "slow_down":
         interval += 5000;
+        delay = interval;
         continue;
       case "access_denied":
         throw new CliError("the sign-in was denied on the box");
@@ -138,16 +156,17 @@ export async function pollForToken(client: BoxClient, start: DeviceStart, deps: 
 }
 
 /**
- * The approval page to open. The box names it, and behind a proxy it may name
- * its public origin rather than the one typed here, which is fine; but what
- * gets handed to the browser is only ever an http(s) URL of the approval
- * page, else the same page on the origin that was typed.
+ * The approval page to open. The box names it; what is handed to the browser
+ * is that page only when it is the approval page on the very box that was
+ * typed (same scheme, host and port), and otherwise the approval page on the
+ * typed box — so a box can never send the person's browser anywhere else.
  */
 export function safeVerifyUrl(verifyUrl: string, origin: string, userCode: string): string {
-  const fallback = `${origin}/settings/devices?code=${encodeURIComponent(userCode)}`;
+  const typed = new URL(origin);
+  const fallback = `${typed.origin}/settings/devices?code=${encodeURIComponent(userCode)}`;
   try {
     const url = new URL(verifyUrl);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return fallback;
+    if (url.protocol !== typed.protocol || url.host !== typed.host) return fallback;
     if (url.pathname !== "/settings/devices" || url.username || url.password) return fallback;
     return url.href;
   } catch {

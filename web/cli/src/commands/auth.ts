@@ -1,10 +1,11 @@
 import os from "node:os";
 import { bool, str } from "../args.js";
 import { openBrowser } from "../browser.js";
-import { checkBoxName, defaultBoxName, isLoopbackHost, normalizeBoxUrl, publicView, type ConfigData } from "../config.js";
+import { checkBoxName, defaultBoxName, hasBox, isLoopbackHost, normalizeBoxUrl, publicView, type ConfigData } from "../config.js";
+import type { Context } from "../context.js";
 import { pollForToken, safeVerifyUrl, startDeviceLogin } from "../device.js";
 import { ApiError, CliError, EXIT } from "../errors.js";
-import { formatAgo, table } from "../format.js";
+import { formatAgo, safeText, table } from "../format.js";
 import { VERSION } from "../version.js";
 import { command, type Command } from "./types.js";
 
@@ -20,8 +21,16 @@ interface TokenSession {
 /** A name for a new box that no other box has. */
 function freeName(base: string, data: ConfigData, origin: string): string {
   let name = base;
-  for (let n = 2; data.boxes[name] && data.boxes[name]?.url !== origin; n++) name = `${base}-${n}`;
+  for (let n = 2; hasBox(data.boxes, name) && data.boxes[name]?.url !== origin; n++) name = `${base}-${n}`;
   return name;
+}
+
+/** Revoke a token this machine no longer uses, as far as the box can be reached; never fails. */
+async function revokeQuietly(ctx: Context, origin: string, token: string): Promise<void> {
+  await ctx
+    .client(origin, token)
+    .json("DELETE", "/_gate/tokens/self", { idleMs: 10_000 })
+    .catch(() => {});
 }
 
 export const login = command({
@@ -49,7 +58,7 @@ export const login = command({
     const name = asked
       ? checkBoxName(asked)
       : (Object.entries(data.boxes).find(([, b]) => b.url === origin)?.[0] ?? freeName(defaultBoxName(origin), data, origin));
-    const existing = data.boxes[name];
+    const existing = hasBox(data.boxes, name) ? data.boxes[name] : undefined;
     if (asked && existing && existing.url !== origin) {
       throw new CliError(`a box named "${name}" is already ${existing.url}; pick another --name, or \`agentbox logout --box ${name}\` first`);
     }
@@ -58,19 +67,36 @@ export const login = command({
     const anonymous = ctx.client(origin, null);
     const start = await startDeviceLogin(anonymous, device);
     const verify = safeVerifyUrl(start.verifyUrl, origin, start.userCode);
-    ctx.err(`\nTo sign this device in, open this page where you are signed in to the box:\n\n  ${verify}\n\nand check it shows this code:\n\n  ${start.userCode}\n\n`);
+    ctx.err(
+      `\nTo sign this device in, open this page where you are signed in to the box:\n\n  ${safeText(verify)}\n\n` +
+        `and check it shows this code:\n\n  ${safeText(start.userCode)}\n\n`,
+    );
     let opened = false;
     if (!bool(p.options, "no-browser")) opened = await openBrowser(verify, ctx.platform, ctx.env);
     ctx.err(`${opened ? "Opened your browser. " : ""}Waiting for approval (the code is good for ${Math.round(start.expiresIn / 60)} minutes; Ctrl-C to give up)…\n`);
 
     const token = await pollForToken(anonymous, start, { signal: ctx.abort.signal });
     const client = ctx.client(origin, token);
-    const session = await client.json<TokenSession>("GET", "/_gate/session", { what: "checking the new sign-in" });
+    let session: TokenSession;
+    try {
+      session = await client.json<TokenSession>("GET", "/_gate/session", { what: "checking the new sign-in" });
+      if (typeof session?.id !== "string" || typeof session.user !== "string") throw new CliError("the box's answer about the new sign-in is not one this CLI knows");
+    } catch (err) {
+      // Never kept, so never left valid at the box either.
+      await revokeQuietly(ctx, origin, token);
+      throw err;
+    }
 
-    let replaced: string | null = null;
+    // Tokens this sign-in replaces: this box's own earlier one, and the box
+    // saved under another name (a new --name for the same address). Left
+    // alone they would sit in Settings → Devices, valid and unused.
+    const replaced: Array<{ name: string; token: string }> = [];
     ctx.config.update((d) => {
-      const old = d.boxes[name];
-      if (old && old.url === origin && old.token !== token) replaced = old.token;
+      for (const [other, box] of Object.entries(d.boxes)) {
+        if (box.url !== origin || box.token === token) continue;
+        replaced.push({ name: other, token: box.token });
+        if (other !== name) delete d.boxes[other];
+      }
       d.boxes[name] = {
         url: origin,
         token,
@@ -81,19 +107,13 @@ export const login = command({
       };
       d.current = name;
     });
-    // Signing in again replaces this machine's token: the old one would
-    // otherwise sit in Settings → Devices, valid and unused.
-    if (replaced) {
-      await ctx
-        .client(origin, replaced)
-        .json("DELETE", "/_gate/tokens/self", { idleMs: 10_000 })
-        .catch(() => {});
-    }
+    for (const r of replaced) await revokeQuietly(ctx, origin, r.token);
     const version = await ctx.checkVersion(name, client);
     if (ctx.json) {
-      ctx.printJson({ ...publicView(name, ctx.config.load().boxes[name]!, true), boxVersion: version });
+      ctx.printJson({ ...publicView(name, ctx.config.load().boxes[name]!, true), boxVersion: version, replaced: replaced.map((r) => r.name).filter((n) => n !== name) });
     } else {
-      ctx.out(`Signed in to ${origin} as ${session.user}. This box is "${name}" here, and the current one.\n`);
+      for (const r of replaced) if (r.name !== name) ctx.err(`Replaced the box saved as "${r.name}" (same address), and revoked its token.\n`);
+      ctx.out(`Signed in to ${origin} as ${safeText(session.user)}. This box is "${name}" here, and the current one.\n`);
     }
   },
 });
@@ -169,9 +189,9 @@ export const whoami = command({
       });
       return;
     }
-    ctx.out(`${session.user} on ${name} (${box.url})\n`);
-    ctx.out(`  device   ${session.name ?? "-"}, signed in ${formatAgo(session.createdAt, ctx.now())}\n`);
-    ctx.out(`  version  box ${version ?? "unknown"}, this CLI ${VERSION}\n`);
+    ctx.out(`${safeText(String(session.user))} on ${name} (${box.url})\n`);
+    ctx.out(`  device   ${safeText(session.name ?? "-")}, signed in ${formatAgo(session.createdAt, ctx.now())}\n`);
+    ctx.out(`  version  box ${safeText(version ?? "unknown")}, this CLI ${VERSION}\n`);
   },
 });
 
@@ -194,7 +214,7 @@ export const boxes = command({
     ctx.out(
       table(
         ["", "NAME", "URL", "USER"],
-        names.map((n) => [n === data.current ? "*" : "", n, data.boxes[n]!.url, data.boxes[n]!.user ?? "-"]),
+        names.map((n) => [n === data.current ? "*" : "", n, data.boxes[n]!.url, safeText(data.boxes[n]!.user ?? "-")]),
       ),
     );
   },
@@ -208,7 +228,7 @@ export const use = command({
   async run(ctx, p) {
     const name = p.operands[0] as string;
     const url = ctx.config.update((d) => {
-      const box = d.boxes[name];
+      const box = hasBox(d.boxes, name) ? d.boxes[name] : undefined;
       if (!box) throw new CliError(`no box named "${name}" (see \`agentbox boxes\`)`, EXIT.NOT_FOUND);
       d.current = name;
       return box.url;

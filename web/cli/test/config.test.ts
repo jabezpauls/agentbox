@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { ConfigStore, configDir, defaultBoxName, isLoopbackHost, normalizeBoxUrl, publicView } from "../src/config.js";
+import { withFileLock } from "../src/lock.js";
 import { CliError, EXIT, UsageError } from "../src/errors.js";
 import { TOKEN, runCli, tmpDir } from "./helpers.js";
 
@@ -10,10 +13,15 @@ const mode = (p: string): number => fs.statSync(p).mode & 0o777;
 
 describe("where the configuration lives", () => {
   it("follows XDG_CONFIG_HOME, else ~/.config", () => {
-    expect(configDir({ XDG_CONFIG_HOME: "/x/cfg" }, "/home/u")).toBe(path.join("/x/cfg", "agentbox"));
-    expect(configDir({}, "/home/u")).toBe(path.join("/home/u", ".config", "agentbox"));
+    expect(configDir({ XDG_CONFIG_HOME: "/x/cfg" }, "/home/u", "linux")).toBe(path.join("/x/cfg", "agentbox"));
+    expect(configDir({}, "/home/u", "darwin")).toBe(path.join("/home/u", ".config", "agentbox"));
     // A relative XDG_CONFIG_HOME is invalid by the spec, and ignored.
-    expect(configDir({ XDG_CONFIG_HOME: "rel" }, "/home/u")).toBe(path.join("/home/u", ".config", "agentbox"));
+    expect(configDir({ XDG_CONFIG_HOME: "rel" }, "/home/u", "linux")).toBe(path.join("/home/u", ".config", "agentbox"));
+  });
+
+  it("uses %APPDATA% on Windows, and ~/.config when it is not set", () => {
+    expect(configDir({ APPDATA: "C:\\Users\\me\\AppData\\Roaming", XDG_CONFIG_HOME: "/x" }, "C:\\Users\\me", "win32")).toBe("C:\\Users\\me\\AppData\\Roaming\\agentbox");
+    expect(configDir({}, "/home/u", "win32")).toBe(path.join("/home/u", ".config", "agentbox"));
   });
 });
 
@@ -122,6 +130,64 @@ describe("the configuration file", () => {
   });
 });
 
+describe("changing it from several processes at once", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const tsx = path.resolve(here, "..", "..", "node_modules", ".bin", "tsx");
+
+  it("loses no change when several agentbox processes save at the same moment", async () => {
+    const dir = path.join(tmpDir(), "agentbox");
+    const script = path.join(tmpDir(), "writer.ts");
+    const go = path.join(tmpDir(), "go");
+    fs.writeFileSync(
+      script,
+      `import fs from "node:fs";\n` +
+        `import { ConfigStore } from ${JSON.stringify(path.resolve(here, "..", "src", "config.ts"))};\n` +
+        `const [dir, who, go] = process.argv.slice(2);\n` +
+        `const store = new ConfigStore(dir, { lockTimeoutMs: 20000 });\n` +
+        // All start together, so their changes overlap.
+        `while (!fs.existsSync(go)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);\n` +
+        `for (let i = 0; i < 100; i++) store.update((d) => { d.boxes[\`\${who}-\${i}\`] = { url: "https://x.example", token: "t", addedAt: i }; });\n`,
+    );
+    const runs = ["a", "b", "c", "d"].map(
+      (who) =>
+        new Promise<number>((resolve) => {
+          const child = spawn(tsx, [script, dir, who, go], { stdio: "ignore" });
+          child.on("exit", (code) => resolve(code ?? 1));
+        }),
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    fs.writeFileSync(go, "");
+    expect(await Promise.all(runs)).toEqual([0, 0, 0, 0]);
+    expect(Object.keys(new ConfigStore(dir).load().boxes)).toHaveLength(400);
+    expect(fs.existsSync(`${new ConfigStore(dir).file}.lock`)).toBe(false);
+  }, 60_000);
+
+  it("waits for a live holder, then says who holds it", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "config.json");
+    // Held by a live process (this one's parent stands in for another agentbox).
+    fs.writeFileSync(`${file}.lock`, `${process.ppid}\n`);
+    const store = new ConfigStore(dir, { lockTimeoutMs: 100 });
+    expect(() => store.update(() => {})).toThrow(new RegExp(`being changed by another agentbox \\(pid ${process.ppid}\\)`));
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("takes over a lock left by a process that is gone, or left long ago", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "config.json");
+    // A pid that cannot be running.
+    fs.writeFileSync(`${file}.lock`, "2147483646\n");
+    new ConfigStore(dir, { lockTimeoutMs: 100 }).update((d) => {
+      d.current = null;
+    });
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    fs.writeFileSync(`${file}.lock`, `${process.ppid}\n`);
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(`${file}.lock`, old, old);
+    expect(withFileLock(file, () => "done", { timeoutMs: 100 })).toBe("done");
+  });
+});
+
 describe("box addresses and names", () => {
   it("normalises what people type", () => {
     expect(normalizeBoxUrl("work.example.com")).toBe("https://work.example.com");
@@ -149,6 +215,28 @@ describe("box addresses and names", () => {
     const view = publicView("work", { url: "https://w.example", token: TOKEN, addedAt: 1, tokenId: "t1" }, true);
     expect(JSON.stringify(view)).not.toContain(TOKEN);
     expect(view).toMatchObject({ name: "work", url: "https://w.example", current: true, tokenId: "t1" });
+  });
+});
+
+describe("box names that are also JavaScript's", () => {
+  it("treats constructor, toString and __proto__ as names like any other", async () => {
+    const dir = tmpDir();
+    const store = new ConfigStore(dir);
+    for (const name of ["constructor", "toString", "hasOwnProperty"]) {
+      expect(() => store.resolve(name)).toThrow(new RegExp(`no box named "${name}"`));
+    }
+    fs.writeFileSync(
+      store.file,
+      JSON.stringify({ version: 1, current: "__proto__", boxes: { ["__proto__"]: { url: "https://p.example", token: TOKEN, addedAt: 1 }, constructor: { url: "https://c.example", token: TOKEN, addedAt: 1 } } }),
+    );
+    fs.chmodSync(store.file, 0o600);
+    const data = store.load();
+    expect(Object.keys(data.boxes).sort()).toEqual(["__proto__", "constructor"]);
+    expect(store.resolve("constructor").box.url).toBe("https://c.example");
+    expect(store.resolve().box.url).toBe("https://p.example");
+    expect((await runCli(["use", "toString"], { configDir: dir })).code).toBe(EXIT.NOT_FOUND);
+    expect((await runCli(["use", "constructor"], { configDir: dir })).code).toBe(0);
+    expect(store.load().current).toBe("constructor");
   });
 });
 

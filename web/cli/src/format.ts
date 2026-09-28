@@ -15,7 +15,7 @@ export function formatBytes(n: number | null | undefined): string {
 
 /** `2026-09-28 14:03` in local time, or `Sep 28 2025` when it is not this year. */
 export function formatTime(ms: number | null | undefined, now: number = Date.now()): string {
-  if (!ms) return "-";
+  if (!ms || !Number.isFinite(ms)) return "-";
   const d = new Date(ms);
   const pad = (x: number): string => String(x).padStart(2, "0");
   if (d.getFullYear() !== new Date(now).getFullYear()) {
@@ -54,6 +54,11 @@ function width(s: string): number {
 /** Characters a terminal would act on, made visible: a file name is data, not a command. */
 export function safeText(s: string): string {
   return s.replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+/** As {@link safeText}, but line breaks stay line breaks: for messages of several lines. */
+export function safeLines(s: string): string {
+  return s.split("\n").map(safeText).join("\n");
 }
 
 /**

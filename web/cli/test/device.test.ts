@@ -14,7 +14,10 @@ type Answer = { status: number; body: unknown; headers?: Record<string, string> 
  * A stand-in for the gate's device flow: start, poll (answers from `polls`, in
  * order, the last one repeating), and the calls a signed-in CLI makes.
  */
-async function stubGate(polls: Answer[], opts: { interval?: number; tokens?: string[] } = {}): Promise<Stub & { revoked: string[] }> {
+async function stubGate(
+  polls: Answer[],
+  opts: { interval?: number; tokens?: string[]; session?: Answer; verifyUrl?: string } = {},
+): Promise<Stub & { revoked: string[] }> {
   const revoked: string[] = [];
   const valid = new Set(opts.tokens ?? [TOKEN, TOKEN2]);
   let i = 0;
@@ -22,7 +25,7 @@ async function stubGate(polls: Answer[], opts: { interval?: number; tokens?: str
   const stub = await stubServer((req, res) => {
     const url = req.url ?? "";
     if (req.method === "POST" && url === "/_gate/device/start") {
-      return json(res, 200, { deviceCode: "device-code-1", userCode: "BCDF-GHJK", verifyUrl: `${stub.url}/settings/devices?code=BCDF-GHJK`, interval: opts.interval ?? 0, expiresIn: 600 });
+      return json(res, 200, { deviceCode: "device-code-1", userCode: "BCDF-GHJK", verifyUrl: opts.verifyUrl ?? `${stub.url}/settings/devices?code=BCDF-GHJK`, interval: opts.interval ?? 0, expiresIn: 600 });
     }
     if (req.method === "POST" && url === "/_gate/device/poll") {
       const answer = polls[Math.min(i++, polls.length - 1)] as Answer;
@@ -33,6 +36,9 @@ async function stubGate(polls: Answer[], opts: { interval?: number; tokens?: str
     const token = bearer(req);
     if (!token || !valid.has(token)) return json(res, 401, { error: "unauthorized" });
     if (req.method === "GET" && url === "/_gate/session") {
+      const s = opts.session;
+      if (s === "drop") return void req.socket.destroy();
+      if (s) return json(res, s.status, s.body);
       return json(res, 200, { kind: "token", id: token === TOKEN ? "tok-1" : "tok-2", name: "agentbox CLI on test", user: "owner", createdAt: 1000 });
     }
     if (req.method === "DELETE" && url === "/_gate/tokens/self") {
@@ -111,12 +117,32 @@ describe("the device-flow client", () => {
     await expect(pollForToken(new BoxClient(gate.url, null), START, { sleep: async () => {} })).rejects.toThrow(/not a device token/);
   });
 
-  it("opens only the approval page, on http(s)", () => {
+  it("opens only the approval page, on the very box that was typed", () => {
     const origin = "https://box.example";
-    expect(safeVerifyUrl("https://public.example/settings/devices?code=BCDF-GHJK", origin, "BCDF-GHJK")).toBe("https://public.example/settings/devices?code=BCDF-GHJK");
-    for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "https://evil.example/phish", "not a url", "https://u:p@box.example/settings/devices"]) {
+    expect(safeVerifyUrl("https://box.example/settings/devices?code=BCDF-GHJK", origin, "BCDF-GHJK")).toBe("https://box.example/settings/devices?code=BCDF-GHJK");
+    for (const bad of [
+      "javascript:alert(1)",
+      "file:///etc/passwd",
+      "https://evil.example/phish",
+      "https://evil.example/settings/devices?code=BCDF-GHJK",
+      "http://box.example/settings/devices?code=BCDF-GHJK",
+      "https://box.example:8443/settings/devices?code=BCDF-GHJK",
+      "not a url",
+      "https://u:p@box.example/settings/devices",
+    ]) {
       expect(safeVerifyUrl(bad, origin, "BCDF-GHJK"), bad).toBe("https://box.example/settings/devices?code=BCDF-GHJK");
     }
+  });
+
+  it("waits out a box answering 5xx between restarts, longer each time", async () => {
+    const gate = await stubGate([{ status: 502, body: {} }, { status: 503, body: {} }, pending, { status: 200, body: { token: TOKEN } }]);
+    stubs.push(gate);
+    const slept: number[] = [];
+    expect(await pollForToken(new BoxClient(gate.url, null), START, { sleep: async (ms) => void slept.push(ms) })).toBe(TOKEN);
+    expect(slept).toEqual([5000, 5000, 10_000, 5000]);
+    const down = await stubGate([{ status: 500, body: {} }]);
+    stubs.push(down);
+    await expect(pollForToken(new BoxClient(down.url, null), START, { sleep: async () => {}, maxNetworkErrors: 3 })).rejects.toThrow(/kept failing.*HTTP 500/);
   });
 });
 
@@ -146,6 +172,41 @@ describe("login, whoami and logout", () => {
     const r = await runCli(["login", gate.url, "--no-browser", "--name", "test"], { configDir: dir });
     expect(r.code, r.stderr).toBe(0);
     expect(new ConfigStore(dir).load().boxes.test?.token).toBe(TOKEN2);
+    expect(gate.revoked).toEqual([TOKEN]);
+  });
+
+  it("points the browser only at the typed box, whatever the box names", async () => {
+    const gate = await stubGate([{ status: 200, body: { token: TOKEN } }], { verifyUrl: "https://evil.example/settings/devices?code=BCDF-GHJK" });
+    stubs.push(gate);
+    const r = await runCli(["login", gate.url, "--no-browser"], { configDir: tmpDir() });
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`${gate.url}/settings/devices?code=BCDF-GHJK`);
+    expect(r.stderr).not.toContain("evil.example");
+  });
+
+  it("revokes the new token when checking it fails, and keeps nothing", async () => {
+    for (const session of [{ status: 500, body: { error: "boom" } }, { status: 200, body: { unexpected: true } }] as Answer[]) {
+      const gate = await stubGate([{ status: 200, body: { token: TOKEN } }], { session });
+      stubs.push(gate);
+      const dir = tmpDir();
+      const r = await runCli(["login", gate.url, "--no-browser"], { configDir: dir });
+      expect(r.code).toBe(EXIT.FAILURE);
+      expect(gate.revoked).toEqual([TOKEN]);
+      expect(new ConfigStore(dir).load().boxes).toEqual({});
+    }
+  });
+
+  it("replaces the same box saved under another name, revoking its token", async () => {
+    const gate = await stubGate([{ status: 200, body: { token: TOKEN2 } }]);
+    stubs.push(gate);
+    const dir = signedIn(gate.url);
+    const r = await runCli(["login", gate.url, "--no-browser", "--name", "work"], { configDir: dir });
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/Replaced the box saved as "test"/);
+    const data = new ConfigStore(dir).load();
+    expect(Object.keys(data.boxes)).toEqual(["work"]);
+    expect(data.boxes.work?.token).toBe(TOKEN2);
+    expect(data.current).toBe("work");
     expect(gate.revoked).toEqual([TOKEN]);
   });
 

@@ -4,6 +4,7 @@ import path from "node:path";
 import { Transform } from "node:stream";
 import { sleep as defaultSleep } from "./device.js";
 import { ApiError, CliError, EXIT } from "./errors.js";
+import { withFileLock } from "./lock.js";
 import { MAX_CHUNK, type FilesApi } from "./files-api.js";
 import type { OutStream } from "./context.js";
 import type { FileEntry, UploadSession } from "@workbench/shared";
@@ -56,20 +57,35 @@ export class ResumeStore {
   }
 
   get(key: string): string | null {
-    return this.read()[key]?.id ?? null;
+    const data = this.read();
+    return Object.hasOwn(data, key) ? (data[key]?.id ?? null) : null;
+  }
+
+  /** A change made under the file's lock (two uploads at once must not lose each other's ids). */
+  private change(fn: (data: Record<string, { id: string; at: number; remote: string }>) => boolean): void {
+    try {
+      withFileLock(this.file, () => {
+        const data = this.read();
+        if (fn(data)) this.write(data);
+      });
+    } catch {
+      // Only resuming is lost.
+    }
   }
 
   set(key: string, id: string, remote: string): void {
-    const data = this.read();
-    data[key] = { id, at: Date.now(), remote };
-    this.write(data);
+    this.change((data) => {
+      data[key] = { id, at: Date.now(), remote };
+      return true;
+    });
   }
 
   delete(key: string): void {
-    const data = this.read();
-    if (!(key in data)) return;
-    delete data[key];
-    this.write(data);
+    this.change((data) => {
+      if (!Object.hasOwn(data, key)) return false;
+      delete data[key];
+      return true;
+    });
   }
 }
 

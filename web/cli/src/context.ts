@@ -1,5 +1,7 @@
+import os from "node:os";
 import type { Globals } from "./args.js";
-import { ConfigStore, type BoxEntry } from "./config.js";
+import { ConfigStore, hasBox, type BoxEntry } from "./config.js";
+import { safeLines, safeText } from "./format.js";
 import { BoxClient } from "./http.js";
 import { VERSION } from "./version.js";
 
@@ -44,6 +46,8 @@ export class Context {
   private readonly clients: BoxClient[] = [];
   /** Aborted on Ctrl-C, so a transfer in flight stops cleanly. */
   readonly abort = new AbortController();
+  /** While above zero, Ctrl-C belongs to a program in the foreground (an editor), not to this command. */
+  interruptsHeld = 0;
 
   constructor(
     readonly io: Io,
@@ -67,8 +71,33 @@ export class Context {
     this.io.stderr.write(text);
   }
 
+  /** A warning; it may quote the box, so control characters are shown escaped. */
   warn(message: string): void {
-    this.err(`warning: ${message}\n`);
+    this.err(`warning: ${safeLines(message)}\n`);
+  }
+
+  /**
+   * Run `fn` with Ctrl-C (SIGINT) and Ctrl-\ (SIGQUIT) left to the program it
+   * starts in the foreground, as git does for an editor: the terminal sends
+   * them to the whole process group, and the editor may use them, or ignore
+   * them, without this command dying and taking the work with it.
+   */
+  async holdInterrupts<T>(fn: () => Promise<T>): Promise<T> {
+    const ignore = (): void => {};
+    const signals = this.platform === "win32" ? ["SIGINT"] : ["SIGINT", "SIGQUIT"];
+    for (const s of signals) process.on(s, ignore);
+    this.interruptsHeld += 1;
+    try {
+      return await fn();
+    } finally {
+      this.interruptsHeld -= 1;
+      for (const s of signals) process.off(s, ignore);
+    }
+  }
+
+  /** Where temporary files go: `$TMPDIR` (or Windows' `%TEMP%`), else the system's. */
+  tempRoot(): string {
+    return this.env.TMPDIR || this.env.TEMP || this.env.TMP || os.tmpdir();
   }
 
   printJson(value: unknown): void {
@@ -111,7 +140,7 @@ export class Context {
     }
     try {
       this.config.update((data) => {
-        const entry = data.boxes[name];
+        const entry = hasBox(data.boxes, name) ? data.boxes[name] : undefined;
         if (entry) {
           entry.versionCheckedAt = this.now();
           if (version) entry.boxVersion = version;
@@ -121,7 +150,7 @@ export class Context {
       // A read-only configuration costs only the reminder's schedule.
     }
     if (version && version !== VERSION) {
-      this.warn(`this CLI is agentbox ${VERSION}, but ${name} (${client.origin}) runs ${version}; run \`agentbox update\``);
+      this.warn(`this CLI is agentbox ${VERSION}, but ${name} (${client.origin}) runs ${safeText(version)}; run \`agentbox update\``);
     }
     return version;
   }
@@ -133,8 +162,4 @@ export class Context {
 
 export function defaultIo(): Io {
   return { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin };
-}
-
-export function makeConfig(env: NodeJS.ProcessEnv, dir: string, io: Io): ConfigStore {
-  return new ConfigStore(dir, { warn: (m) => io.stderr.write(`warning: ${m}\n`) });
 }
