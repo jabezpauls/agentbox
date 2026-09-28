@@ -67,9 +67,17 @@ export interface AppDeps {
  * The app must not be framed by anyone else: a hostile page that could overlay
  * it would be clicking on live terminals and agents. Apps are framed *by* the
  * app, and they are served by the data plane, not here, so they are unaffected.
+ *
+ * And the page runs only its own scripts. The build has no inline script, no
+ * eval and no plugin, so a script that found its way into the page — through
+ * a rendered README, say, past the sanitiser — has nothing to run with. Frames,
+ * images, styles and sockets are left open: the editor, apps on their own
+ * origin, pasted pictures and React's inline styles all need them.
  */
+export const APP_CSP = "frame-ancestors 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'";
+
 const FRAME_GUARD: Record<string, string> = {
-  "content-security-policy": "frame-ancestors 'self'",
+  "content-security-policy": APP_CSP,
   "x-frame-options": "SAMEORIGIN",
 };
 

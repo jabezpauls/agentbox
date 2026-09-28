@@ -84,6 +84,25 @@ test("project cards: a name with spaces labels its card, and the actions line up
   fs.rmSync(path.join(root, "two words"), { recursive: true, force: true });
 });
 
+test("every surface runs under the page's content security policy without a violation", async ({ page }) => {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { cspViolations: string[] }).cspViolations = seen;
+    document.addEventListener("securitypolicyviolation", (e) => seen.push(`${e.violatedDirective} ${e.blockedURI}`));
+  });
+  await resume(page, cookies);
+  const csp = await page.evaluate(async () => (await fetch("/", { headers: { accept: "text/html" } })).headers.get("content-security-policy"));
+  expect(csp).toContain("script-src 'self'");
+  for (const path of ["/", "/workbench", "/files", "/apps", "/system", "/settings/account", "/settings/cli"]) {
+    await page.goto(path);
+    await expect(page.locator("section.surface[data-active]")).toBeVisible();
+  }
+  await page.keyboard.press("Control+Alt+k");
+  await expect(page.getByLabel("Command palette query")).toBeFocused();
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
+});
+
 test("J1: a link into the app survives the sign-in on the way", async ({ page }) => {
   await signIn(page, "/settings/cli");
   await expect(surface(page, "settings")).toBeVisible();
