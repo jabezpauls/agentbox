@@ -30,6 +30,7 @@ certificate and starts the stack. It prints the password once.
 | `/settings/…` | Password, two-factor, sessions, devices and the CLI, sharing, appearance |
 | `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
 | `/shell` | A plain bash shell, pleasant on a phone |
+| `/monitor` | btop full-screen, the same as System's detailed monitor |
 
 Sign-in is served by the **gate**, a small container outside the sandbox that
 holds the password, sessions, optional two-factor (TOTP with recovery codes)

@@ -28,6 +28,10 @@ describe("parseRoute", () => {
     expect(parse("/files/workspace/proj/src/a.ts")).toEqual({ surface: "files", path: "/workspace/proj/src/a.ts" });
     expect(parse("/files/home/coder/.config")).toEqual({ surface: "files", path: "/home/coder/.config" });
     expect(parse("/files?trash=1")).toEqual({ surface: "files", path: "", trash: true });
+    // `agentbox open ~/notes` from a laptop: home, wherever the box keeps it.
+    expect(parse("/files/~/notes/a.md")).toEqual({ surface: "files", path: "~/notes/a.md" });
+    expect(parse("/files/~")).toEqual({ surface: "files", path: "~" });
+    expect(pathFor({ surface: "files", path: "~/notes" })).toBe("/files/~/notes");
   });
 
   it("decodes names with spaces, unicode and reserved characters", () => {

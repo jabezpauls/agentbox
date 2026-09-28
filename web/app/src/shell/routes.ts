@@ -8,6 +8,7 @@
  *   /files                 Files, at the workspace
  *   /files/<absolute path> Files, at a folder or a file: `/files/workspace/proj/src`
  *                          is /workspace/proj/src, `/files/home/coder/.config` is in home
+ *   /files/~/<path>        … below home, wherever the box keeps it
  *   /files?trash=1         the trash
  *   /apps, /apps/<id>      Apps, optionally with one app selected
  *   /system[/monitor]      System, or its detailed monitor
@@ -26,7 +27,7 @@ export type Route =
   | { surface: "home" }
   | { surface: "workbench"; review?: string }
   | { surface: "editor" }
-  /** `path` is absolute; "" is the default, the workspace root. */
+  /** `path` is absolute, or `~/…` below home; "" is the default, the workspace root. */
   | { surface: "files"; path: string; trash?: true }
   | { surface: "apps"; appId?: string }
   | { surface: "system"; view: "overview" | "monitor" }
@@ -130,6 +131,9 @@ function filesRoute(parts: string[], params: URLSearchParams, search: string): R
     return { surface: "files", path: segs.length ? `/${segs.join("/")}` : "" };
   }
   const segs = names(parts.map(decodeSegment));
+  // `/files/~/…` is home, as the files API reads `~`: where it is on disk is
+  // the box's to say, so the path stays relative to it here.
+  if (segs[0] === "~") return { surface: "files", path: ["~", ...segs.slice(1)].join("/") };
   return { surface: "files", path: segs.length ? `/${segs.join("/")}` : "" };
 }
 
@@ -180,6 +184,7 @@ export function pathFor(route: Route): string {
       if (route.trash) return "/files?trash=1";
       const segs = route.path.split("/").filter(Boolean);
       if (segs.length === 0) return "/files";
+      // (A `~/…` path keeps its `~` as the first segment.)
       if (segs.some((n) => n.includes("\\"))) return `/files?p=%2F${segs.map(encodeSegment).join("%2F")}`;
       return `/files/${segs.map(encodeSegment).join("/")}`;
     }

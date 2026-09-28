@@ -157,7 +157,9 @@ export function FilesSurface() {
   const here = lastFiles.current;
   const trash = here?.trash === true;
   // Nothing is read before the bridge has said where the roots are.
-  const target = health ? (here?.path || roots.workspace) : null;
+  const asked = here?.path || roots.workspace;
+  const home = asked === "~" ? roots.home : asked.startsWith("~/") ? join(roots.home, asked.slice(2)) : null;
+  const target = health ? (home ?? asked) : null;
 
   const [hidden, setHidden] = useState(() => readFlag("agentbox.files.hidden", false));
   const [showHome, setShowHome] = useState(() => readFlag("agentbox.files.home", false));
