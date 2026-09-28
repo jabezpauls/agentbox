@@ -81,6 +81,22 @@ test("project cards: a name with spaces labels its card, and the actions line up
   );
   expect(gaps.length).toBeGreaterThan(1);
   expect(new Set(gaps).size).toBe(1);
+
+  // At a laptop's width every action, "Agent ▾" included, stays on one row
+  // — with several agents installed, so the button carries its chevron.
+  await page.route(/\/api\/system$/, async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { versions: { agents: { name: string; version: string | null }[] } };
+    body.versions.agents = ["claude", "codex", "gemini"].map((name) => ({ name, version: "1.0.0" }));
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await expect(page.getByRole("article", { name: "demo" }).getByRole("button", { name: /^Agent/ })).toHaveAttribute("aria-haspopup", "menu");
+  const rows = await page.locator("article.project-card .card-actions").evaluateAll((bars) =>
+    bars.map((bar) => new Set([...bar.children].map((b) => Math.round(b.getBoundingClientRect().top))).size),
+  );
+  expect(rows.every((n) => n === 1)).toBe(true);
   fs.rmSync(path.join(root, "two words"), { recursive: true, force: true });
 });
 

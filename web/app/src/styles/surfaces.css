@@ -208,6 +208,12 @@ p code,
 .card-actions .btn-ghost {
   color: var(--text-2);
 }
+/* Four actions to a row at a laptop's width, "Agent ▾" included: the
+   buttons sit closer than elsewhere. A narrower card still wraps. */
+.card-actions .btn {
+  gap: 5px;
+  padding: 0 6px;
+}
 .card-error {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-xs);
