@@ -119,7 +119,7 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
     if (!pageVisible) return;
     const tick = () => {
       void useReviews.getState().refresh();
-      if (useApps.getState().supported !== false) void useApps.getState().refresh();
+      void useApps.getState().refresh();
     };
     tick();
     const id = setInterval(tick, BACKGROUND_POLL_MS);

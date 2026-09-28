@@ -16,9 +16,8 @@ import { toast, toastError } from "../../shell/toast.ts";
  */
 export function SharingSection() {
   const apps = useApps((s) => s.apps);
-  const supported = useApps((s) => s.supported);
   const [expiry, setExpiry] = useState(() => defaultExpiry().id);
-  usePolling(() => useApps.getState().refresh(), 10_000, supported !== false);
+  usePolling(() => useApps.getState().refresh(), 10_000);
 
   const shared = (apps ?? []).filter((a) => isPublic(a));
 
@@ -56,10 +55,8 @@ export function SharingSection() {
           <p className="field-hint">What Share starts with. You can pick another each time.</p>
         </div>
       </Section>
-      <Section title="Shared now" count={supported ? shared.length : undefined} id="shared">
-        {supported === false ? (
-          <Empty compact icon={<Globe size={22} />} title="This box does not serve apps yet." sub="Sharing is part of apps; it arrives with them." />
-        ) : shared.length === 0 ? (
+      <Section title="Shared now" count={shared.length} id="shared">
+        {shared.length === 0 ? (
           <Empty compact icon={<Globe size={22} />} title="Nothing is shared." sub="Every app is private: only you, signed in, can open it." />
         ) : (
           <ul className="settings-list">

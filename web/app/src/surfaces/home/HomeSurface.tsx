@@ -69,7 +69,6 @@ export function HomeSurface() {
   const clones = useProjects((s) => s.clones);
   const dismissClone = useProjects((s) => s.dismissClone);
   const apps = useApps((s) => s.apps);
-  const appsSupported = useApps((s) => s.supported);
   const appsError = useApps((s) => s.error);
   const system = useSystem((s) => s.info);
   const systemError = useSystem((s) => s.error);
@@ -98,7 +97,7 @@ export function HomeSurface() {
     ? "The box is not answering. Reconnecting…"
     : [
         working ? `${plural(working, "agent")} working` : "No agents working",
-        appsSupported && apps !== null ? (running ? `${plural(running, "app")} running` : "no apps running") : null,
+        apps !== null ? (running ? `${plural(running, "app")} running` : "no apps running") : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -199,51 +198,49 @@ export function HomeSurface() {
           )}
         </Section>
 
-        {appsSupported !== false && (
-          <Section
-            title="Apps"
-            count={apps?.length}
-            id="apps"
-            action={
-              <button className="btn btn-small btn-ghost" onClick={() => navigate({ surface: "apps" })}>
-                All apps
-                <ArrowRight size={13} aria-hidden="true" />
-              </button>
-            }
-          >
-            {apps === null && appsError ? (
-              <Empty
-                compact
-                title="Couldn't read the apps."
-                sub={appsError}
-                action={
-                  <button className="btn btn-small" onClick={() => void useApps.getState().refresh()}>
-                    Retry
-                  </button>
-                }
-              />
-            ) : apps === null ? (
-              <div className="skeleton" style={{ height: 44 }} aria-hidden="true" />
-            ) : apps.length === 0 ? (
-              <Empty
-                compact
-                icon={<AppWindow size={22} />}
-                title="No apps yet."
-                sub={
-                  <>
-                    Ask an agent to put something in your preview, or run <code>agentbox-preview start -- npm run dev</code> in a terminal.
-                  </>
-                }
-              />
-            ) : (
-              <ul className="app-list">
-                {apps.map((a) => (
-                  <AppRow key={a.id} app={a} />
-                ))}
-              </ul>
-            )}
-          </Section>
-        )}
+        <Section
+          title="Apps"
+          count={apps?.length}
+          id="apps"
+          action={
+            <button className="btn btn-small btn-ghost" onClick={() => navigate({ surface: "apps" })}>
+              All apps
+              <ArrowRight size={13} aria-hidden="true" />
+            </button>
+          }
+        >
+          {apps === null && appsError ? (
+            <Empty
+              compact
+              title="Couldn't read the apps."
+              sub={appsError}
+              action={
+                <button className="btn btn-small" onClick={() => void useApps.getState().refresh()}>
+                  Retry
+                </button>
+              }
+            />
+          ) : apps === null ? (
+            <div className="skeleton" style={{ height: 44 }} aria-hidden="true" />
+          ) : apps.length === 0 ? (
+            <Empty
+              compact
+              icon={<AppWindow size={22} />}
+              title="No apps yet."
+              sub={
+                <>
+                  Ask an agent to put something in your preview, or run <code>agentbox-preview start -- npm run dev</code> in a terminal.
+                </>
+              }
+            />
+          ) : (
+            <ul className="app-list">
+              {apps.map((a) => (
+                <AppRow key={a.id} app={a} />
+              ))}
+            </ul>
+          )}
+        </Section>
 
         <Section
           title="System"

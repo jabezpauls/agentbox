@@ -213,7 +213,6 @@ export function AppsSurface() {
   const route = useRouter((s) => s.route);
   const navigate = useRouter((s) => s.navigate);
   const apps = useApps((s) => s.apps);
-  const supported = useApps((s) => s.supported);
   const error = useApps((s) => s.error);
   const ports = useApp((s) => s.ports);
   const lost = useOutOfReach();
@@ -224,7 +223,7 @@ export function AppsSurface() {
     setMenu(null);
   });
 
-  usePolling(() => useApps.getState().refresh(), 5000, supported !== false);
+  usePolling(() => useApps.getState().refresh(), 5000);
 
   const selectedId = route.surface === "apps" ? (route.appId ?? null) : null;
   const selected = apps?.find((a) => a.id === selectedId) ?? null;
@@ -238,7 +237,6 @@ export function AppsSurface() {
           title="Apps"
           subtitle="Servers in the box, each with its own link. Private until you share them."
           actions={
-            supported !== false &&
             !(error && apps === null) && (
               <button
                 className="btn btn-small"
@@ -260,13 +258,7 @@ export function AppsSurface() {
           }
         />
 
-        {supported === false ? (
-          <Empty
-            icon={<AppWindow size={22} />}
-            title="This box does not serve apps yet."
-            sub="Update agentbox to get apps: a link per dev server, a Preview that runs real apps, and sharing."
-          />
-        ) : error && apps === null ? (
+        {error && apps === null ? (
           <Empty title="Couldn't read the apps." sub={error} action={<button className="btn btn-small" onClick={() => void useApps.getState().refresh()}>Retry</button>} />
         ) : apps === null ? (
           <div className="skeleton" style={{ height: 120 }} aria-hidden="true" />

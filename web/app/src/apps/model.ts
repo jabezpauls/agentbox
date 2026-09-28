@@ -26,14 +26,12 @@ export const appsApi = {
 interface AppsView {
   /** null until read — and, when a read failed and none are known, while it fails. */
   apps: AppView[] | null;
-  /** Every box that serves this app has the app API. */
-  supported: boolean | null;
   error: string | null;
   refresh(): Promise<void>;
 }
 
 function view(s: AppState): AppsView {
-  return { apps: s.appsError && !s.apps?.length ? null : s.apps, supported: true, error: s.appsError, refresh: s.refreshApps };
+  return { apps: s.appsError && !s.apps?.length ? null : s.apps, error: s.appsError, refresh: s.refreshApps };
 }
 
 /** The store's apps, with the error the surfaces show. */
