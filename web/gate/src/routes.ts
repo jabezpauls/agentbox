@@ -57,6 +57,15 @@ const TTYD: ReadonlyArray<readonly [string, UpstreamName]> = [
 export const EDITOR_PREFIX = "/vscode";
 
 /**
+ * code-server's own port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) would
+ * serve any port in the sandbox — an app, or the bridge itself — on the box's
+ * origin, outside the app policy. The compose file starts code-server with
+ * `--disable-proxy`; the gate refuses these paths as well, in any letter case
+ * (code-server's router ignores case), so neither alone is what stands.
+ */
+const EDITOR_PROXIES = ["/proxy", "/absproxy"];
+
+/**
  * The bridge's editor channel: the socket the VS Code extension inside the
  * sandbox holds open to receive "Open in editor". It is for that extension
  * alone; a browser, or anything else through the front door, posing as the
@@ -104,7 +113,9 @@ export function route(path: string, query: string | null): Route {
     return { kind: "redirect", location: `${EDITOR_PREFIX}/${qs}` };
   }
   if (path.startsWith(`${EDITOR_PREFIX}/`)) {
-    return { kind: "upstream", upstream: "code", target: `${path.slice(EDITOR_PREFIX.length)}${qs}` };
+    const inner = path.slice(EDITOR_PREFIX.length);
+    if (EDITOR_PROXIES.some((p) => underSegment(inner.toLowerCase(), p))) return { kind: "notFound" };
+    return { kind: "upstream", upstream: "code", target: `${inner}${qs}` };
   }
 
   for (const [prefix, upstream] of TTYD) {

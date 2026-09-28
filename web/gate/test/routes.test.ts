@@ -108,6 +108,12 @@ describe("the route table", () => {
     expect(at("/vscode/")).toEqual({ kind: "upstream", upstream: "code", target: "/" });
     expect(at("/vscode/static/out/x.js?v=1")).toEqual({ kind: "upstream", upstream: "code", target: "/static/out/x.js?v=1" });
     expect(at("/vscode")).toEqual({ kind: "redirect", location: "/vscode/" });
+    // code-server's port proxy is never reached: it would serve any sandbox
+    // port on this origin, outside the app policy.
+    for (const p of ["/vscode/proxy/7800/", "/vscode/proxy/5173", "/vscode/proxy", "/vscode/absproxy/8080/x", "/vscode/PROXY/7800/", "/vscode/AbsProxy/7800/"]) {
+      expect(at(p), p).toEqual({ kind: "notFound" });
+    }
+    expect(at("/vscode/proxyish/x")).toEqual({ kind: "upstream", upstream: "code", target: "/proxyish/x" });
     expect(at("/vscode?folder=/workspace")).toEqual({ kind: "redirect", location: "/vscode/?folder=/workspace" });
   });
 

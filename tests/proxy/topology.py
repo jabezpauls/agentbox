@@ -40,4 +40,5 @@ check(trust.startswith(prefix), "the proxy trusts per its mode (%s)" % trust)
 code_cmd = svc["code"].get("command") or []
 check("--disable-workspace-trust" in code_cmd, "the editor opens folders trusted")
 check("--auth=none" in code_cmd, "the editor leaves sign-in to the gate")
+check("--disable-proxy" in code_cmd, "the editor serves no port proxy")
 sys.exit(1 if failed else 0)

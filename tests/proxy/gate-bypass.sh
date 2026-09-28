@@ -364,6 +364,23 @@ for CADDYFILE in $CADDYFILES; do
     req GET /vscode -H "Cookie: $SESSION"
     { [ "$STATUS" = 308 ] && [ "$(header Location)" = /vscode/ ]; } || fail "/vscode -> $STATUS $(header Location)"
 
+    # code-server's own port proxy would serve any sandbox port (the bridge
+    # included) on this origin, outside the app policy: never forwarded, even
+    # signed in, in any spelling.
+    before="$(hits)"
+    for p in /vscode/proxy/7800/ /vscode/proxy/7800/api/health /vscode/absproxy/7800/ /vscode/PROXY/7800/ \
+        /vscode/AbsProxy/5173/ /vscode/%70roxy/7800/ /vscode/proxy; do
+        req GET "$p" -H "Cookie: $SESSION"
+        [ "$STATUS" = 404 ] || fail "signed-in $p -> $STATUS"
+    done
+    ws /vscode/proxy/7800/ws/events -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 404 ] || fail "signed-in WebSocket to the editor's proxy -> $STATUS"
+    if [ "$(hits)" = "$before" ]; then
+        pass "the editor's port proxy is never reached"
+    else
+        fail "a request for the editor's port proxy reached the sandbox"
+    fi
+
     ws /terminal/ws -H "Cookie: $SESSION; keep=1" -H "Origin: $ORIGIN" -H "Authorization: Basic $B64"
     if [ "$STATUS" = 101 ] && [[ "$ECHOED" == *'"port":7681'* ]]; then
         case "$ECHOED" in

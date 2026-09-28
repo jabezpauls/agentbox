@@ -63,6 +63,11 @@ services:
       # Trust guards a machine from the code it opens, and here the sandbox
       # is that boundary — agents already run whatever is in /workspace.
       - --disable-workspace-trust
+      # No port proxy (/proxy/<port>/, /absproxy/<port>/): it would serve any
+      # port in the sandbox, the bridge included, on the box's own origin and
+      # outside the app policy. Apps are the gate's /a/<id>/. The gate refuses
+      # those paths too.
+      - --disable-proxy
       - /workspace
     networks:
       - internal

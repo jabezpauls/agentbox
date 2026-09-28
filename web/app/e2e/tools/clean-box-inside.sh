@@ -29,4 +29,4 @@ ttyd --port 7682 --base-path /monitor --check-origin btop >/dev/null 2>&1 &
 # The bridge, which runs herdr.
 agentbox-workbench &
 
-exec code-server --bind-addr 0.0.0.0:8080 --auth none --disable-telemetry --disable-update-check --disable-workspace-trust /workspace
+exec code-server --bind-addr 0.0.0.0:8080 --auth none --disable-telemetry --disable-update-check --disable-workspace-trust --disable-proxy /workspace
