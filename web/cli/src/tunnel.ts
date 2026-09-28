@@ -3,6 +3,7 @@ import net from "node:net";
 import { WebSocket } from "ws";
 import { CliError, EXIT, UsageError } from "./errors.js";
 import type { BoxClient } from "./http.js";
+import { PING_MS, keepAlive } from "./keepalive.js";
 
 /**
  * Tunnels: a byte stream to something inside the box, over one WebSocket.
@@ -25,7 +26,6 @@ export function targetParam(t: TunnelTarget): string {
 }
 
 export const TUNNEL_PATH = "/_gate/tunnel";
-export const TUNNEL_PING_MS = 25_000;
 
 /** A control frame from the far end. */
 export interface ControlFrame {
@@ -37,11 +37,11 @@ export class TunnelError extends CliError {}
 
 /** The tunnel as a Node stream: write bytes in, read bytes out. */
 export class TunnelStream extends Duplex {
-  private pinger: NodeJS.Timeout | null = null;
+  private readonly stopKeepAlive: () => void;
 
   constructor(
     private readonly ws: WebSocket,
-    pingMs = TUNNEL_PING_MS,
+    pingMs = PING_MS,
   ) {
     super();
     ws.on("message", (data: Buffer, isBinary: boolean) => {
@@ -58,19 +58,11 @@ export class TunnelStream extends Duplex {
       if (!this.push(data)) ws.pause();
     });
     ws.on("close", () => {
-      this.stopPing();
+      this.stopKeepAlive();
       this.push(null);
     });
     ws.on("error", (err) => this.destroy(err));
-    this.pinger = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.ping();
-    }, pingMs);
-    this.pinger.unref();
-  }
-
-  private stopPing(): void {
-    if (this.pinger) clearInterval(this.pinger);
-    this.pinger = null;
+    this.stopKeepAlive = keepAlive(ws, () => this.destroy(new TunnelError("the box stopped answering; the tunnel is closed")), pingMs);
   }
 
   override _read(): void {
@@ -89,7 +81,7 @@ export class TunnelStream extends Duplex {
   }
 
   override _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
-    this.stopPing();
+    this.stopKeepAlive();
     if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) this.ws.terminate();
     cb(err);
   }

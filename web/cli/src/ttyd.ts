@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { WebSocket } from "ws";
 import { CliError, EXIT } from "./errors.js";
 import type { BoxClient } from "./http.js";
+import { keepAlive, PING_MS } from "./keepalive.js";
 
 /**
  * ttyd's WebSocket protocol, as ttyd 1.7.7 speaks it (src/protocol.c and
@@ -77,9 +78,6 @@ export type Ended =
   | { reason: "detached" }
   | { reason: "error"; message: string };
 
-/** WebSocket keepalive: Cloudflare drops a socket idle for 100 s. */
-export const PING_MS = 25_000;
-
 export interface TtydEvents {
   output: [Buffer];
   title: [string];
@@ -93,7 +91,7 @@ export interface TtydEvents {
  */
 export class TtydSession extends EventEmitter<TtydEvents> {
   private ws: WebSocket | null = null;
-  private pinger: NodeJS.Timeout | null = null;
+  private stopKeepAlive: (() => void) | null = null;
   private ended = false;
 
   constructor(
@@ -114,10 +112,14 @@ export class TtydSession extends EventEmitter<TtydEvents> {
     ws.binaryType = "nodebuffer";
     ws.on("open", () => {
       ws.send(handshakeFrame(columns, rows));
-      this.pinger = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.ping();
-      }, opts.pingMs ?? PING_MS);
-      this.pinger.unref();
+      this.stopKeepAlive = keepAlive(
+        ws,
+        () => {
+          this.finish({ reason: "error", message: "the box stopped answering (a sleeping laptop or a changed network drops the connection); attach again" });
+          ws.terminate();
+        },
+        opts.pingMs ?? PING_MS,
+      );
       this.emit("open");
     });
     ws.on("message", (data: Buffer, isBinary: boolean) => {
@@ -181,7 +183,7 @@ export class TtydSession extends EventEmitter<TtydEvents> {
   /** Drop the connection without a word: the caller already knows why it is leaving. */
   dispose(): void {
     this.ended = true;
-    if (this.pinger) clearInterval(this.pinger);
+    this.stopKeepAlive?.();
     const ws = this.ws;
     if (!ws) return;
     if (ws.readyState === WebSocket.OPEN) ws.close(1000);
@@ -191,7 +193,7 @@ export class TtydSession extends EventEmitter<TtydEvents> {
   private finish(ended: Ended): void {
     if (this.ended) return;
     this.ended = true;
-    if (this.pinger) clearInterval(this.pinger);
+    this.stopKeepAlive?.();
     this.emit("close", ended);
   }
 }

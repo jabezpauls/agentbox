@@ -52,9 +52,10 @@ interface StubTtyd {
  * --check-origin rule (Origin's host[:port] must equal Host), and a bearer
  * check standing in for the gate.
  */
-async function stubTtyd(opts: { status?: number; onFrame?: (ws: WebSocket, frame: Buffer) => void } = {}): Promise<StubTtyd> {
+async function stubTtyd(opts: { status?: number; onFrame?: (ws: WebSocket, frame: Buffer) => void; silent?: boolean } = {}): Promise<StubTtyd> {
   const server = http.createServer();
-  const wss = new WebSocketServer({ noServer: true, handleProtocols: (p) => (p.has("tty") ? "tty" : false) });
+  // `silent`: a box that has stopped answering (no pongs).
+  const wss = new WebSocketServer({ noServer: true, autoPong: !opts.silent, handleProtocols: (p) => (p.has("tty") ? "tty" : false) });
   const frames: Buffer[] = [];
   const upgrades: http.IncomingHttpHeaders[] = [];
   const sockets: WebSocket[] = [];
@@ -406,6 +407,20 @@ describe("attach and shell, end to end against a stand-in ttyd", () => {
     w.proc.emit("SIGTERM");
     expect(await w.done).toBe(143);
     expect(w.stdin.rawModes).toEqual([true, false]);
+  });
+
+  it("notices a box that stopped answering, and restores the terminal", async () => {
+    const s = await ttyd({ silent: true });
+    const stdin = fakeStdin(true);
+    const stderr = capture();
+    const session = new TtydSession(new BoxClient(s.origin, TOKEN), "/terminal");
+    const origConnect = session.connect.bind(session);
+    session.connect = (c: number, r: number) => origConnect(c, r, { pingMs: 30 });
+    const done = runTerminal({ session, stdin, stdout: capture({ isTTY: true }), stderr, proc: new EventEmitter(), onCrash: () => {} });
+    await s.opened;
+    expect(await done).toBe(1);
+    expect(stdin.rawModes).toEqual([true, false]);
+    expect(stderr.text()).toMatch(/stopped answering/);
   });
 
   it("restores the terminal when the connection drops", async () => {

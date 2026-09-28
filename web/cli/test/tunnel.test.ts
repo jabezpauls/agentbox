@@ -14,9 +14,10 @@ import { TOKEN } from "./helpers.js";
  * bytes both ways to a TCP target, a text error frame then close when the
  * target cannot be reached.
  */
-async function stubTunnelGate(opts: { status?: number } = {}) {
+async function stubTunnelGate(opts: { status?: number; silent?: boolean } = {}) {
   const server = http.createServer();
-  const wss = new WebSocketServer({ noServer: true });
+  // `silent`: a gate that has stopped answering (no pongs).
+  const wss = new WebSocketServer({ noServer: true, autoPong: !opts.silent });
   const targets: string[] = [];
   let pings = 0;
   server.on("upgrade", (req, socket, head) => {
@@ -96,6 +97,16 @@ describe("tunnels", () => {
     expect(gate.pings()).toBeGreaterThan(0);
     expect(gate.targets).toEqual([`tcp:${up.port}`]);
     t.destroy();
+  });
+
+  it("close themselves when the box stops answering pings", async () => {
+    const gate = await stubTunnelGate({ silent: true });
+    const up = await upperServer();
+    cleanups.push(gate.close, up.close);
+    const t = await openTunnel(new BoxClient(gate.url, TOKEN), { kind: "tcp", port: up.port }, { pingMs: 20 });
+    const err = await new Promise<Error>((r) => t.once("error", r));
+    expect(err).toBeInstanceOf(TunnelError);
+    expect(err.message).toMatch(/stopped answering/);
   });
 
   it("fail with the gate's own words on an error frame", async () => {
