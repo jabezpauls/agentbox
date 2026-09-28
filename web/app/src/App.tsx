@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ProjectCloneEvent } from "@workbench/shared";
 import { connectEvents } from "./api/events.ts";
-import { getHealth, getSession } from "./api/client.ts";
+import { getSession } from "./api/client.ts";
 import { fromSnapshot } from "./store/session.ts";
 import { useApp } from "./store/app.ts";
 import { useTheme } from "./theme/useTheme.ts";
@@ -10,12 +10,12 @@ import { useProjects } from "./projects/model.ts";
 import { AppShell } from "./shell/AppShell.tsx";
 import { installRouter } from "./shell/router.ts";
 import { useGateSession } from "./shell/session.ts";
+import { loadHealth } from "./shell/health.ts";
 
 export function App() {
   const { theme, resolved, cycle, set } = useTheme();
   const applyMessage = useApp((s) => s.applyMessage);
   const setStatus = useApp((s) => s.setStatus);
-  const setHealth = useApp((s) => s.setHealth);
   const setUi = useApp((s) => s.setUi);
   const setThemeCycle = useApp((s) => s.setThemeCycle);
   const setThemeSet = useApp((s) => s.setThemeSet);
@@ -38,14 +38,20 @@ export function App() {
     };
   }, [cycle, set, setThemeCycle, setThemeSet]);
 
-  // Learn the roots and the preview configuration once, and who is signed in.
+  // Learn the roots and the preview configuration, and who is signed in. A
+  // failed read is retried with backoff (see shell/health.ts).
   useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => {});
+    void loadHealth();
     void useApp.getState().refreshApps();
     void useGateSession.getState().refresh();
-  }, [setHealth]);
+  }, []);
+
+  // The events socket coming back means the bridge is back: read what we
+  // could not read while it was away.
+  const status = useApp((s) => s.status);
+  useEffect(() => {
+    if (status === "open" && !useApp.getState().health) void loadHealth();
+  }, [status]);
 
   useEffect(() => {
     // Seed from the REST snapshot so the UI has content before the socket opens,

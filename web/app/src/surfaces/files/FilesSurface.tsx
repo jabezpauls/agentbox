@@ -42,6 +42,7 @@ import { focusOnArrival, openModal, useOnActivate, usePolling, useSurfaceActive 
 import { openInEditor } from "../../shell/editor.ts";
 import { useRouter } from "../../shell/router.ts";
 import { useNarrow } from "../../shell/Dock.tsx";
+import { loadHealth, useHealthState } from "../../shell/health.ts";
 import { agentHere, agentLabel, launchableAgents, runHere, terminalHere } from "../../workbench/launch.ts";
 import {
   copyPaths,
@@ -144,6 +145,7 @@ export function FilesSurface() {
   const route = useRouter((s) => s.route);
   const navigate = useRouter((s) => s.navigate);
   const health = useApp((s) => s.health);
+  const healthError = useHealthState((s) => s.error);
   const active = useSurfaceActive();
   const narrow = useNarrow();
   const roots = useMemo(
@@ -420,7 +422,19 @@ export function FilesSurface() {
   ];
 
   let body: React.ReactNode;
-  if (trash) {
+  if (!health && healthError) {
+    body = (
+      <Empty
+        title="Couldn't reach the box."
+        sub={`${healthError} Files needs to know where the workspace is; it keeps trying.`}
+        action={
+          <button className="btn btn-small" onClick={() => void loadHealth()}>
+            Retry
+          </button>
+        }
+      />
+    );
+  } else if (trash) {
     body = <TrashView items={trashItems} error={trashError} onChange={() => (void loadTrash(), changed())} onReveal={go} />;
   } else if (listing.status === "missing") {
     body = (
