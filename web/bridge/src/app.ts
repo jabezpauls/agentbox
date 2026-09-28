@@ -10,12 +10,8 @@ import { TerminalStreams } from "./herdr/terminal.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
-import { registerPreviewRoutes } from "./routes/preview.js";
 import { registerReviewRoutes } from "./routes/review.js";
-import { registerPublicShareRoutes, registerShareApiRoutes, startExpirySweep, type ShareDeps } from "./routes/share.js";
 import { ReviewStore } from "./review/store.js";
-import { ShareStore } from "./share/store.js";
-import { LiveShares } from "./share/live.js";
 import { pathGuard } from "./path-guard.js";
 import { FilesService } from "./files/service.js";
 import { registerFilesRoutes } from "./files/routes.js";
@@ -28,6 +24,10 @@ import { EditorChannel } from "./editor.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { listListeningPorts } from "./ports.js";
 import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
+import { AppsService } from "./apps/service.js";
+import { gateApps } from "./apps/gate.js";
+import { registerAppRoutes } from "./routes/apps.js";
+import { request as herdrRequest } from "./herdr/socket.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -47,10 +47,6 @@ export interface AppDeps {
   ports?: PortsWatcher;
   /** Review session store; defaults to one rooted at the configured directory. */
   review?: ReviewStore;
-  /** Public preview share store; defaults to one rooted at the configured dir. */
-  shares?: ShareStore;
-  /** How often to cut connections on expired shares; tests shorten it. */
-  shareSweepMs?: number;
   /** Terminal stream registry; defaults to one bound to herdr's socket. */
   streams?: TerminalStreams;
   /** The files API's roots, trash and uploads; defaults to the configured roots. */
@@ -63,13 +59,14 @@ export interface AppDeps {
   projects?: Projects;
   /** The editor channel the VS Code extension connects to. */
   editor?: EditorChannel;
+  /** Apps: the gate's records with their live state; defaults to the configured gate. */
+  apps?: AppsService;
 }
 
 /**
  * The app must not be framed by anyone else: a hostile page that could overlay
- * it would be clicking on live terminals and agents. Previews are framed *by*
- * the app, and they are served by the preview route rather than the static
- * one, so they are unaffected.
+ * it would be clicking on live terminals and agents. Apps are framed *by* the
+ * app, and they are served by the data plane, not here, so they are unaffected.
  */
 const FRAME_GUARD: Record<string, string> = {
   "content-security-policy": "frame-ancestors 'self'",
@@ -82,10 +79,10 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   // route, because the router's method table is shared.
   for (const m of DAV_METHODS) app.addHttpMethod(m, { hasBody: true });
   await app.register(websocket);
-  // Before any route, so it covers every route and every websocket upgrade:
-  // the decisive half of the public `/s/` boundary, and a refusal of ambiguous
-  // paths. After the websocket plugin, whose own hook wires an upgrade's socket
-  // to its reply — a refusal sent before that leaves the socket dangling.
+  // Before any route, so it covers every route and every websocket upgrade: a
+  // refusal of ambiguous paths. After the websocket plugin, whose own hook
+  // wires an upgrade's socket to its reply — a refusal sent before that leaves
+  // the socket dangling.
   app.addHook("onRequest", pathGuard());
 
   const streams =
@@ -94,29 +91,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   app.addHook("onClose", async () => streams.stop());
 
   const review = deps.review ?? new ReviewStore(config.reviewDir);
-  const shares = deps.shares ?? new ShareStore(config.sharesDir);
-  const live = new LiveShares();
-  const infra = new Set(config.infraPorts);
-  const shareDeps: ShareDeps = {
-    store: shares,
-    live,
-    refusedPort: (port) => {
-      if (infra.has(port)) return true;
-      const addr = app.server.address();
-      if (typeof addr === "object" && addr && addr.port === port) return true;
-      // Whatever the classifier currently calls infrastructure (a host daemon
-      // sharing the namespace, say) is off limits too.
-      return deps.ports?.current().some((p) => p.port === port && p.system) ?? false;
-    },
-  };
-  const stopSweep = startExpirySweep(shares, live, deps.shareSweepMs ?? 30_000);
-  app.addHook("onClose", async () => stopSweep());
-
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
-
-  // The public share route is the one route Caddy's unauthenticated public
-  // branch reaches; `/s/…` is forwarded to the bridge unchanged.
-  registerPublicShareRoutes(app, config, shareDeps);
 
   const files =
     deps.files ?? new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
@@ -135,8 +110,21 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   app.addHook("onClose", async () => projects.stop());
   const editor = deps.editor ?? new EditorChannel();
   app.addHook("onClose", async () => editor.close());
+  const apps =
+    deps.apps ??
+    new AppsService({
+      gate: gateApps(config.gateAppsUrl),
+      events,
+      scanPorts: async () =>
+        (await listListeningPorts({ systemPorts: config.infraPorts, workspaceRoot: config.workspaceRoot })).ports,
+      snapshot: () => deps.hub.snapshot(),
+      herdr: (method, params) => herdrRequest(config.socketPath, method, params ?? {}),
+      herdrReady: () => deps.hub.connected,
+    });
+  app.addHook("onClose", async () => apps.stopWatching());
 
-  registerApiRoutes(app, config, deps.hub, { ports: deps.ports });
+  registerApiRoutes(app, config, deps.hub, { ports: deps.ports, sharing: () => apps.sharing });
+  registerAppRoutes(app, apps);
   registerProjectRoutes(app, projects);
   registerEditorRoutes(app, editor, files);
   registerFilesRoutes(app, files);
@@ -155,10 +143,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
       }),
   );
   registerReviewRoutes(app, config, review);
-  registerShareApiRoutes(app, config, shareDeps);
   registerEventsWs(app, deps.hub, deps.ports, events);
   registerTerminalWs(app, streams);
-  await registerPreviewRoutes(app, config);
 
   // The app used to live under `/workbench/`, and links into it are out there:
   // bookmarks, and every review link an agent printed before the move. The
@@ -209,11 +195,11 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
 }
 
 /**
- * Paths the app never answers for: the API, the sockets, the proxies and the
- * built assets. A miss under one of them is a real 404 — a stale asset URL
- * should fail loudly, not parse a page as JavaScript.
+ * Paths the app never answers for: the API, the sockets and the built assets.
+ * A miss under one of them is a real 404 — a stale asset URL should fail
+ * loudly, not parse a page as JavaScript.
  */
-const NOT_THE_APP = /^\/(api|ws|preview|s|assets)(\/|$)/;
+const NOT_THE_APP = /^\/(api|ws|assets)(\/|$)/;
 
 /** Fetch destinations that are page loads rather than subresources. */
 const PAGE_DESTINATIONS = new Set(["document", "iframe", "frame"]);

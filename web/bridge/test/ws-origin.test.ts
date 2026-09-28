@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import http from "node:http";
 import type { ClientOptions } from "ws";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocket } from "ws";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
@@ -35,19 +34,8 @@ const stubStreams = {
 let app: FastifyInstance;
 let config: Config;
 let baseUrl: string;
-let upstream: http.Server;
-let upstreamPort: number;
 
 beforeAll(async () => {
-  // A real upstream so the preview route's accepted case stays open rather
-  // than closing on a failed connection.
-  upstream = http.createServer((_req, res) => res.end("ok"));
-  const wss = new WebSocketServer({ server: upstream });
-  wss.on("connection", (ws) => ws.on("message", (data) => ws.send(data)));
-  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
-  const uaddr = upstream.address();
-  upstreamPort = typeof uaddr === "object" && uaddr ? uaddr.port : 0;
-
   config = loadConfig({
     WORKBENCH_PORT: "0",
     HERDR_SOCKET_PATH: "/does/not/exist-ws-origin.sock",
@@ -61,7 +49,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
-  await new Promise<void>((resolve) => upstream.close(() => resolve()));
 });
 
 /** Resolves with the handshake status when the upgrade is refused. */
@@ -100,12 +87,9 @@ const EVENTS = "/ws/events";
 const TERMINAL = "/ws/terminal?pane=w1:p1";
 
 describe("websocket origin checks", () => {
-  // The preview port is only known once the upstream is listening, so each
-  // route names its path lazily.
   const ROUTES: { name: string; path(): string }[] = [
     { name: "events", path: () => EVENTS },
     { name: "terminal", path: () => TERMINAL },
-    { name: "preview", path: () => `/preview/${upstreamPort}/socket` },
   ];
 
   for (const route of ROUTES) {
@@ -152,12 +136,9 @@ describe("websocket origin checks", () => {
     );
   });
 
-  it("leaves plain HTTP requests on the preview route alone", async () => {
-    // No Origin and no upgrade: the hook must let the request through to the
-    // handler, which is what answers 400 for an out-of-range port.
-    const res = await app.inject({ method: "GET", url: "/preview/70000/" });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "invalid preview port" });
+  it("serves no preview proxy on the control plane: apps are the data plane's", async () => {
+    const res = await app.inject({ method: "GET", url: "/preview/3000/" });
+    expect(res.statusCode).toBe(404);
   });
 });
 
@@ -177,14 +158,6 @@ describe("isSameOrigin", () => {
           host: "code.example.com",
           "x-forwarded-proto": "http",
         }),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts a per-port preview hostname on its own Host", () => {
-    expect(
-      isSameOrigin(
-        req({ origin: "https://3000.preview.example.com", host: "3000.preview.example.com" }),
       ),
     ).toBe(true);
   });

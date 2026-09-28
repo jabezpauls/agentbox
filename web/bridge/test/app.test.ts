@@ -43,10 +43,11 @@ describe("bridge app", () => {
     expect(body.ok).toBe(true);
     expect(body.herdr.connected).toBe(true);
     expect(body.herdr.version).toMatch(/^\d+\./);
-    // The app reads these from health: the picker's root, and the preview
-    // configuration the inspector needs.
+    // The app reads these from health: the picker's root, and whether the
+    // Preview panel offers Share (the gate's say, repeated).
     expect(typeof body.workspaceRoot).toBe("string");
-    expect(body).toHaveProperty("previewDomain");
+    expect(typeof body.sharing).toBe("boolean");
+    expect(body).not.toHaveProperty("previewDomain");
   });
 
   it("refuses non-allowlisted RPC methods with 403", async () => {

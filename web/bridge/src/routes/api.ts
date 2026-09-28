@@ -8,6 +8,8 @@ import { listDirs } from "../fs.js";
 
 export interface ApiDeps {
   ports?: PortsWatcher | undefined;
+  /** Whether the owner may share apps, as the gate last said. */
+  sharing?: () => boolean;
 }
 
 /** Register health, session snapshot, the allowlisted RPC forwarder, and the
@@ -22,13 +24,12 @@ export function registerApiRoutes(
     ok: true,
     herdr: { connected: hub.connected, version: hub.version, protocol: hub.protocol },
     // Surfaced to the app: the directory picker composes absolute cwds under
-    // the workspace root, and preview full-screen needs the preview domain.
+    // the workspace root.
     workspaceRoot: config.workspaceRoot,
     // The files API's second root, so the app can offer it without guessing.
     homeRoot: config.homeRoot,
-    previewDomain: config.previewDomain,
-    // Whether the panel may offer a Share action; off hides it entirely.
-    previewSharing: config.previewSharing,
+    // Whether the Preview panel offers Share: the gate decides, this repeats it.
+    sharing: deps.sharing?.() ?? false,
   }));
 
   app.get("/api/session", () => hub.snapshot());

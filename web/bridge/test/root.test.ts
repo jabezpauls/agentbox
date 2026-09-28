@@ -83,8 +83,8 @@ describe("the app at the root", () => {
     }
   });
 
-  it("keeps the API, sockets, proxies and assets out of the fallback", async () => {
-    for (const url of ["/api/nope", "/ws/nope", "/assets/missing.js", "/s/nope", "/api"]) {
+  it("keeps the API, sockets and assets out of the fallback", async () => {
+    for (const url of ["/api/nope", "/ws/nope", "/assets/missing.js", "/api"]) {
       const res = await app.inject({ method: "GET", url, headers: { "sec-fetch-dest": "document" } });
       expect(res.statusCode, url).toBe(404);
       expect(res.body, url).not.toBe(INDEX);

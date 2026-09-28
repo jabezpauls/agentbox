@@ -1,19 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 /**
- * The header Caddy sets on its unauthenticated `/s/` branch, and only there.
- * Caddy deletes any client-supplied copy on every branch first, so its presence
- * means "this request skipped the login".
- */
-export const PUBLIC_HEADER = "x-agentbox-public";
-
-/** The only raw path shape an unauthenticated request may have. */
-const PUBLIC_PATH = /^\/s\/[0-9a-f]{32}(\/|$)/;
-
-/**
- * Path forms that different layers normalise differently. Caddy's `path`
- * matcher decodes and cleans; find-my-way routes on the raw string. Anything
- * that could read as one path to Caddy and another to the router is refused.
+ * Path forms that different layers normalise differently. The gate refuses
+ * them before routing; the bridge refuses them too, on the raw string its
+ * router matches, so no normalisation difference between the gate and the
+ * router can make one path read as another. (Apps are not served here at all:
+ * they live on the data plane, see data-plane.ts.)
  */
 const AMBIGUOUS = /(^|\/)\.\.?(\/|$)|%2e|%2f|%5c|\\|;|\/\//i;
 
@@ -24,43 +16,21 @@ function rawPath(req: FastifyRequest): string {
 }
 
 /**
- * The part of a raw path that decides routing. Behind a proxy prefix — the
- * private preview `/preview/<port>` or a share `/s/<token>` — the rest of the
- * path belongs to the previewed app and is forwarded verbatim (an app may
- * legitimately use `%2F` in its own URLs), so only the prefix is held to the
- * strict form. Every other path the bridge serves is checked whole.
+ * The part of a raw path that decides routing: all of it, except under the
+ * WebDAV mount. WebDAV names files in its path, and a filename may hold `;`, a
+ * backslash or anything else. The DAV handler decodes each segment itself and
+ * refuses `.`, `..`, empty names and encoded slashes before a path reaches the
+ * filesystem, so here only its prefix is held to the strict form.
  */
 function routingPart(path: string): string {
-  // WebDAV names files in its path, and a filename may hold `;`, a backslash
-  // or anything else. The DAV handler decodes each segment itself and refuses
-  // `.`, `..`, empty names and encoded slashes before a path reaches the
-  // filesystem, so here only its prefix is held to the strict form.
   if (path === "/api/dav" || path.startsWith("/api/dav/")) return "/api/dav/";
-  for (const prefix of ["/preview/", "/s/"]) {
-    if (path.startsWith(prefix)) {
-      const end = path.indexOf("/", prefix.length);
-      return end === -1 ? path : path.slice(0, end + 1);
-    }
-  }
   return path;
 }
 
-/**
- * Bridge-wide `onRequest` guard, applied to HTTP requests and websocket
- * upgrades alike. It is the decisive half of the `/s/` boundary: because it
- * judges the same raw string the router matches on, no normalisation
- * difference between Caddy and the bridge can turn a public request into a
- * private route.
- */
+/** Bridge-wide `onRequest` guard, applied to HTTP requests and websocket upgrades alike. */
 export function pathGuard() {
   return (req: FastifyRequest, reply: FastifyReply, done: () => void): void => {
-    const path = rawPath(req);
-    if (req.headers[PUBLIC_HEADER] !== undefined && !PUBLIC_PATH.test(path)) {
-      // Uniform with an unknown token: a probe learns nothing.
-      void reply.code(404).send({ error: "not found" });
-      return;
-    }
-    if (AMBIGUOUS.test(routingPart(path))) {
+    if (AMBIGUOUS.test(routingPart(rawPath(req)))) {
       void reply.code(400).send({ error: "bad path" });
       return;
     }
