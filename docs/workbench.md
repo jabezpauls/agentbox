@@ -713,11 +713,13 @@ docker run -d --name ab-editor --network host \
   -e AGENTBOX_BRIDGE_URL=ws://127.0.0.1:27800/ws/editor \
   -v /tmp:/tmp --entrypoint code-server agentbox/workspace \
   --bind-addr 127.0.0.1:27808 --auth none --disable-workspace-trust <workspace root>
-node e2e/tools/editor-check.mjs http://127.0.0.1:27900 <a file in the workspace>
+node e2e/tools/editor-check.mjs http://127.0.0.1:27900 <a file in the workspace> <another file>
 ```
 
 `editor-check.mjs` opens the file from Files with *Open in editor*, types into
 it, tours the other surfaces and checks the editor kept its frame and the
-unsaved text. `e2e/tools/screenshots.mjs <gate url> docs/images` stages a
+unsaved text; then that VS Code turns dark and light with the app, and that
+with a second tab open and the first closed — code-server keeps a closed
+tab's window for hours — *Open in editor* lands in the tab in use. `e2e/tools/screenshots.mjs <gate url> docs/images` stages a
 believable box and takes this document's pictures, every surface in light and
 dark.

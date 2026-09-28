@@ -2,19 +2,22 @@
 // Check the kept-alive editor against a real code-server with the
 // agentbox-connect extension, which the e2e harness does not have:
 //
-//   node e2e/tools/editor-check.mjs <gate url> <file in the workspace> [shots dir]
+//   node e2e/tools/editor-check.mjs <gate url> <file> <another file> [shots dir]
 //
 // Run the stack (e2e/start-stack.mjs) with E2E_CODE_PORT pointing at a
 // code-server from the workspace image, sharing the host's loopback so its
 // extension reaches the bridge — docs/workbench.md has the command. The
 // script opens the file from Files with "Open in editor", types into it,
 // tours the other surfaces, and checks the editor kept its frame and the
-// unsaved text, and that ⌃⌥ chords work from inside VS Code.
+// unsaved text, and that ⌃⌥ chords work from inside VS Code. Then that VS
+// Code's theme follows the app's light and dark, and that once a tab with
+// the editor is closed — code-server keeps its window alive for hours — the
+// next "Open in editor" still lands in the tab you are using.
 import { chromium } from "@playwright/test";
 
-const [base, file, shots] = process.argv.slice(2);
-if (!base || !file) {
-  console.error("usage: editor-check.mjs <gate url> <file> [shots dir]");
+const [base, file, other, shots] = process.argv.slice(2);
+if (!base || !file || !other) {
+  console.error("usage: editor-check.mjs <gate url> <file> <another file> [shots dir]");
   process.exit(2);
 }
 const browser = await chromium.launch();
@@ -75,5 +78,52 @@ step("back in the editor: same frame, unsaved text still there");
 if (shots) await page.screenshot({ path: `${shots}/editor-check.png` });
 // Leave the file as it was: undo the typing without saving.
 await page.keyboard.press("Control+z");
+
+// VS Code's theme follows the app's: the workbench is `vs` in light and
+// `vs-dark` in dark.
+const workbench = vscode.locator(".monaco-workbench").first();
+async function appTheme(kind) {
+  // In-app, as a link would: a full load would rebuild the editor's frame.
+  await page.evaluate(() => {
+    history.pushState(null, "", "/settings/appearance");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.getByRole("radio", { name: new RegExp(`^${kind}`, "i") }).click();
+  await page.keyboard.press("Control+Alt+3");
+  await page.waitForURL(/\/editor$/);
+  const want = kind === "dark" ? /\bvs-dark\b/ : /\bvs\b(?!-)/;
+  for (let i = 0; i < 100; i++) {
+    const cls = (await workbench.getAttribute("class").catch(() => "")) ?? "";
+    if (want.test(cls)) return;
+    await page.waitForTimeout(100);
+  }
+  await fail(`VS Code did not turn ${kind} with the app`);
+}
+await appTheme("dark");
+step("the app turned dark, and VS Code with it");
+if (shots) await page.screenshot({ path: `${shots}/editor-check-dark.png` });
+await appTheme("light");
+step("the app turned light, and VS Code with it");
+
+// A second tab with the editor, then the first closed: its window lingers
+// in code-server, and was the last one focused.
+const second = await context.newPage();
+await second.goto(`${base}/editor`);
+const secondCode = second.frameLocator("iframe.editor-frame");
+await secondCode.locator(".monaco-workbench").first().waitFor({ timeout: 90_000 }).catch(() => fail("the second tab's editor never loaded"));
+await vscode.locator(".monaco-editor .view-lines").first().click();
+await page.close();
+step("closed the first tab after focusing its editor last");
+const otherName = other.split("/").pop();
+await second.goto(`${base}/files${other}`);
+const look2 = second.getByRole("dialog", { name: /Quick look/ });
+await look2.waitFor({ timeout: 15_000 }).catch(() => fail("quick look did not open in the second tab"));
+await look2.getByRole("button", { name: "Open in editor" }).click();
+await secondCode
+  .locator(`.tab[aria-label^="${otherName}"], .tab:has-text("${otherName}")`)
+  .first()
+  .waitFor({ timeout: 30_000 })
+  .catch(() => fail(`${otherName} went to the closed tab's lingering window, not this one`));
+step(`"Open in editor" landed in the tab in use, not the closed one's window`);
 await browser.close();
 console.log("OK");
