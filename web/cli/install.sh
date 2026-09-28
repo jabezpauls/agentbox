@@ -27,11 +27,30 @@ die() {
     exit 1
 }
 
+# $1 quoted for sh, so a folder with a quote or a space in its name can be
+# pasted back safely.
+q() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 fetch() {
+    # From an https box, https only: no redirect may drop to plain http.
+    case "$1" in
+        https://*) secure=yes ;;
+        *) secure=no ;;
+    esac
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$2" "$1"
+        if [ "$secure" = yes ]; then
+            curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1"
+        else
+            curl -fsSL -o "$2" "$1"
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$2" "$1"
+        if [ "$secure" = yes ]; then
+            wget -q --https-only -O "$2" "$1"
+        else
+            wget -q -O "$2" "$1"
+        fi
     else
         # Node is needed anyway, and can download on its own. (The single
         # quotes are deliberate: that is JavaScript, not the shell's.)
@@ -41,6 +60,7 @@ fetch() {
             fetch(url)
               .then(async (r) => {
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                if (url.startsWith("https:") && !r.url.startsWith("https:")) throw new Error("redirected off https");
                 require("fs").writeFileSync(file, Buffer.from(await r.arrayBuffer()));
               })
               .catch((e) => { console.error(e.message); process.exit(1); });
@@ -90,14 +110,18 @@ main() {
     case ":$PATH:" in
         *":$dir:"*) cmd=agentbox ;;
         *)
-            cmd="$dir/agentbox"
+            cmd=$(q "$dir/agentbox")
+            # The line for the shell's startup file, quoted once for the file
+            # and once more for the echo that appends it.
+            # shellcheck disable=SC2016
+            line="export PATH=$(q "$dir")"':"$PATH"'
             say ""
             say "$dir is not on your PATH. To add it, run this and open a new terminal:"
             case "${SHELL:-}" in
-                */zsh) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" ;;
-                */fish) say "  fish_add_path '$dir'" ;;
-                */bash) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;;
-                *) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile" ;;
+                */zsh) say "  echo $(q "$line") >> ~/.zshrc" ;;
+                */fish) say "  fish_add_path $(q "$dir")" ;;
+                */bash) say "  echo $(q "$line") >> ~/.bashrc" ;;
+                *) say "  echo $(q "$line") >> ~/.profile" ;;
             esac
             ;;
     esac
