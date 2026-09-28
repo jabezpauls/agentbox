@@ -7,7 +7,7 @@ import { formatBytes, formatCores, formatDuration, formatMemory, plural } from "
 import { Empty, PageHeader, Section } from "../../components/ui/Page.tsx";
 import { Meter } from "../../components/ui/Meter.tsx";
 import { Sparkline } from "../../components/ui/Sparkline.tsx";
-import { usePolling } from "../../shell/activity.tsx";
+import { usePageVisible, usePolling, useSurfaceActive } from "../../shell/activity.tsx";
 import { useRouter } from "../../shell/router.ts";
 import { useOutOfReach } from "../../shell/health.ts";
 
@@ -238,9 +238,13 @@ export function SystemSurface() {
   const navigate = useRouter((s) => s.navigate);
   const info = useSystem((s) => s.info);
   const error = useSystem((s) => s.error);
-  const [monitorBuilt, setMonitorBuilt] = useState(false);
   const view = route.surface === "system" ? route.view : "overview";
-  if (view === "monitor" && !monitorBuilt) setMonitorBuilt(true);
+  // btop streams a frame a second for as long as it is loaded, seen or not.
+  // It is loaded only while it is what you are looking at — this view, this
+  // surface, this tab — and loaded afresh when you come back.
+  const active = useSurfaceActive();
+  const pageVisible = usePageVisible();
+  const showMonitor = view === "monitor" && active && pageVisible;
 
   usePolling(() => useSystem.getState().refresh(), POLL_MS, view === "overview");
 
@@ -293,13 +297,13 @@ export function SystemSurface() {
           )}
         </div>
       </div>
-      {monitorBuilt && (
-        <div className="system-monitor" hidden={view !== "monitor"}>
+      {view === "monitor" && (
+        <div className="system-monitor">
           <header className="system-monitor-bar">
             <h1 className="page-title">System</h1>
             {switcher}
           </header>
-          <Monitor />
+          {showMonitor && <Monitor />}
         </div>
       )}
     </div>

@@ -198,7 +198,9 @@ Workbench's terminals and the agents in them — against its own CPU, memory and
 process limits; the editor and the monitor run in containers beside it, whose
 limits the bridge cannot read.
 Then the disks, the busiest processes, what is listening, versions and uptime.
-**Detailed monitor** (`/system/monitor`) is btop, full size.
+**Detailed monitor** (`/system/monitor`) is btop, full size; it is loaded
+only while you look at it, since btop streams a frame a second whether seen
+or not.
 
 ## Settings
 
