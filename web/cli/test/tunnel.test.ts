@@ -1,12 +1,14 @@
 import http from "node:http";
 import net from "node:net";
+import os from "node:os";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
+import { forward } from "../src/commands/forward.js";
 import { EXIT } from "../src/errors.js";
 import { BoxClient } from "../src/http.js";
 import { forwardPort, openTunnel, parseForwardSpec, targetParam, TunnelError } from "../src/tunnel.js";
-import { TOKEN } from "./helpers.js";
+import { capture, runCli, signedIn, TOKEN } from "./helpers.js";
 
 /**
  * A stand-in for the gate's tunnel endpoint as Phase C specifies it: a
@@ -160,5 +162,54 @@ describe("tunnels", () => {
     }
     expect(gate.targets).toEqual([`tcp:${up.port}`, `tcp:${up.port}`]);
     await expect(forwardPort(new BoxClient(gate.url, TOKEN), { remote: up.port, local: free })).rejects.toThrow(/already in use/);
+  });
+});
+
+describe("forward", () => {
+  it("listens on loopback only, and warns before handing over one of agentbox's own services", async () => {
+    const gate = await stubTunnelGate();
+    const up = await upperServer();
+    cleanups.push(gate.close, up.close);
+    const free = await (async () => {
+      const s = net.createServer();
+      await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+      const port = (s.address() as AddressInfo).port;
+      await new Promise((r) => s.close(r));
+      return port;
+    })();
+    expect(forward.options.map((o) => o.name)).not.toContain("host");
+    const stdout = capture();
+    const ctrlC = new AbortController();
+    const running = runCli(["forward", `8080:${free}`], { configDir: signedIn(gate.url), stdout, signal: ctrlC.signal });
+    const deadline = Date.now() + 5000;
+    while (!stdout.text() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    expect(stdout.text()).toContain(`http://localhost:${free}`);
+    // Bound to 127.0.0.1: not on every address.
+    const listeners = await new Promise<boolean>((resolve) => {
+      const probe = net.connect(free, "127.0.0.1", () => {
+        probe.destroy();
+        resolve(true);
+      });
+      probe.once("error", () => resolve(false));
+    });
+    expect(listeners).toBe(true);
+    const outside = Object.values(os.networkInterfaces())
+      .flat()
+      .find((a) => a && a.family === "IPv4" && !a.internal)?.address;
+    if (outside) {
+      const reached = await new Promise<boolean>((resolve) => {
+        const probe = net.connect(free, outside, () => {
+          probe.destroy();
+          resolve(true);
+        });
+        probe.once("error", () => resolve(false));
+      });
+      expect(reached, `reachable at ${outside}`).toBe(false);
+    }
+    ctrlC.abort();
+    const r = await running;
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/port 8080 is the editor \(code-server\) in the box.*anyone on this machine.*DNS rebinding/s);
+    expect(gate.targets[0]).toBe("tcp:8080");
   });
 });
