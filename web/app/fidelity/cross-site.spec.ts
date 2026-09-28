@@ -97,7 +97,10 @@ test("another site gets nothing once the owner has signed out", async ({ browser
   await expect(page.getByRole("heading", { name: "Please sign in" })).toBeVisible();
   await page.goto(`${BASE}/workbench`);
   expect((await api(page, "POST", "/_gate/logout")).status).toBe(204);
-  nothing(await fromEvil(page, appId));
+  // The open app sees its session end and goes to /login by itself, which
+  // would race the next page load: the other site opens in a tab of its own.
+  await page.close();
+  nothing(await fromEvil(await ctx.newPage(), appId));
   await ctx.close();
 });
 

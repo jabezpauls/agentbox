@@ -182,9 +182,9 @@ export function visitor(browser: Browser): Promise<BrowserContext> {
  */
 export async function showPreview(page: Page): Promise<void> {
   const tab = page.getByRole("tab", { name: "Preview" });
-  await expect(page.getByRole("button", { name: "Toggle inspector" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dock", exact: true })).toBeVisible();
   for (let i = 0; i < 5 && !(await tab.isVisible()); i++) {
-    await page.getByRole("button", { name: "Toggle inspector" }).click();
+    await page.getByRole("button", { name: "Dock", exact: true }).click();
     await tab.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   }
   await tab.click();
