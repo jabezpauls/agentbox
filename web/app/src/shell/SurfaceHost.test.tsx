@@ -5,6 +5,7 @@ import { usePolling, useSurfaceActive } from "./activity.tsx";
 import { useRouter } from "./router.ts";
 import type { SurfaceId } from "./routes.ts";
 import { SurfaceHost } from "./SurfaceHost.tsx";
+import { lazySurface } from "./lazySurface.tsx";
 
 const mounts: Record<string, number> = {};
 
@@ -24,6 +25,24 @@ beforeEach(() => {
   for (const k of Object.keys(mounts)) delete mounts[k];
   window.history.replaceState(null, "", "/");
   useRouter.setState({ route: { surface: "home" }, mounted: ["home"], last: {} });
+});
+
+describe("SurfaceHost with surfaces fetched on first visit", () => {
+  it("shows a surface once its code arrives, and a Reload when it cannot", async () => {
+    let arrive: (c: React.ComponentType) => void = () => {};
+    const Late = lazySurface(() => new Promise<React.ComponentType>((r) => (arrive = r)));
+    const Gone = lazySurface<object>(() => Promise.reject(new TypeError("Failed to fetch dynamically imported module")));
+    render(<SurfaceHost render={{ ...renderers, files: () => <Late />, apps: () => <Gone /> }} />);
+
+    act(() => useRouter.getState().navigate({ surface: "files", path: "" }));
+    expect(screen.getByLabelText("Loading Files")).toHaveAttribute("aria-busy", "true");
+    await act(async () => arrive(() => <p>files are here</p>));
+    expect(await screen.findByText("files are here")).toBeInTheDocument();
+
+    act(() => useRouter.getState().navigate({ surface: "apps" }));
+    expect(await screen.findByText("Couldn't load this part of the app.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
 });
 
 describe("SurfaceHost", () => {

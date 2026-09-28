@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, type ReactNode } from "react";
 import { focusOnArrival, SurfaceActiveContext } from "./activity.tsx";
 import { useRouter } from "./router.ts";
 import type { SurfaceId } from "./routes.ts";
@@ -56,7 +56,12 @@ export function SurfaceHost({ render }: Props) {
             aria-hidden={active ? undefined : true}
             inert={!active}
           >
-            <SurfaceActiveContext.Provider value={active}>{mounted.includes(id) ? render[id]() : null}</SurfaceActiveContext.Provider>
+            <SurfaceActiveContext.Provider value={active}>
+              {/* A surface's code arrives on its first visit (see AppShell). */}
+              <Suspense fallback={<div className="surface-loading" aria-busy="true" aria-label={`Loading ${label}`} />}>
+                {mounted.includes(id) ? render[id]() : null}
+              </Suspense>
+            </SurfaceActiveContext.Provider>
           </section>
         );
       })}

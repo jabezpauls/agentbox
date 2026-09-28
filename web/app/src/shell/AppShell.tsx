@@ -13,13 +13,7 @@ import { ConfirmDialog } from "../components/dialogs/ConfirmDialog.tsx";
 import { dismissPrompts, PromptHost } from "../components/ui/prompts.tsx";
 import { useApps } from "../apps/model.ts";
 import { HomeSurface } from "../surfaces/home/HomeSurface.tsx";
-import { WorkbenchSurface } from "../surfaces/workbench/WorkbenchSurface.tsx";
-import { EditorSurface } from "../surfaces/editor/EditorSurface.tsx";
-import { FilesSurface } from "../surfaces/files/FilesSurface.tsx";
 import { UploadPanel } from "../surfaces/files/UploadPanel.tsx";
-import { AppsSurface } from "../surfaces/apps/AppsSurface.tsx";
-import { SystemSurface } from "../surfaces/system/SystemSurface.tsx";
-import { SettingsSurface } from "../surfaces/settings/SettingsSurface.tsx";
 import { handleShellKey } from "./actions.ts";
 import { useReviews } from "./attention.ts";
 import { usePageVisible } from "./activity.tsx";
@@ -31,8 +25,19 @@ import { Rail } from "./Rail.tsx";
 import { useRouter } from "./router.ts";
 import type { SurfaceId } from "./routes.ts";
 import { SurfaceHost } from "./SurfaceHost.tsx";
+import { lazySurface } from "./lazySurface.tsx";
 import { SURFACE_BY_ID } from "./surfaces.ts";
 import { setTitleSurface } from "./title.ts";
+
+// Home is where most visits start and is built with the page; every other
+// surface is its own chunk, fetched on the first visit — the terminal
+// emulator, the file manager and the rest are not paid for up front.
+const WorkbenchSurface = lazySurface(() => import("../surfaces/workbench/WorkbenchSurface.tsx").then((m) => m.WorkbenchSurface));
+const EditorSurface = lazySurface(() => import("../surfaces/editor/EditorSurface.tsx").then((m) => m.EditorSurface));
+const FilesSurface = lazySurface(() => import("../surfaces/files/FilesSurface.tsx").then((m) => m.FilesSurface));
+const AppsSurface = lazySurface(() => import("../surfaces/apps/AppsSurface.tsx").then((m) => m.AppsSurface));
+const SystemSurface = lazySurface(() => import("../surfaces/system/SystemSurface.tsx").then((m) => m.SystemSurface));
+const SettingsSurface = lazySurface(() => import("../surfaces/settings/SettingsSurface.tsx").then((m) => m.SettingsSurface));
 
 /** Review sessions and apps are cheap to read and feed "needs you" everywhere. */
 const BACKGROUND_POLL_MS = 20_000;
