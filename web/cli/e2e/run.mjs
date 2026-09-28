@@ -193,6 +193,17 @@ try {
     assert(p.text("stderr").includes("[detached]"), p.text("stderr"));
   });
 
+  await step("attach", "detaches with the keys as a kitty-protocol terminal sends them", async () => {
+    const p = start(["attach"], { env: { COLUMNS: "120", LINES: "36" } });
+    await p.waitFor(HERDR_UI);
+    // Ctrl-] pressed and released, then q, in kitty's keyboard protocol.
+    p.child.stdin.write("\x1b[93;5u");
+    p.child.stdin.write("\x1b[93;5:3u");
+    p.child.stdin.write("\x1b[113u");
+    const code = await p.exit();
+    assert(code === 0 && p.text("stderr").includes("[detached]"), `attach exited ${code}: ${p.text("stderr")}`);
+  });
+
   await step("attach", "in a real terminal: raw mode, and the screen put back", async () => {
     if (!which("script")) throw new Error("util-linux `script` is needed to give the CLI a terminal");
     const cmd = `stty cols 120 rows 36; ${process.execPath} ${bundle} attach; echo "stty after: $(stty -a | tr '\\n' ' ')"`;
@@ -319,14 +330,19 @@ try {
   await step("mount", "--no-mount serves WebDAV; a client copies, moves and deletes through it", async () => {
     const p = start(["mount", "--no-mount", "--json"]);
     const [line] = await p.waitFor(/\{[\s\S]*\}\n/);
-    const { url } = JSON.parse(line);
+    const { url, user, password } = JSON.parse(line);
     assert(/^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{22}\/$/.test(url), url);
+    assert(user === "agentbox" && /^[A-Za-z0-9_-]{32}$/.test(password), `credentials: ${user} ${password}`);
+    const basic = `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
     const dav = async (method, rel, headers = {}, body) => {
-      const res = await fetch(new URL(rel, url), { method, headers, body });
+      const res = await fetch(new URL(rel, url), { method, headers: { authorization: basic, ...headers }, body });
       return { status: res.status, text: await res.text(), headers: res.headers };
     };
     try {
-      let r = await dav("PROPFIND", "", { depth: "1" });
+      // Without the password: nothing, and nothing reaches the box.
+      let r = await dav("PROPFIND", "", { depth: "1", authorization: "" });
+      assert(r.status === 401 && /^Basic /.test(r.headers.get("www-authenticate") ?? ""), `PROPFIND without the password: ${r.status}`);
+      r = await dav("PROPFIND", "", { depth: "1" });
       assert(r.status === 207, `PROPFIND ${r.status}`);
       const prefix = new URL(url).pathname;
       assert(r.text.includes(`<D:href>${prefix}demo/</D:href>`), `hrefs not under ${prefix}: ${r.text.slice(0, 500)}`);
@@ -362,7 +378,9 @@ try {
         fs.mkdirSync(path.join(data, "sub"), { recursive: true });
         fs.writeFileSync(path.join(data, "a.txt"), "alpha");
         fs.writeFileSync(path.join(data, "sub", "b.bin"), randomBytes(200_000));
-        const remote = `:webdav,url='${url}',vendor=other:`;
+        // rclone takes a password only obscured, which rclone itself does.
+        const obscured = spawnSync("docker", ["run", "--rm", "rclone/rclone:latest", "obscure", password], { encoding: "utf8" }).stdout.trim();
+        const remote = `:webdav,url='${url}',vendor=other,user=${user},pass='${obscured}':`;
         const rc = (...args) => {
           const res = spawnSync("docker", ["run", "--rm", "--network", "host", "-v", `${data}:/data:ro`, "rclone/rclone:latest", ...args], { encoding: "utf8", timeout: 120_000 });
           assert(res.status === 0, `rclone ${args.join(" ")}: ${res.stderr}`);
