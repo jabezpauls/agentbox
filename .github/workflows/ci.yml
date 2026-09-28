@@ -21,7 +21,7 @@ jobs:
             images/gate/agentbox-gate web/cli/install.sh \
             scripts/refresh-cloudflare-ips.sh \
             tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh \
-            tests/dav/clients.sh
+            tests/dav/clients.sh web/app/fidelity/in-docker.sh
 
       - name: Validate Compose files
         run: |
@@ -55,6 +55,10 @@ jobs:
       - name: The host-isolation rules apply idempotently
         # Applied inside a throwaway container's own network namespace.
         run: tests/install/isolate-rules.sh
+
+      - name: Codex's instructions block is replaced, never duplicated
+        # The entrypoint's own lines, against a scratch home.
+        run: tests/install/codex-block.sh
 
   proxy-config:
     runs-on: ubuntu-latest
@@ -172,6 +176,43 @@ jobs:
           path: web/app/playwright-report
           retention-days: 7
 
+  fidelity:
+    # Real apps under /a/<id>/ in all three engines: a create-vite React app
+    # started by agentbox-preview and plainly, browser storage, an app's own
+    # sign-in, sharing, passcodes and expiry, against the real gate, bridge
+    # and herdr behind TLS.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            web/app/fidelity/fixtures/vite-react/package-lock.json
+      - name: Install herdr
+        run: sudo scripts/install-herdr.sh /usr/local/bin
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: The fixture's dependencies
+        run: npm run fidelity:deps -w app
+        working-directory: web
+      - name: Install Chromium, Firefox and WebKit
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: web/app
+      - name: The fidelity suite
+        run: npm run fidelity -w app
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-fidelity
+          path: web/app/playwright-report-fidelity
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -182,7 +223,13 @@ jobs:
         run: docker build -t agentbox/workspace:ci -f images/workspace/Dockerfile .
       - name: The agents must actually be present
         run: |
-          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v agentbox-workbench && command -v agentbox-review'
+          docker run --rm agentbox/workspace:ci bash -lc 'command -v code-server && command -v ttyd && command -v btop && command -v herdr && command -v tmux && command -v gh && command -v agentbox-workbench && command -v agentbox-review && command -v agentbox-preview'
+      - name: Every agent is told how the box works
+        # Claude Code's managed memory (the Linux path its binary names), and
+        # the text the entrypoint writes into Codex's AGENTS.md.
+        run: |
+          docker run --rm agentbox/workspace:ci grep -q agentbox-preview /etc/claude-code/CLAUDE.md
+          docker run --rm agentbox/workspace:ci bash -lc 'grep -q agentbox-preview ~/.codex/AGENTS.md && test -f ~/.claude/skills/preview/SKILL.md'
       - name: The Workbench bridge must actually run
         run: |
           docker run --rm agentbox/workspace:ci \
