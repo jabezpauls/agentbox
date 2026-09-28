@@ -43,6 +43,30 @@ describe("the registry", () => {
     expect(saved.apps[0]?.visibility.mode).toBe("private");
   });
 
+  it("makes a shared app private when its port changes, and only then", async () => {
+    const store = await Store.open(scratch(), null);
+    const registry = new AppRegistry(store, { infraPorts: [], sharing: true });
+    const changes: unknown[] = [];
+    registry.onChange((c) => changes.push(c));
+    const app = await registry.create({ port: 5173 }, "agent");
+    await registry.setVisibility(app.id, { mode: "link", expiresAt: null });
+
+    // Other settings leave the link as it is.
+    await registry.update(app.id, { name: "goofy", port: 5173 });
+    expect(registry.get(app.id)?.visibility.mode).toBe("link");
+
+    changes.length = 0;
+    const moved = await registry.update(app.id, { port: 5174 });
+    expect(moved.port).toBe(5174);
+    expect(moved.visibility.mode).toBe("private");
+    // Announced as unshared, so connected visitors are cut off.
+    expect(changes).toContainEqual(expect.objectContaining({ kind: "unshared", id: app.id }));
+
+    // A private app moves freely.
+    await registry.update(app.id, { port: 5175 });
+    expect(registry.get(app.id)?.visibility.mode).toBe("private");
+  });
+
   it("judges a link's expiry when asked, not only when swept", async () => {
     let now = 1_000_000;
     const store = await Store.open(scratch(), null);

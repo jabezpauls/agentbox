@@ -288,16 +288,24 @@ export class AppRegistry {
     return app;
   }
 
-  /** Change an app's settings. Visibility is not among them. */
+  /**
+   * Change an app's settings. Visibility is not among them — and moving a
+   * shared app to another port makes it private: the owner shared what served
+   * on the old port, and changes arrive from the sandbox, which could
+   * otherwise point a public link at any server it likes. The owner shares
+   * it again.
+   */
   async update(id: string, input: AppInput): Promise<AppRecord> {
     const app = this.get(id);
     if (!app) throw new AppError(404, "not_found", "no such app");
     const draft = structuredClone(app);
     this.apply(draft, input);
+    const moved = draft.port !== app.port;
     Object.assign(app, draft);
     for (const key of ["cwd", "command"] as const) if (!(key in draft)) delete app[key];
+    if (moved && app.visibility.mode !== "private") this.makePrivate(app);
+    else this.changed({ kind: "edited", id });
     await this.store.save();
-    this.changed({ kind: "edited", id });
     return app;
   }
 
