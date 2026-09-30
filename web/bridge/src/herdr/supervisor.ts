@@ -97,7 +97,10 @@ export async function ensureServer(socketPath: string, env: NodeJS.ProcessEnv): 
 
   const startChild = (): void => {
     log("starting herdr server");
-    child = spawn("herdr", ["server"], { env, stdio: ["ignore", "inherit", "inherit"] });
+    // Its own session (setsid): herdr counts only such a server as a detached
+    // daemon, and `herdr --remote` / saved machines over SSH refuse any other,
+    // offering to restart it — which would end every pane.
+    child = spawn("herdr", ["server"], { env, stdio: ["ignore", "inherit", "inherit"], detached: true });
     // Arm the stability reset the moment we spawn; a run that outlasts STABLE_MS
     // clears the accumulated backoff so an isolated later crash restarts fast.
     stableTimer = setTimeout(() => {
