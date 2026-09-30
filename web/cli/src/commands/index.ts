@@ -8,6 +8,7 @@ import { FILES_COMMANDS } from "./files.js";
 import { FORWARD_COMMANDS } from "./forward.js";
 import { HERDR_COMMANDS } from "./herdr.js";
 import { MOUNT_COMMANDS } from "./mount.js";
+import { SSH_COMMANDS } from "./ssh.js";
 import { STATUS_COMMANDS } from "./status.js";
 import { TERMINAL_COMMANDS } from "./terminal.js";
 import type { Command } from "./types.js";
@@ -18,6 +19,7 @@ export const COMMANDS: Command[] = [
   ...AUTH_COMMANDS,
   ...STATUS_COMMANDS,
   ...TERMINAL_COMMANDS,
+  ...SSH_COMMANDS,
   ...FILES_COMMANDS,
   ...MOUNT_COMMANDS,
   ...FORWARD_COMMANDS,

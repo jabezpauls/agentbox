@@ -7,6 +7,7 @@ import { pollForToken, safeVerifyUrl, startDeviceLogin } from "../device.js";
 import { ApiError, CliError, EXIT } from "../errors.js";
 import { formatAgo, safeText, table } from "../format.js";
 import { VERSION } from "../version.js";
+import { setupSsh, VIA_OPTIONS, viaOption } from "./ssh.js";
 import { command, type Command } from "./types.js";
 
 /** What `/_gate/session` says about a device token. */
@@ -43,11 +44,13 @@ export const login = command({
     { name: "name", type: "string", value: "name", description: "what to call the box here (default: from its address)" },
     { name: "device", type: "string", value: "label", description: 'how this device is listed on the box (default: "agentbox CLI on <hostname>")' },
     { name: "no-browser", type: "boolean", description: "print the approval link instead of opening a browser" },
+    ...VIA_OPTIONS,
   ],
   details:
     "Shows a code and opens the box's approval page; approve it there, signed in, and this machine\n" +
     "gets a device token of its own. Your password never passes through the CLI.",
   async run(ctx, p) {
+    const via = viaOption(p.options);
     const origin = normalizeBoxUrl(p.operands[0] as string);
     const url = new URL(origin);
     if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
@@ -97,7 +100,9 @@ export const login = command({
         replaced.push({ name: other, token: box.token });
         if (other !== name) delete d.boxes[other];
       }
+      const sshVia = hasBox(d.boxes, name) ? d.boxes[name]?.sshVia : undefined;
       d.boxes[name] = {
+        ...(sshVia ? { sshVia } : {}),
         url: origin,
         token,
         tokenId: session.id,
@@ -114,6 +119,13 @@ export const login = command({
     } else {
       for (const r of replaced) if (r.name !== name) ctx.err(`Replaced the box saved as "${r.name}" (same address), and revoked its token.\n`);
       ctx.out(`Signed in to ${origin} as ${safeText(session.user)}. This box is "${name}" here, and the current one.\n`);
+    }
+    // `ssh <box>` (and herdr's --remote, editors' Remote-SSH) from here on. The
+    // sign-in stands whatever happens to it.
+    try {
+      for (const line of await setupSsh(ctx, name, client, via)) ctx.err(`ssh-setup: ${line}\n`);
+    } catch (err) {
+      ctx.warn(`SSH is not set up: ${err instanceof Error ? err.message : String(err)}. \`agentbox ssh-setup\` tries again.`);
     }
   },
 });

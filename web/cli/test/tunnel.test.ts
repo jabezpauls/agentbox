@@ -8,7 +8,7 @@ import { forward } from "../src/commands/forward.js";
 import { EXIT } from "../src/errors.js";
 import { BoxClient } from "../src/http.js";
 import { forwardPort, openTunnel, parseForwardSpec, targetParam, TunnelError } from "../src/tunnel.js";
-import { capture, runCli, signedIn, TOKEN } from "./helpers.js";
+import { capture, fakeStdin, runCli, signedIn, TOKEN } from "./helpers.js";
 
 /**
  * A stand-in for the gate's tunnel endpoint as Phase C specifies it: a
@@ -211,5 +211,35 @@ describe("forward", () => {
     expect(r.code).toBe(0);
     expect(r.stderr).toMatch(/port 8080 is the editor \(code-server\) in the box.*anyone on this machine.*DNS rebinding/s);
     expect(gate.targets[0]).toBe("tcp:8080");
+  });
+});
+
+describe("proxy", () => {
+  it("joins stdin and stdout to the box's port, printing nothing else, and ends with stdin", async () => {
+    const gate = await stubTunnelGate();
+    const up = await upperServer();
+    cleanups.push(gate.close, up.close);
+    const stdin = fakeStdin(false);
+    const stdout = capture();
+    const running = runCli(["proxy", `tcp:${up.port}`], { configDir: signedIn(gate.url), stdin, stdout });
+    stdin.feed("ssh-2.0-hello");
+    const deadline = Date.now() + 5000;
+    while (!stdout.text() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    (stdin as unknown as { end(): void }).end();
+    const r = await running;
+    expect(r.code, r.stderr).toBe(0);
+    expect(stdout.text()).toBe("SSH-2.0-HELLO");
+    expect(r.stderr).toBe("");
+    expect(gate.targets).toEqual([`tcp:${up.port}`]);
+  });
+
+  it("says what went wrong when the box refuses, on stderr", async () => {
+    const gate = await stubTunnelGate();
+    cleanups.push(gate.close);
+    const r = await runCli(["proxy", "tcp:1"], { configDir: signedIn(gate.url), stdin: fakeStdin(false) });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toMatch(/nothing is listening on 1/);
+    expect((await runCli(["proxy", "udp:53"], { configDir: signedIn(gate.url) })).code).toBe(EXIT.USAGE);
   });
 });

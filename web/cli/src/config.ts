@@ -33,6 +33,8 @@ export interface BoxEntry {
   /** When the box's version was last compared with the CLI's, and what it said. */
   versionCheckedAt?: number;
   boxVersion?: string;
+  /** `ssh-setup --via`: reach the box's sshd through its host (`ssh <host>`, then its compose project). */
+  sshVia?: { host: string; project: string };
 }
 
 export interface ConfigData {

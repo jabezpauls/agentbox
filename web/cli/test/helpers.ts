@@ -185,7 +185,7 @@ export async function runCli(
     io,
     configDir: opts.configDir,
     // Temporary files (files edit) go where the tests clean up.
-    env: { PATH: process.env.PATH, TMPDIR: tmpDir(), ...(opts.env ?? {}) },
+    env: { PATH: process.env.PATH, TMPDIR: tmpDir(), HOME: tmpDir(), ...(opts.env ?? {}) },
     platform: opts.platform ?? "linux",
     ...(opts.signal ? { signal: opts.signal } : {}),
   });

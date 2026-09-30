@@ -48,6 +48,12 @@ export interface CommandShape {
   options: OptionSpec[];
   /** Operand count; `max: Infinity` for "one or more". */
   operands: { min: number; max: number };
+  /**
+   * From the first word that is neither one of its own options nor a global
+   * one, everything is operands, hyphens and all: the words are another program's
+   * (`agentbox attach --session work` runs `herdr --remote <box> --session work`).
+   */
+  passthrough?: boolean;
 }
 
 export interface Parsed<C extends CommandShape = CommandShape> {
@@ -57,6 +63,12 @@ export interface Parsed<C extends CommandShape = CommandShape> {
   options: ParsedOptions;
   operands: string[];
   globals: Globals;
+}
+
+/** Whether `arg` is one of `specs`, as `--name`, `--name=value` or a lone `-n`. */
+function isOption(arg: string, specs: OptionSpec[]): boolean {
+  if (arg.startsWith("--")) return specs.some((o) => arg === `--${o.name}` || (o.type === "string" && arg.startsWith(`--${o.name}=`)));
+  return /^-[A-Za-z]$/.test(arg) && specs.some((o) => o.short === arg[1]);
 }
 
 function findOption(specs: OptionSpec[], long: string | null, short: string | null): OptionSpec | undefined {
@@ -99,6 +111,12 @@ export function parseArgs<C extends CommandShape>(argv: string[], commands: C[])
 
     if (!endOfOptions && arg === "--") {
       endOfOptions = true;
+      continue;
+    }
+
+    if (!endOfOptions && command?.passthrough && !isOption(arg, specsNow())) {
+      endOfOptions = true;
+      operands.push(arg);
       continue;
     }
 
