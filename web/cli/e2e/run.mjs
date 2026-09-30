@@ -60,8 +60,28 @@ console.log(`stack up at ${stack.url} (state in ${stack.root})`);
 const cliHome = path.join(stack.root, "laptop");
 const cliConfig = path.join(cliHome, ".config");
 fs.mkdirSync(cliConfig, { recursive: true });
+// herdr here, past its first-run tour (which would take the keys and clicks the tests send).
+fs.mkdirSync(path.join(cliConfig, "herdr"));
+fs.writeFileSync(path.join(cliConfig, "herdr", "config.toml"), "onboarding = false\n");
 // A laptop with no browser to open: the code is printed instead.
-const cliEnv = { PATH: process.env.PATH, HOME: cliHome, XDG_CONFIG_HOME: cliConfig, LANG: "C.UTF-8" };
+// The stack's sshd is this user's, on a port of its own (the box's is coder's, on 2222).
+const cliEnv = {
+  PATH: process.env.PATH,
+  HOME: cliHome,
+  XDG_CONFIG_HOME: cliConfig,
+  LANG: "C.UTF-8",
+  AGENTBOX_SSH_USER: stack.ssh.user,
+  AGENTBOX_SSH_PORT: String(stack.ssh.port),
+};
+/** A PATH without herdr, for the old attach. */
+const noHerdrPath = "/usr/bin:/bin";
+const sshConfig = path.join(cliHome, ".ssh", "config");
+/** The box's side, as a program in it sees it: its home, its herdr. */
+const boxEnv = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("HERDR_") && !k.startsWith("XDG_"))),
+  HOME: stack.home,
+  XDG_CONFIG_HOME: path.join(stack.home, ".config"),
+};
 
 /** Start the CLI; collect what it prints; wait for things in it. */
 function start(args, opts = {}) {
@@ -159,6 +179,11 @@ try {
     assert((fs.statSync(path.dirname(configFile)).mode & 0o777) === 0o700, "config folder is not 0700");
     const tokens = (await gate("GET", "/_gate/tokens")).json();
     assert(tokens.some((t) => t.name === "e2e laptop"), "the gate does not list the device");
+    // …and set up SSH to the box on the way out.
+    assert(/ssh-setup: added `Host \S+` in ~\/.ssh\/config/.test(p.text("stderr")), `no SSH setup: ${p.text("stderr")}`);
+    const pub = fs.readFileSync(path.join(cliHome, ".ssh", "agentbox_ed25519.pub"), "utf8").split(" ").slice(0, 2).join(" ");
+    assert(fs.readFileSync(path.join(stack.home, ".ssh", "authorized_keys"), "utf8").includes(pub), "the key is not in the box's authorized_keys");
+    assert((fs.statSync(path.join(stack.home, ".ssh", "authorized_keys")).mode & 0o777) === 0o600, "authorized_keys lost its 0600");
   });
 
   await step("login", "whoami", async () => {
@@ -183,10 +208,51 @@ try {
 
   // --- terminals ---------------------------------------------------------------
 
-  const HERDR_UI = /terminal workspace manager/;
+  // herdr on the alternate screen, its sidebar drawn.
+  const HERDR_UI = /\x1b\[\?1049h[\s\S]*agents/;
 
-  await step("attach", "herdr's TUI through the gate, then Ctrl-] q", async () => {
-    const p = start(["attach"], { env: { COLUMNS: "120", LINES: "36" } });
+  /** herdr in the box, as a program there runs it. */
+  const boxHerdr = (...args) => execFileSync("herdr", args, { env: boxEnv, encoding: "utf8", timeout: 20_000 });
+  /** Type a command into the box's first pane. */
+  const firstPane = () => {
+    const pane = /"pane_id"\s*:\s*"([^"]+)"/.exec(boxHerdr("pane", "list"))?.[1];
+    assert(pane, "no pane in the box's herdr");
+    return pane;
+  };
+  const inPane = (commandLine) => boxHerdr("pane", "run", firstPane(), commandLine);
+  /** Wait for the box's first pane to show `re` (what the program in it saw). */
+  const paneShows = async (re, timeoutMs = 10_000) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const text = boxHerdr("pane", "read", firstPane(), "--source", "recent");
+      if (re.test(text)) return;
+      if (Date.now() > deadline) throw new Error(`the pane never showed ${re}:\n${text.slice(-600)}`);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  };
+  /**
+   * A pane copies `b64` (OSC 52) until the copy shows in what `p` printed:
+   * the first may land before a newly attached client is listening.
+   */
+  const copyReaches = async (p, b64) => {
+    const seen = () => p.text().includes(`;${b64}`) && new RegExp(`\\x1b\\]52;[a-z]*;${b64}`).test(p.text());
+    for (let i = 0; i < 12 && !seen(); i++) {
+      inPane(String.raw`printf '\033]52;c;` + b64 + String.raw`\a'`);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    assert(seen(), `the pane's copy never reached this terminal:\n${p.text().slice(-600)}`);
+  };
+  // A program that asks for mouse reports, and says what it got.
+  const mouseEcho = () =>
+    inPane(
+      `python3 -c 'import os,tty,select;tty.setraw(0);os.write(1,b"\\033[?1000h\\033[?1006h");r=select.select([0],[],[],8)[0];` +
+        `d=os.read(0,99) if r else b"";os.write(1,b"\\033[?1000l\\033[?1006l\\r\\nGOT "+repr(d).encode()+b"\\r\\n")'`,
+    );
+  const CLICK = "\x1b[<0;100;12M\x1b[<0;100;12m";
+  const CLICKED = /GOT b'\\x1b\[<0;\d+;\d+M/;
+
+  await step("attach", "--web: herdr's TUI through the gate, then Ctrl-] q", async () => {
+    const p = start(["attach", "--web"], { env: { COLUMNS: "120", LINES: "36" } });
     await p.waitFor(HERDR_UI);
     p.child.stdin.write("\x1d");
     p.child.stdin.write("q");
@@ -195,8 +261,8 @@ try {
     assert(p.text("stderr").includes("[detached]"), p.text("stderr"));
   });
 
-  await step("attach", "detaches with the keys as a kitty-protocol terminal sends them", async () => {
-    const p = start(["attach"], { env: { COLUMNS: "120", LINES: "36" } });
+  await step("attach", "without herdr here: the TUI through the gate; detaches with kitty-protocol keys", async () => {
+    const p = start(["attach"], { env: { COLUMNS: "120", LINES: "36", PATH: noHerdrPath } });
     await p.waitFor(HERDR_UI);
     // Ctrl-] pressed and released, then q, in kitty's keyboard protocol.
     p.child.stdin.write("\x1b[93;5u");
@@ -204,13 +270,22 @@ try {
     p.child.stdin.write("\x1b[113u");
     const code = await p.exit();
     assert(code === 0 && p.text("stderr").includes("[detached]"), `attach exited ${code}: ${p.text("stderr")}`);
+    assert(/Tip: install herdr here/.test(p.text("stderr")), `no hint to install herdr: ${p.text("stderr")}`);
   });
 
-  await step("attach", "in a real terminal: raw mode, and the screen put back", async () => {
+  await step("attach", "in a real terminal: raw mode, clicks and copies pass, and the screen put back", async () => {
     if (!which("script")) throw new Error("util-linux `script` is needed to give the CLI a terminal");
     const cmd = `stty cols 120 rows 36; ${process.execPath} ${bundle} attach; echo "stty after: $(stty -a | tr '\\n' ' ')"`;
-    const p = start(["-qfec", cmd, "/dev/null"], { command: "script" });
+    const p = start(["-qfec", cmd, "/dev/null"], { command: "script", env: { PATH: noHerdrPath, SHELL: "/bin/sh" } });
+    // In a terminal, with no herdr here, it offers to install it: not now.
+    await p.waitFor(/Install it now with herdr's installer .*\? \[y\/N\] /);
+    p.child.stdin.write("n\r");
     await p.waitFor(HERDR_UI);
+    await copyReaches(p, Buffer.from("e2e-copy-web").toString("base64"));
+    mouseEcho();
+    await new Promise((r) => setTimeout(r, 1000));
+    p.child.stdin.write(CLICK + CLICK);
+    await paneShows(CLICKED);
     p.child.stdin.write("\x1d");
     await new Promise((r) => setTimeout(r, 100));
     p.child.stdin.write("q");
@@ -223,6 +298,87 @@ try {
     assert(tail.includes("\x1b[?1049l") && tail.includes("\x1b[?1000l") && tail.includes("\x1b[?25h"), "the terminal modes were not restored");
     // Cooked mode again: the terminal echoes and takes lines.
     assert(/stty after:/.test(after) && /\sicanon\s/.test(after) && /\secho\s/.test(after), `terminal left raw: ${after}`);
+  });
+
+  // --- the box as an SSH host --------------------------------------------------
+
+  const boxName = () => readConfig().current;
+  const ssh = (args, opts = {}) => cli(["-F", sshConfig, ...args], { command: "ssh", timeoutMs: 30_000, ...opts });
+
+  await step("ssh", "ssh <box> through the ProxyCommand and the gate's tunnel, and agentbox ssh", async () => {
+    let r = await ssh([boxName(), "echo", "MARK", "$HOME"]);
+    assert(r.code === 0 && r.stdout.trim() === `MARK ${stack.home}`, `ssh: ${r.code} ${r.stdout}${r.stderr}`);
+    r = await cli(["ssh", "echo", "VIA-CLI"]);
+    assert(r.code === 0 && r.stdout.trim() === "VIA-CLI", `agentbox ssh: ${r.code} ${r.stdout}${r.stderr}`);
+    // The host key is the box's own, pinned, and checked.
+    assert(fs.readFileSync(path.join(cliHome, ".ssh", "agentbox_known_hosts"), "utf8").startsWith(`agentbox-${boxName()} ssh-ed25519 `), "no pinned host key");
+    r = await ssh(["-o", "HostKeyAlias=agentbox-someone-else", boxName(), "true"]);
+    assert(r.code !== 0 && /Host key verification failed|No ED25519 host key is known/.test(r.stderr), `an unpinned host key was accepted: ${r.stderr}`);
+  });
+
+  await step("ssh", "rsync over it", async () => {
+    if (!which("rsync")) throw new Skip("no rsync here");
+    const src = path.join(stack.root, "rsync-src");
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, "a.txt"), "synced");
+    const r = await cli(["-a", "-e", `ssh -F ${sshConfig}`, `${src}/`, `${boxName()}:${stack.workspace}/synced/`], { command: "rsync", timeoutMs: 30_000 });
+    assert(r.code === 0, `rsync: ${r.code} ${r.stderr}`);
+    assert(fs.readFileSync(path.join(stack.workspace, "synced", "a.txt"), "utf8") === "synced", "rsync did not arrive");
+  });
+
+  await step("ssh", "herdr machine add <box>, and herdr --machine lists the box's workspaces", async () => {
+    let r = await cli(["herdr", "add"], { timeoutMs: 60_000 });
+    assert(r.code === 0 && /Saved SSH machine/.test(r.stdout + r.stderr), `herdr add: ${r.code} ${r.stdout}${r.stderr}`);
+    r = await cli(["--machine", boxName(), "workspace", "list"], { command: "herdr", timeoutMs: 60_000 });
+    assert(r.code === 0, `herdr --machine: ${r.code} ${r.stdout}${r.stderr}`);
+    const mine = JSON.parse(boxHerdr("workspace", "list")).result.workspaces.map((w) => w.workspace_id);
+    const theirs = JSON.parse(r.stdout).result.workspaces.map((w) => w.workspace_id);
+    assert(mine.length > 0 && JSON.stringify(mine) === JSON.stringify(theirs), `not the box's session: ${JSON.stringify(theirs)} vs ${JSON.stringify(mine)}`);
+  });
+
+  await step("ssh", "attach: herdr --remote draws here; clicks and copies pass; Ctrl-b q detaches", async () => {
+    if (!which("script")) throw new Error("util-linux `script` is needed to give the CLI a terminal");
+    const cmd = `stty cols 120 rows 36; ${process.execPath} ${bundle} attach; echo "exit $?"`;
+    const p = start(["-qfec", cmd, "/dev/null"], { command: "script", env: { SHELL: "/bin/sh" } });
+    await p.waitFor(/\x1b\[\?1049h/, "stdout", 60_000);
+    await new Promise((r) => setTimeout(r, 2000));
+    await copyReaches(p, Buffer.from("e2e-copy-ssh").toString("base64"));
+    mouseEcho();
+    await new Promise((r) => setTimeout(r, 1000));
+    p.child.stdin.write(CLICK + CLICK);
+    await paneShows(CLICKED);
+    p.child.stdin.write("\x02");
+    await new Promise((r) => setTimeout(r, 200));
+    p.child.stdin.write("q");
+    const code = await p.exit();
+    assert(code === 0 && /exit 0/.test(p.text()), `attach exited ${code}: ${p.text().slice(-800)}`);
+  });
+
+  await step("ssh", "--via <host>: ssh to the host, then the box's sshd over docker exec", async () => {
+    fs.appendFileSync(
+      sshConfig,
+      [
+        "",
+        "Host e2e-host",
+        "  HostName 127.0.0.1",
+        `  Port ${stack.ssh.port}`,
+        `  User ${stack.ssh.user}`,
+        `  IdentityFile ${path.join(cliHome, ".ssh", "agentbox_ed25519")}`,
+        "  StrictHostKeyChecking no",
+        "  UserKnownHostsFile /dev/null",
+        "  LogLevel ERROR",
+        "",
+      ].join("\n"),
+    );
+    let r = await cli(["ssh-setup", "--via", "e2e-host"], { timeoutMs: 60_000 });
+    assert(r.code === 0 && /through e2e-host \(compose project agentbox-e2e\)/.test(r.stdout), `ssh-setup --via: ${r.code} ${r.stdout}${r.stderr}`);
+    assert(/ProxyCommand ssh .*e2e-host 'sh -c /.test(fs.readFileSync(sshConfig, "utf8")), "the block does not go through the host");
+    r = await ssh([boxName(), "echo", "FAST", "$HOME"]);
+    assert(r.code === 0 && r.stdout.trim() === `FAST ${stack.home}`, `ssh via the host: ${r.code} ${r.stdout}${r.stderr}`);
+    r = await cli(["ssh-setup", "--tunnel"]);
+    assert(r.code === 0 && /through its HTTPS tunnel/.test(r.stdout), `ssh-setup --tunnel: ${r.stdout}${r.stderr}`);
+    r = await ssh([boxName(), "echo", "BACK"]);
+    assert(r.code === 0 && r.stdout.trim() === "BACK", `ssh after --tunnel: ${r.code} ${r.stdout}${r.stderr}`);
   });
 
   await step("shell", "bash in the box, started with --cwd", async () => {
