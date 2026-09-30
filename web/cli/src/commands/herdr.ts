@@ -5,7 +5,9 @@ import path from "node:path";
 import type { Context } from "../context.js";
 import { CliError, EXIT, UsageError } from "../errors.js";
 import { safeText } from "../format.js";
+import { findOnPath } from "../mount.js";
 import { openTunnel, type TunnelStream } from "../tunnel.js";
+import { ensureSsh, runForeground } from "./ssh.js";
 import { command, type Command } from "./types.js";
 
 /**
@@ -141,4 +143,22 @@ const socket = command({
   },
 });
 
-export const HERDR_COMMANDS: Command[] = [call, socket];
+const add = command({
+  path: ["herdr", "add"],
+  summary: "add the box to herdr here as a saved machine",
+  usage: "[herdr machine add options…]",
+  operands: { min: 0, max: Infinity },
+  passthrough: true,
+  ownsInterrupt: true,
+  details:
+    "`herdr machine add <box>`, with SSH set up first: the box's agents then sit beside this machine's in\n" +
+    "one herdr window, and `herdr --machine <box> …` scripts it. Anything after `add` goes to herdr.",
+  async run(ctx, p) {
+    const herdr = findOnPath("herdr", ctx.env, ctx.platform);
+    if (!herdr) throw new CliError("herdr is not installed here; get it from https://herdr.dev (or let `agentbox attach` install it)");
+    const name = await ensureSsh(ctx);
+    return runForeground(ctx, herdr, ["machine", "add", name, ...p.operands]);
+  },
+});
+
+export const HERDR_COMMANDS: Command[] = [add, call, socket];
