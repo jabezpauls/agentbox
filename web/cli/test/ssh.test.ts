@@ -11,9 +11,12 @@ import {
   parsePublicKey,
   pinHostKey,
   projectWithKey,
+  removeAuthorizedKey,
+  removeBlock,
   renderBlock,
   shellArg,
   tunnelProxy,
+  unpinHostKey,
   upsertBlock,
   viaProxy,
   type PublicKey,
@@ -51,6 +54,18 @@ describe("the managed block in ~/.ssh/config", () => {
     expect(currentBlock(r.text, "box-2")).toBe(block("box-2"));
     expect(r.text).toContain("Host work\n  User me\n");
     expect(r.text.match(/Host box\n/g)).toHaveLength(1);
+  });
+
+  it("comes out whole, leaving the rest as it was", () => {
+    const mine = "Host work\n  User me\n";
+    let text = upsertBlock(mine, "box", block("box")).text;
+    text = upsertBlock(text, "box-2", block("box-2")).text;
+    const r = removeBlock(text, "box");
+    expect(r.removed).toBe(true);
+    expect(currentBlock(r.text, "box")).toBeNull();
+    expect(r.text).toBe(upsertBlock(mine, "box-2", block("box-2")).text);
+    expect(removeBlock(r.text, "box").removed).toBe(false);
+    expect(removeBlock(upsertBlock(mine, "box", block("box")).text, "box").text).toBe(mine);
   });
 
   it("refuses a block whose end marker was lost, rather than guess", () => {
@@ -100,6 +115,13 @@ describe("keys", () => {
     const r = pinHostKey(a.text, "agentbox-box", key(KEY_A));
     expect(r.status).toBe("replaced");
     expect(r.text).toBe(`agentbox-other ssh-ed25519 AAAA\nagentbox-box ${KEY_A}\n`);
+  });
+
+  it("come out of authorized_keys and known_hosts by key and alias alone", () => {
+    const k = key(KEY_A);
+    expect(removeAuthorizedKey(`${KEY_B} x\nno-pty ${KEY_A} me\n`, k)).toEqual({ text: `${KEY_B} x\n`, removed: true });
+    expect(removeAuthorizedKey(`${KEY_B}\n`, k).removed).toBe(false);
+    expect(unpinHostKey(`agentbox-a ${KEY_A}\nagentbox-ab ${KEY_B}\n`, "agentbox-a")).toEqual({ text: `agentbox-ab ${KEY_B}\n`, removed: true });
   });
 
   it("from the box are read strictly, and fingerprinted as ssh-keygen does", () => {
@@ -184,6 +206,29 @@ describe("agentbox ssh-setup", () => {
     expect(r.code).toBe(4);
     expect(r.stderr).toMatch(/no SSH endpoint yet/);
     expect(fs.existsSync(path.join(home, ".ssh"))).toBe(false);
+  });
+
+  it("is undone by logout: the key off the box, the block and the pin gone here; --keep-ssh keeps them", async () => {
+    const { stub, cfg, home } = await setup();
+    fs.mkdirSync(path.join(home, ".ssh"), { mode: 0o700 });
+    fs.writeFileSync(path.join(home, ".ssh", "config"), "Host work\n  User me\n");
+    fs.writeFileSync(path.join(home, ".ssh", "agentbox_known_hosts"), "agentbox-other ssh-ed25519 AAAA\n");
+    expect((await runCli(["ssh-setup"], { configDir: cfg, env: { HOME: home } })).code).toBe(0);
+
+    const kept = tmpDir();
+    fs.cpSync(cfg, kept, { recursive: true });
+    const k = await runCli(["logout", "--keep-ssh"], { configDir: kept, env: { HOME: home } });
+    expect(k.code, k.stderr).toBe(0);
+    expect(fs.readFileSync(path.join(home, ".ssh", "config"), "utf8")).toMatch(/Host test/);
+
+    const r = await runCli(["logout"], { configDir: cfg, env: { HOME: home } });
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/ssh: removed ~\/.ssh\/agentbox_ed25519.pub from ~\/.ssh\/authorized_keys on test/);
+    expect(r.stderr).toMatch(/ssh: removed `Host test` from ~\/.ssh\/config/);
+    expect(read(stub, "/home/coder/.ssh/authorized_keys")).toBe(`${KEY_B} someone-else\n`);
+    expect(fs.readFileSync(path.join(home, ".ssh", "config"), "utf8")).toBe("Host work\n  User me\n");
+    expect(fs.readFileSync(path.join(home, ".ssh", "agentbox_known_hosts"), "utf8")).toBe("agentbox-other ssh-ed25519 AAAA\n");
+    expect(fs.existsSync(path.join(home, ".ssh", "agentbox_ed25519"))).toBe(true);
   });
 
   it("keeps --via across a new sign-in's setup, and --tunnel puts the tunnel back", async () => {

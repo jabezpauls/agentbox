@@ -20,9 +20,12 @@ import {
   parsePublicKey,
   pinHostKey,
   projectWithKey,
+  removeAuthorizedKey,
+  removeBlock,
   REMOTE_AUTHORIZED_KEYS,
   REMOTE_HOST_KEY,
   renderBlock,
+  unpinHostKey,
   SSH_HOST,
   SSH_PORT,
   SSH_USER,
@@ -237,6 +240,47 @@ export async function setupSsh(ctx: Context, box: string, client: BoxClient, via
   if (cfg.status !== "unchanged") {
     writePrivate(configFile, cfg.text);
     changes.push(`${cfg.status} \`Host ${box}\` in ${tilde(ctx, configFile)}`);
+  }
+  return changes;
+}
+
+/**
+ * Undo {@link setupSsh} for `box`: this machine's key out of the box's
+ * authorized_keys (when `client` can still reach it), the pinned host key and
+ * the managed block here. The key files stay: other boxes may use them.
+ * Returns one line per thing it changed; a box it cannot reach is a warning.
+ * `here: false` does the box's part alone (while the token still works).
+ */
+export async function teardownSsh(ctx: Context, box: string, client: BoxClient | null, here = true): Promise<string[]> {
+  const changes: string[] = [];
+  const dir = sshDir(ctx);
+  const local = existingKey(dir);
+  if (client && local) {
+    try {
+      const files = new FilesApi(client);
+      if (await files.stat(REMOTE_AUTHORIZED_KEYS)) {
+        const out = removeAuthorizedKey(await (await files.raw(REMOTE_AUTHORIZED_KEYS)).text(), local.key);
+        if (out.removed) {
+          await files.write(REMOTE_AUTHORIZED_KEYS, out.text, true);
+          changes.push(`removed ${tilde(ctx, local.file)}.pub from ${REMOTE_AUTHORIZED_KEYS} on ${box}`);
+        }
+      }
+    } catch (err) {
+      ctx.warn(`could not take this machine's key out of ${box}'s ${REMOTE_AUTHORIZED_KEYS}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (!here) return changes;
+  const knownHosts = path.join(dir, KNOWN_HOSTS_FILE);
+  const pin = unpinHostKey(readIfThere(knownHosts) ?? "", hostKeyAlias(box));
+  if (pin.removed) {
+    writePrivate(knownHosts, pin.text);
+    changes.push(`unpinned ${box}'s host key in ${tilde(ctx, knownHosts)}`);
+  }
+  const configFile = path.join(dir, "config");
+  const cfg = removeBlock(readIfThere(configFile) ?? "", box);
+  if (cfg.removed) {
+    writePrivate(configFile, cfg.text);
+    changes.push(`removed \`Host ${box}\` from ${tilde(ctx, configFile)}`);
   }
   return changes;
 }

@@ -691,8 +691,15 @@ try {
   // --- sign out --------------------------------------------------------------------
 
   await step("logout", "revokes this device's token at the box", async () => {
+    const name = boxName();
     const r = await cli(["logout"]);
     assert(r.code === 0 && /token is revoked/.test(r.stdout), `logout: ${r.stdout}${r.stderr}`);
+    // …and the SSH setup with it: the key off the box, the block and the pin gone here.
+    const pub = fs.readFileSync(path.join(cliHome, ".ssh", "agentbox_ed25519.pub"), "utf8").split(" ").slice(0, 2).join(" ");
+    assert(!fs.readFileSync(path.join(stack.home, ".ssh", "authorized_keys"), "utf8").includes(pub), "the key is still in the box's authorized_keys");
+    assert(!fs.readFileSync(sshConfig, "utf8").includes(`Host ${name}\n`), "the Host block is still in ~/.ssh/config");
+    assert(fs.readFileSync(sshConfig, "utf8").includes("Host e2e-host"), "logout took the person's own hosts too");
+    assert(!fs.readFileSync(path.join(cliHome, ".ssh", "agentbox_known_hosts"), "utf8").includes(`agentbox-${name} `), "the host key is still pinned");
     const res = await fetch(`${stack.url}/_gate/session`, { headers: { authorization: `Bearer ${token}` } });
     assert(res.status === 401, `the old token still works: ${res.status}`);
     assert(!(await gate("GET", "/_gate/tokens")).json().some((t) => t.name === "e2e laptop"), "the gate still lists the device");

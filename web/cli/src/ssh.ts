@@ -197,6 +197,33 @@ export function upsertBlock(existing: string, box: string, block: string): { tex
   return { text: rest ? `${block}\n\n${rest}` : `${block}\n`, status: "added" };
 }
 
+/** `~/.ssh/config` without the box's block (and the blank line that followed it). */
+export function removeBlock(existing: string, box: string): { text: string; removed: boolean } {
+  const lines = existing.split("\n");
+  const at = findBlock(lines, box);
+  if (!at) return { text: existing, removed: false };
+  const after = lines[at.end + 1] === "" && at.end + 1 < lines.length - 1 ? 1 : 0;
+  lines.splice(at.begin, at.end - at.begin + 1 + after);
+  return { text: lines.join("\n"), removed: true };
+}
+
+/** `authorized_keys` without any line carrying `key`. */
+export function removeAuthorizedKey(existing: string, key: PublicKey): { text: string; removed: boolean } {
+  const lines = existing.split("\n");
+  const keep = lines.filter((line) => {
+    const words = line.trim().split(/\s+/);
+    return !words.some((w, i) => w === key.type && words[i + 1] === key.data);
+  });
+  return { text: keep.join("\n"), removed: keep.length !== lines.length };
+}
+
+/** known_hosts without the lines for `alias`. */
+export function unpinHostKey(existing: string, alias: string): { text: string; removed: boolean } {
+  const lines = existing.split("\n");
+  const keep = lines.filter((l) => l.split(/\s+/)[0] !== alias);
+  return { text: keep.join("\n"), removed: keep.length !== lines.length };
+}
+
 /** The block's text, or null when there is none. */
 export function currentBlock(existing: string, box: string): string | null {
   const lines = existing.split("\n");

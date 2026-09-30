@@ -218,7 +218,10 @@ box's name here:
   # <<< agentbox: work
   ```
 
-It prints what it changed, and running it again changes nothing. Run it again
+It prints what it changed, and running it again changes nothing. `agentbox
+logout` undoes it — the key comes off the box before the token is revoked,
+and the block and the pinned host key go here (the key files stay) — unless
+you pass `--keep-ssh`. Run it again
 if you move the CLI. The ProxyCommand is `agentbox proxy`: ssh's bytes through
 the gate's tunnel, with this device's token, to the box's sshd, which listens
 on the sandbox's loopback only. See [security.md](security.md#ssh) for the

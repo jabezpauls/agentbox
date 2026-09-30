@@ -7,7 +7,7 @@ import { pollForToken, safeVerifyUrl, startDeviceLogin } from "../device.js";
 import { ApiError, CliError, EXIT } from "../errors.js";
 import { formatAgo, safeText, table } from "../format.js";
 import { VERSION } from "../version.js";
-import { setupSsh, VIA_OPTIONS, viaOption } from "./ssh.js";
+import { setupSsh, teardownSsh, VIA_OPTIONS, viaOption } from "./ssh.js";
 import { command, type Command } from "./types.js";
 
 /** What `/_gate/session` says about a device token. */
@@ -140,12 +140,17 @@ export const logout = command({
       type: "boolean",
       description: "forget the box here without revoking (when the box cannot be reached; revoke it in Settings → Devices)",
     },
+    { name: "keep-ssh", type: "boolean", description: "leave the SSH setup (key on the box, ~/.ssh/config block, pinned host key) in place" },
   ],
   async run(ctx, p) {
     const { name, box } = ctx.selected();
+    const ssh = !bool(p.options, "keep-ssh");
+    const said: string[] = [];
     let revoked = false;
     if (!bool(p.options, "local")) {
       const client = ctx.client(box.url, box.token);
+      // The key comes off the box first: once the token is revoked, nothing here can reach it.
+      if (ssh) said.push(...(await teardownSsh(ctx, name, client, false)));
       try {
         await client.json("DELETE", "/_gate/tokens/self", { what: "revoking this device's token" });
         revoked = true;
@@ -166,6 +171,8 @@ export const logout = command({
       delete d.boxes[name];
       if (d.current === name) d.current = Object.keys(d.boxes)[0] ?? null;
     });
+    if (ssh) said.push(...(await teardownSsh(ctx, name, null)));
+    for (const line of said) ctx.err(`ssh: ${line}\n`);
     ctx.out(
       revoked
         ? `Signed out of ${name} (${box.url}); its token is revoked.\n`

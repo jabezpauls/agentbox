@@ -77,6 +77,7 @@ export async function filesStub(): Promise<FilesStub> {
     const route = `${req.method} ${url.pathname}`;
 
     if (route === "GET /_gate/version") return json(res, 200, { version: "0.0.0-dev" });
+    if (route === "DELETE /_gate/tokens/self") return json(res, 200, { revoked: true });
     if (route === "GET /api/files/stat") {
       const p = norm(q("path"));
       const n = fs.get(p);
