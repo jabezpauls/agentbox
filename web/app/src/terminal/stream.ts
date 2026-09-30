@@ -1,4 +1,4 @@
-import type { TerminalClientMessage, TerminalServerMessage } from "@workbench/shared";
+import type { TerminalClientMessage, TerminalMuxClientMessage, TerminalMuxServerMessage } from "@workbench/shared";
 import { wsUrl } from "../api/base.ts";
 
 export interface TermSize {
@@ -54,22 +54,158 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+/** What the shared socket needs from each pane on it. */
+interface Channel {
+  /** The shared socket is open: attach, and send what was held. */
+  opened(): void;
+  /** The shared socket dropped, is retrying, or gave up. */
+  dropped(state: ConnState): void;
+  data(bytes: Uint8Array): void;
+  notice(msg: TerminalMuxServerMessage): void;
+}
+
 /**
- * One WebSocket to the bridge's terminal stream for a pane. The server pushes
- * raw ANSI bytes as binary frames (write them straight into xterm) and a couple
- * of JSON control records; the client sends input, resize, scroll and focus as
- * JSON text. herdr renders scrollback server-side, so this carries no history —
- * which is also why reconnecting is cheap: the bridge replays a full frame on
- * attach, so a dropped tunnel or a restarted bridge heals with no lost output.
+ * The one WebSocket every terminal on the page shares. Through the public
+ * proxy a WebSocket handshake costs 0.4–1.4 s (a fresh TCP and TLS connection
+ * each time), and a browser opens a host's WebSockets one at a time: with a
+ * socket per pane, the fourth pane of a tab waited out four handshakes, and
+ * every tab switch paid one more. Now the handshake is paid once, early (see
+ * `prewarmTerminalSocket`), and a pane attaches as a channel on a socket that
+ * is already open. The bridge replays a full frame on every attach, so a
+ * reconnect re-attaches every channel and heals with no lost output.
  */
-export class TerminalSocket {
+class SharedSocket {
   private ws: WebSocket | null = null;
-  private queue: string[] = [];
-  private closed = false;
-  private size: TermSize;
-  private readonly paneId: string;
+  private open = false;
+  private readonly channels = new Map<number, Channel>();
+  private nextCh = 1;
   private readonly policy = new ReconnectPolicy();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private gaveUp = false;
+
+  /** Open the socket now unless it is open, opening, or waiting to retry. */
+  ensure(): void {
+    if (this.ws || this.timer || this.gaveUp) return;
+    this.connect();
+  }
+
+  add(channel: Channel): number {
+    let ch = this.nextCh;
+    while (this.channels.has(ch)) ch = (ch % 0xffff) + 1;
+    this.nextCh = (ch % 0xffff) + 1;
+    this.channels.set(ch, channel);
+    // A new pane after the policy gave up is a fresh reason to try again.
+    if (this.gaveUp) this.retry();
+    else if (this.open) queueMicrotask(() => this.channels.get(ch) === channel && channel.opened());
+    else this.ensure();
+    return ch;
+  }
+
+  remove(ch: number): void {
+    if (!this.channels.delete(ch)) return;
+    this.send({ ch, type: "detach" });
+  }
+
+  /** Send now if open; false if the caller should hold the message. */
+  send(msg: TerminalMuxClientMessage): boolean {
+    if (!this.open || !this.ws) return false;
+    this.ws.send(JSON.stringify(msg));
+    return true;
+  }
+
+  /** Try again now, after the automatic policy gave up. */
+  retry(): void {
+    if (this.ws) return;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.gaveUp = false;
+    this.policy.reset();
+    for (const c of this.channels.values()) c.dropped("connecting");
+    this.connect();
+  }
+
+  private connect(): void {
+    const ws = new WebSocket(wsUrl("/ws/terminal"));
+    ws.binaryType = "arraybuffer";
+    this.ws = ws;
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
+      this.open = true;
+      this.policy.reset();
+      for (const c of [...this.channels.values()]) c.opened();
+    };
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        if (ev.data.byteLength < 2) return;
+        const ch = new DataView(ev.data).getUint16(0);
+        this.channels.get(ch)?.data(new Uint8Array(ev.data, 2));
+        return;
+      }
+      let msg: TerminalMuxServerMessage;
+      try {
+        msg = JSON.parse(ev.data as string) as TerminalMuxServerMessage;
+      } catch {
+        return;
+      }
+      this.channels.get(msg.ch)?.notice(msg);
+    };
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this.open = false;
+      // With no pane on it, wait for the next one to reopen; otherwise retry.
+      if (this.channels.size === 0) return;
+      const delay = this.policy.next();
+      if (delay === null) {
+        this.gaveUp = true;
+        for (const c of this.channels.values()) c.dropped("lost");
+        return;
+      }
+      for (const c of this.channels.values()) c.dropped("reconnecting");
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.connect();
+      }, delay);
+    };
+    ws.onerror = () => {
+      // `close` always follows; the reconnect is scheduled from there.
+    };
+  }
+}
+
+let shared: SharedSocket | null = null;
+function sharedSocket(): SharedSocket {
+  return (shared ??= new SharedSocket());
+}
+
+/** Start the shared terminal socket's handshake now, ahead of the first pane. */
+export function prewarmTerminalSocket(): void {
+  if (typeof WebSocket === "undefined") return;
+  sharedSocket().ensure();
+}
+
+/** Forget the shared socket (tests only): the next terminal starts afresh. */
+export function resetTerminalSocketForTests(): void {
+  shared = null;
+}
+
+/**
+ * One pane's terminal stream: a channel on the shared socket. The server
+ * pushes raw ANSI bytes (write them straight into xterm) and a couple of JSON
+ * notices; the client sends input, resize, scroll and focus. herdr renders
+ * scrollback server-side, so this carries no history — which is also why
+ * reconnecting is cheap.
+ */
+export class TerminalSocket {
+  private queue: TerminalClientMessage[] = [];
+  private closed = false;
+  private attached = false;
+  private size: TermSize;
+  private readonly paneId: string;
+  private readonly mux: SharedSocket;
+  private readonly ch: number;
   private dataCb: DataCb | null = null;
   private sizeCb: SizeCb | null = null;
   private stateCb: StateCb | null = null;
@@ -79,7 +215,36 @@ export class TerminalSocket {
   constructor(paneId: string, size: TermSize) {
     this.paneId = paneId;
     this.size = size;
-    this.open();
+    this.mux = sharedSocket();
+    this.ch = this.mux.add({
+      opened: () => this.opened(),
+      dropped: (state) => {
+        this.attached = false;
+        if (!this.closed) this.setState(state);
+      },
+      data: (bytes) => this.dataCb?.(bytes),
+      notice: (msg) => {
+        if (msg.type === "size") this.sizeCb?.({ cols: msg.cols, rows: msg.rows });
+        else if (msg.type === "closed") {
+          // The pane itself is gone; retrying would only fail the same way.
+          this.closed = true;
+          this.mux.remove(this.ch);
+          this.setState("lost");
+          this.goneCb?.(msg.reason);
+        }
+      },
+    });
+  }
+
+  private opened(): void {
+    if (this.closed) return;
+    // Name the pane at our size: on a reconnect the bridge has no memory of
+    // this viewer, and the pane may have been resized by someone else meanwhile.
+    this.mux.send({ ch: this.ch, type: "attach", pane: this.paneId, ...this.size });
+    this.attached = true;
+    this.setState("open");
+    for (const m of this.queue) this.mux.send({ ...m, ch: this.ch });
+    this.queue = [];
   }
 
   private setState(state: ConnState): void {
@@ -88,75 +253,10 @@ export class TerminalSocket {
     this.stateCb?.(state);
   }
 
-  private open(): void {
-    if (this.closed) return;
-    const q = `?pane=${encodeURIComponent(this.paneId)}&cols=${this.size.cols}&rows=${this.size.rows}`;
-    const ws = new WebSocket(wsUrl(`/ws/terminal${q}`));
-    this.ws = ws;
-    ws.binaryType = "arraybuffer";
-
-    ws.onopen = () => {
-      if (this.closed) return;
-      this.policy.reset();
-      this.setState("open");
-      // Re-state our geometry: on a reconnect the bridge has no memory of this
-      // viewer, and the pane may have been resized by someone else meanwhile.
-      ws.send(JSON.stringify({ type: "resize", ...this.size } satisfies TerminalClientMessage));
-      for (const m of this.queue) ws.send(m);
-      this.queue = [];
-    };
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        this.dataCb?.(new Uint8Array(ev.data));
-        return;
-      }
-      let msg: TerminalServerMessage;
-      try {
-        msg = JSON.parse(ev.data as string) as TerminalServerMessage;
-      } catch {
-        return;
-      }
-      if (msg.type === "size") this.sizeCb?.({ cols: msg.cols, rows: msg.rows });
-      else if (msg.type === "closed") {
-        // The pane itself is gone; retrying would only fail the same way.
-        this.closed = true;
-        this.setState("lost");
-        this.goneCb?.(msg.reason);
-      }
-    };
-    ws.onclose = () => {
-      if (this.closed || this.ws !== ws) return;
-      this.ws = null;
-      this.schedule();
-    };
-    ws.onerror = () => {
-      // `close` always follows; the reconnect is scheduled from there.
-    };
-  }
-
-  private schedule(): void {
-    const delay = this.policy.next();
-    if (delay === null) {
-      this.setState("lost");
-      return;
-    }
-    this.setState("reconnecting");
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      this.open();
-    }, delay);
-  }
-
   /** Try again now, after the automatic policy gave up. */
   retry(): void {
-    if (this.closed || this.ws) return;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    this.policy.reset();
-    this.setState("connecting");
-    this.open();
+    if (this.closed) return;
+    this.mux.retry();
   }
 
   onData(cb: DataCb): void {
@@ -176,11 +276,10 @@ export class TerminalSocket {
 
   private send(msg: TerminalClientMessage): void {
     if (this.closed) return;
-    const text = JSON.stringify(msg);
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(text);
+    if (this.attached && this.mux.send({ ...msg, ch: this.ch })) return;
     // While reconnecting, hold a bounded amount of input: enough to cover a
     // blip without turning a long outage into unbounded memory.
-    else if (this.queue.length < MAX_QUEUED) this.queue.push(text);
+    if (this.queue.length < MAX_QUEUED) this.queue.push(msg);
   }
 
   /** Send keystrokes (or a paste). Strings go as text; raw bytes as base64. */
@@ -203,16 +302,8 @@ export class TerminalSocket {
   }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    try {
-      this.ws?.close();
-    } catch {
-      // Already closing/closed; nothing to do.
-    }
-    this.ws = null;
+    this.mux.remove(this.ch);
   }
 }

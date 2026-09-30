@@ -11,6 +11,7 @@ import { AppShell } from "./shell/AppShell.tsx";
 import { installRouter } from "./shell/router.ts";
 import { useGateSession } from "./shell/session.ts";
 import { loadHealth } from "./shell/health.ts";
+import { prewarmTerminalSocket } from "./terminal/stream.ts";
 
 export function App() {
   const { theme, resolved, cycle, set } = useTheme();
@@ -44,6 +45,9 @@ export function App() {
     void loadHealth();
     void useApp.getState().refreshApps();
     void useGateSession.getState().refresh();
+    // A terminal socket's handshake, begun now, runs alongside the session
+    // read instead of after it: the first pane attaches without waiting.
+    prewarmTerminalSocket();
   }, []);
 
   // The events socket coming back means the bridge is back: read what we

@@ -93,6 +93,62 @@ describe("terminal ws route", () => {
     await new Promise<void>((resolve) => ws.once("close", () => resolve()));
   });
 
+  it("carries several panes on one shared socket, each on its own channel", async () => {
+    const a = await newPane("mux-a");
+    const b = await newPane("mux-b");
+    const ws = new WebSocket(`ws://${baseUrl}/ws/terminal`, { origin: `http://${baseUrl}` });
+    const out = new Map<number, string>();
+    const notices: Array<{ type: string; ch: number; reason?: string }> = [];
+    ws.on("message", (raw, isBinary) => {
+      const buf = raw as Buffer;
+      if (!isBinary) return void notices.push(JSON.parse(buf.toString()));
+      const ch = buf.readUInt16BE(0);
+      out.set(ch, (out.get(ch) ?? "") + buf.subarray(2).toString("utf8"));
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    const send = (m: object) => ws.send(JSON.stringify(m));
+    // Before an attach, a channel is nothing: its input goes nowhere.
+    send({ ch: 1, type: "input", text: "echo NOPE\n" });
+    send({ ch: 1, type: "attach", pane: a, cols: 80, rows: 24 });
+    send({ ch: 300, type: "attach", pane: b, cols: 80, rows: 24 });
+    send({ ch: 1, type: "input", text: "echo MUX_A_$((2*21))\n" });
+    send({ ch: 300, type: "input", text: "echo MUX_B_$((3*14))\n" });
+    const until = async (ok: () => boolean, what: string) => {
+      const t0 = Date.now();
+      while (!ok()) {
+        if (Date.now() - t0 > 5_000) throw new Error(`timed out waiting for ${what}`);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    await until(() => (out.get(1) ?? "").includes("MUX_A_42") && (out.get(300) ?? "").includes("MUX_B_42"), "both echoes");
+    expect(out.get(1)).not.toContain("MUX_B_42");
+    expect(out.get(300)).not.toContain("MUX_A_42");
+
+    // A bad pane is refused on its channel alone; the socket stays up.
+    send({ ch: 7, type: "attach", pane: "../etc", cols: 80, rows: 24 });
+    await until(() => notices.some((n) => n.ch === 7 && n.type === "closed"), "a refusal");
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    // Detached, a channel hears nothing more; the other carries on.
+    send({ ch: 1, type: "detach" });
+    await new Promise((r) => setTimeout(r, 200));
+    const before = out.get(1) ?? "";
+    send({ ch: 1, type: "input", text: "echo GONE\n" });
+    send({ ch: 300, type: "input", text: "echo STILL_$((6*7))\n" });
+    await until(() => (out.get(300) ?? "").includes("STILL_42"), "the other channel");
+    expect(out.get(1) ?? "").toBe(before);
+
+    // A pane that exits says so on its channel, and the socket stays open.
+    send({ ch: 300, type: "input", text: "exit\n" });
+    await until(() => notices.some((n) => n.ch === 300 && n.type === "closed"), "the pane's end");
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", () => resolve()));
+  });
+
   it("rejects an invalid pane id with close code 1008", async () => {
     const ws = new WebSocket(`ws://${baseUrl}/ws/terminal?pane=not-a-pane&cols=80&rows=24`, {
       origin: `http://${baseUrl}`,

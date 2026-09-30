@@ -175,6 +175,21 @@ export type TerminalClientMessage =
   | { type: "focus" };
 export type TerminalServerMessage = { type: "closed"; reason: string } | { type: "size"; cols: number; rows: number };
 
+/**
+ * The shared form of /ws/terminal, opened without `?pane=`: one socket carries
+ * every pane the page shows, each on a channel the client numbers (0–65535).
+ * Client → bridge: `attach` a channel to a pane, then the usual control
+ * messages, then `detach` — each tagged with its `ch`. Bridge → client: binary
+ * frames whose first two bytes (big-endian) are the channel and the rest raw
+ * ANSI; JSON notices tagged with `ch`.
+ */
+export type TerminalMuxClientMessage = (
+  | { type: "attach"; pane: string; cols: number; rows: number }
+  | { type: "detach" }
+  | TerminalClientMessage
+) & { ch: number };
+export type TerminalMuxServerMessage = TerminalServerMessage & { ch: number };
+
 /** Review: an artifact an agent published, and the comments a human anchored to it. */
 export type ReviewStatus = "open" | "ended";
 export type ReviewEndedBy = "agent" | "human";
