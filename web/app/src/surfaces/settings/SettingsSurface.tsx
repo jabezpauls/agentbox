@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useEditorFollowsTheme } from "../../theme/editorSync.ts";
+import { useCopyOnSelect } from "../../terminal/clipboard.ts";
 import { BookOpen, Info, Keyboard, KeyRound, Laptop, Monitor, Moon, Palette, Share2, Sun, type LucideIcon } from "lucide-react";
 import { useApp } from "../../store/app.ts";
 import type { Theme } from "../../theme/useTheme.ts";
@@ -62,7 +63,36 @@ function AppearanceSection() {
       </div>
       <p className="field-hint">Kept in this browser. The terminals follow it too.</p>
       <EditorFollows />
+      <CopyOnSelect />
     </Section>
+  );
+}
+
+/** Whether selecting text in a terminal copies it straight away. */
+function CopyOnSelect() {
+  const on = useCopyOnSelect((s) => s.on);
+  const set = useCopyOnSelect((s) => s.set);
+  return (
+    <div className="settings-card editor-follows">
+      <div className="settings-row">
+        <div className="settings-row-text">
+          <strong id="copy-on-select-label">Terminals copy what you select</strong>
+          <span id="copy-on-select-hint">
+            As herdr does. Off, copy with Ctrl+Shift+C (⌘C on a Mac) or the right-click menu. Kept in this browser.
+          </span>
+        </div>
+        <button
+          className={`switch${on ? " is-on" : ""}`}
+          role="switch"
+          aria-checked={on}
+          aria-labelledby="copy-on-select-label"
+          aria-describedby="copy-on-select-hint"
+          onClick={() => set(!on)}
+        >
+          <span className="switch-knob" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   );
 }
 

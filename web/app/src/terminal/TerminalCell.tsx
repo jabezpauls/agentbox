@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ClipboardPaste, Copy } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -17,7 +18,9 @@ import { TerminalSocket, type ConnState } from "./stream.ts";
 import { terminalTheme } from "./themes.ts";
 import { registerTerminal } from "./registry.ts";
 import { handleChord } from "../shell/actions.ts";
-import { isPaletteKey } from "../shell/keys.ts";
+import { isMacPlatform, isPaletteKey } from "../shell/keys.ts";
+import { Menu } from "../components/ui/Menu.tsx";
+import { clipboardKey, parseOsc52, useCopyOnSelect, writeClipboard } from "./clipboard.ts";
 
 interface Props {
   paneId: string;
@@ -35,6 +38,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
   const socketRef = useRef<TerminalSocket | null>(null);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [gone, setGone] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: boolean } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -48,6 +52,9 @@ export function TerminalCell({ paneId, resolved }: Props) {
       lineHeight: 1.2,
       cursorBlink: true,
       theme: terminalTheme(),
+      // Shift+drag selects text even while the program in the pane has the
+      // mouse (Claude Code, herdr); on a Mac that key is Option.
+      macOptionClickForcesSelection: true,
     });
     termRef.current = term;
 
@@ -63,6 +70,14 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // WebGL unavailable (headless, blocklisted GPU): xterm's DOM renderer
       // stays in place, which is correct, just slower.
     }
+
+    // OSC 52: a program in the box copies to this viewer's clipboard. A
+    // request to read the clipboard back is swallowed, never answered.
+    const osc52 = term.parser.registerOscHandler(52, (data) => {
+      const r = parseOsc52(data);
+      if (r && r !== "read") writeClipboard(r.write);
+      return true;
+    });
 
     const unregister = registerTerminal(paneId, {
       focus: () => term.focus(),
@@ -82,8 +97,16 @@ export function TerminalCell({ paneId, resolved }: Props) {
       socket?.scroll(e.deltaY > 0 ? "down" : "up", 3);
     };
     const onMouseUp = () => {
-      // Copy on mouse-up when a selection exists, like the TUI.
-      if (term.hasSelection()) navigator.clipboard?.writeText(term.getSelection()).catch(() => {});
+      // Copy on mouse-up when a selection exists, like the TUI — unless
+      // Settings turned that off.
+      if (useCopyOnSelect.getState().on && term.hasSelection()) writeClipboard(term.getSelection());
+    };
+    const onContextMenu = (e: MouseEvent) => {
+      // A program that asked for the mouse gets its right-clicks; Shift still
+      // opens the menu over it.
+      if (term.modes.mouseTrackingMode !== "none" && !e.shiftKey) return;
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, selection: term.hasSelection() });
     };
     const onFocus = () => {
       // Focus: tell herdr and claim the pane's size for this viewer.
@@ -117,6 +140,22 @@ export function TerminalCell({ paneId, resolved }: Props) {
       // swallowed from xterm (return false), so the terminal only sees input.
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true;
+        // Copy and paste: Ctrl+Shift+C / Ctrl+Shift+V, and ⌘C / ⌘V on a Mac.
+        const clip = clipboardKey(e, isMacPlatform(), term.hasSelection());
+        if (clip === "copy") {
+          e.preventDefault();
+          writeClipboard(term.getSelection());
+          return false;
+        }
+        if (clip === "paste") {
+          // ⌘V is the browser's own paste, which xterm takes from there; the
+          // Ctrl+Shift form is not, so read the clipboard for it.
+          if (!e.metaKey) {
+            e.preventDefault();
+            pasteFromClipboard(term);
+          }
+          return false;
+        }
         // The app's ⌃⌥ chords — another surface, the palette, the dock — work
         // from inside a terminal too; no terminal program uses them.
         if (handleChord(e)) {
@@ -149,6 +188,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
       term.textarea?.addEventListener("focus", onFocus);
       host.addEventListener("wheel", onWheel, { passive: false });
       host.addEventListener("mouseup", onMouseUp);
+      host.addEventListener("contextmenu", onContextMenu);
 
       ro = new ResizeObserver(() => {
         try {
@@ -168,6 +208,8 @@ export function TerminalCell({ paneId, resolved }: Props) {
       ro?.disconnect();
       host.removeEventListener("wheel", onWheel);
       host.removeEventListener("mouseup", onMouseUp);
+      host.removeEventListener("contextmenu", onContextMenu);
+      osc52.dispose();
       term.textarea?.removeEventListener("focus", onFocus);
       socket?.close();
       term.dispose();
@@ -185,6 +227,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
   }, [resolved]);
 
   const notice = gone ?? NOTICE[conn] ?? null;
+  const mac = isMacPlatform();
 
   return (
     <div className="term-host" ref={hostRef}>
@@ -198,8 +241,40 @@ export function TerminalCell({ paneId, resolved }: Props) {
           )}
         </div>
       )}
+      {menu && (
+        <Menu
+          anchor={{ x: menu.x, y: menu.y }}
+          label="Terminal"
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: "Copy",
+              icon: Copy,
+              keys: mac ? "⌘C" : "Ctrl+Shift+C",
+              disabled: !menu.selection,
+              onSelect: () => termRef.current && writeClipboard(termRef.current.getSelection()),
+            },
+            {
+              label: "Paste",
+              icon: ClipboardPaste,
+              keys: mac ? "⌘V" : "Ctrl+Shift+V",
+              onSelect: () => termRef.current && pasteFromClipboard(termRef.current),
+            },
+          ]}
+        />
+      )}
     </div>
   );
+}
+
+/** Paste the clipboard's text into the terminal as a paste (bracketed, if the program asked). */
+function pasteFromClipboard(term: Terminal): void {
+  navigator.clipboard
+    ?.readText()
+    .then((text) => {
+      if (text) term.paste(text);
+    })
+    .catch(() => {});
 }
 
 /** localhost links open that server as an app in Preview; everything else opens a tab. */
