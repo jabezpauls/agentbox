@@ -67,6 +67,19 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
   // Files dropped where nothing takes them must not replace the app.
   useEffect(() => installDropGuard(), []);
 
+  // The Workbench is where most visits go next. Fetch its code once the page
+  // is idle, so the first move there does not wait a round trip through the
+  // proxy for it (a cold fetch measured 150–250 ms).
+  useEffect(() => {
+    const load = () => void import("../surfaces/workbench/WorkbenchSurface.tsx").catch(() => {});
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(load, { timeout: 5_000 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = setTimeout(load, 2_000);
+    return () => clearTimeout(t);
+  }, []);
+
   // The keyboard. Chords and ⌘K from anywhere; the Workbench's own keys
   // (⌘B, the ⌃B prefix) only while the Workbench is what you are looking at.
   useEffect(() => {
