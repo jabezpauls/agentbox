@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { TerminalClientMessage } from "@workbench/shared";
 import type { TerminalStreams, Viewer } from "../herdr/terminal.js";
 import { wsOriginGuard } from "../ws-origin.js";
+import { heartbeat } from "../ws-heartbeat.js";
 
 const PANE_RE = /^w\d+:p\d+$/;
 
@@ -38,6 +39,7 @@ export function registerTerminalWs(app: FastifyInstance, streams: TerminalStream
         socket.close(1008, "invalid pane");
         return;
       }
+      heartbeat(socket);
       const cols = clamp(Number(req.query.cols), 20, 500, 80);
       const rows = clamp(Number(req.query.rows), 5, 200, 24);
 

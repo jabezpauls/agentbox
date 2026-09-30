@@ -4,6 +4,7 @@ import type { SessionHub } from "../herdr/session.js";
 import type { PortsWatcher } from "../app.js";
 import type { BridgeEvents } from "../events.js";
 import { wsOriginGuard } from "../ws-origin.js";
+import { heartbeat } from "../ws-heartbeat.js";
 
 /**
  * `/ws/events`: on open send a fresh snapshot and the current listening ports,
@@ -29,6 +30,7 @@ export function registerEventsWs(
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m));
     };
 
+    heartbeat(socket);
     clientCount += 1;
     if (ports && clientCount === 1) ports.start();
     // Subscribed at once rather than after the snapshot: a clone's progress
