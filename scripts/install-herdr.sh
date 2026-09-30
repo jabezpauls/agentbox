@@ -11,18 +11,18 @@
 # runs in the Debian build stage as readily as on a CI runner.
 set -eu
 
-HERDR_VERSION="${HERDR_VERSION:-0.9.1}"
+HERDR_VERSION="${HERDR_VERSION:-0.9.3}"
 DEST="${1:-/usr/local/bin}"
 
 # herdr publishes plain static binaries, not archives.
 case "$(uname -m)" in
     x86_64|amd64)
         asset="herdr-linux-x86_64"
-        sha="2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7"
+        sha="18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7"
         ;;
     aarch64|arm64)
         asset="herdr-linux-aarch64"
-        sha="f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e"
+        sha="4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0"
         ;;
     *)
         echo "unsupported architecture: $(uname -m)" >&2
