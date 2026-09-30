@@ -9,6 +9,7 @@ export const BOX_SERVICES: Record<number, string> = {
   7681: "herdr's TUI (ttyd)",
   7682: "the process monitor (ttyd)",
   7683: "a shell (ttyd)",
+  2222: "the box's sshd (key-only)",
   7800: "the Workbench's API (the bridge)",
   7801: "the bridge's app plane",
   7900: "the gate",

@@ -123,7 +123,7 @@ export async function startHarness(overrides: Partial<Config> = {}, deps: GateDe
     dataPlane: { host: "127.0.0.1", port: echoes.data.port },
     appsHost: "127.0.0.1",
     appsPort: 0,
-    infraPorts: [8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901, ...names.map((n) => echoes[n].port)],
+    infraPorts: [8080, 7681, 7682, 7683, 2222, 7800, 7801, 7900, 7901, ...names.map((n) => echoes[n].port)],
     sharing: true,
     staticDir,
     cliDir: path.join(dataDir, "cli"),

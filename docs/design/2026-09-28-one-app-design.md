@@ -223,7 +223,7 @@ interface App {
 }
 ```
 
-Infrastructure ports (8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901 and any
+Infrastructure ports (8080, 7681, 7682, 7683, 2222, 7800, 7801, 7900, 7901 and any
 the operator adds) are refused at registration, update and serve time, by the
 gate.
 

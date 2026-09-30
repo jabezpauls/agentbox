@@ -40,7 +40,7 @@ export function loadConfig(env = process.env): Config {
     port,
     dataPort,
     dataHost: env.WORKBENCH_DATA_HOST ?? "0.0.0.0",
-    infraPorts: [port, dataPort, 8080, 7681, 7682, 7683, 7900, 7901].filter((p) => p > 0),
+    infraPorts: [port, dataPort, 8080, 7681, 7682, 7683, 2222, 7900, 7901].filter((p) => p > 0),
     staticDir: env.WORKBENCH_STATIC_DIR ?? null, socketPath: defaultSocketPath(env),
     workspaceRoot: env.WORKBENCH_WORKSPACE_ROOT ?? "/workspace",
     homeRoot: env.WORKBENCH_HOME_ROOT ?? (env.HOME || os.homedir()),

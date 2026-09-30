@@ -45,7 +45,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/home/coder/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git openssh-client \
+        ca-certificates curl git openssh-client openssh-server rsync \
         passwd adduser \
         bash less nano vim \
         ripgrep fd-find jq unzip zip \
@@ -186,6 +186,20 @@ COPY --chown=1000:1000 images/workspace/agentbox-review /usr/local/bin/agentbox-
 # Root-owned, as every other binary on PATH: the sandbox user runs it and
 # cannot change it.
 COPY --chmod=0755 images/workspace/agentbox-preview /usr/local/bin/agentbox-preview
+
+# The `ssh` service (docker-compose.yml): sshd as the sandbox user, with a
+# configuration of agentbox's own. Debian's package leaves host keys in
+# /etc/ssh, the same in every image built from it; nothing uses them, so they
+# go. The configuration is checked here, against a throwaway key.
+COPY --chmod=0755 images/workspace/agentbox-sshd /usr/local/bin/agentbox-sshd
+COPY --chmod=0644 images/workspace/sshd_config /etc/agentbox/sshd_config
+USER 0:0
+# (COPY --chmod made /etc/agentbox for its file, but only root could enter it.)
+RUN rm -f /etc/ssh/ssh_host_* && chmod 0755 /etc/agentbox
+USER 1000:1000
+RUN ssh-keygen -q -t ed25519 -N '' -f /tmp/check_key \
+    && /usr/sbin/sshd -t -f /etc/agentbox/sshd_config -o HostKey=/tmp/check_key \
+    && rm -f /tmp/check_key /tmp/check_key.pub
 COPY --chown=1000:1000 images/workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=1000:1000 images/workspace/welcome.md /home/coder/welcome.md
 

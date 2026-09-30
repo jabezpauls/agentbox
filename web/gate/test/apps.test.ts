@@ -50,7 +50,7 @@ describe("the sandbox side (:7901)", () => {
   });
 
   it("refuses agentbox's own ports, at registration and on a change", async () => {
-    for (const port of [8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901, h.echoes.bridge.port]) {
+    for (const port of [8080, 7681, 7682, 7683, 2222, 7800, 7801, 7900, 7901, h.echoes.bridge.port]) {
       const res = await request(h.apps, "POST", "/apps", { body: { port } });
       expect(res.status, String(port)).toBe(400);
       expect(res.json()).toMatchObject({ error: "infrastructure_port" });

@@ -1,0 +1,46 @@
+# agentbox's sshd: the box as an SSH host, for `herdr --remote`, editors'
+# Remote-SSH, rsync and plain `ssh`. It runs as the sandbox user (never root),
+# so it can only ever log that user in.
+#
+# It listens on the sandbox's loopback alone. The way in from outside is the
+# gate's tunnel (/_gate/tunnel?target=tcp:2222), which takes a device token;
+# or, for `agentbox ssh-setup --via <host>`, `docker exec … agentbox-sshd -i`
+# on the host, which needs the host. Either way a key is a second lock.
+Port 2222
+ListenAddress 127.0.0.1
+HostKey /home/coder/.agentbox/ssh/ssh_host_ed25519_key
+PidFile none
+
+AllowUsers coder
+PermitRootLogin no
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+HostbasedAuthentication no
+UsePAM no
+AuthorizedKeysFile .ssh/authorized_keys
+PermitUserEnvironment no
+MaxAuthTries 3
+LoginGraceTime 30
+
+# Local forwarding to the sandbox's own ports only: what `agentbox forward`
+# reaches anyway, and what VS Code's Remote-SSH needs. Nothing else: no ports
+# opened elsewhere, no agent, no X11, no tunnels, no Unix sockets.
+AllowTcpForwarding local
+PermitOpen 127.0.0.1:* localhost:*
+GatewayPorts no
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+
+PrintMotd no
+PrintLastLog no
+ClientAliveInterval 30
+ClientAliveCountMax 4
+Subsystem sftp internal-sftp
+
+# The container's environment (TZ, API keys) for sessions, written by
+# agentbox-sshd at start: sshd passes its own environment to nobody.
+Include /tmp/agentbox-sshd/*.conf

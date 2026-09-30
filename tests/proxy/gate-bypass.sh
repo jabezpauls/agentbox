@@ -492,7 +492,7 @@ for CADDYFILE in $CADDYFILES; do
         fail "registering an app from the sandbox: $created"
     fi
     ok=1
-    for p in 8080 7681 7682 7683 7800 7801 7900 7901; do
+    for p in 8080 7681 7682 7683 2222 7800 7801 7900 7901; do
         r="$(sandbox_call POST http://gate:7901/apps "{\"port\":$p}")"
         [[ "$r" == 400\ *infrastructure_port* ]] || { fail "port $p was accepted as an app: $r"; ok=0; }
     done
@@ -533,6 +533,13 @@ for CADDYFILE in $CADDYFILES; do
     [ "$STATUS" = 401 ] || fail "a tunnel with no credential -> $STATUS"
     ws "/_gate/tunnel?target=tcp:5173" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
     [ "$STATUS" = 401 ] || fail "a tunnel on the session cookie -> $STATUS"
+    # The box's sshd (2222): the same tunnel, the same rule, nothing without a device token.
+    ws "/_gate/tunnel?target=tcp:2222" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 401 ] || fail "a tunnel to sshd with no credential -> $STATUS"
+    ws "/_gate/tunnel?target=tcp:2222" -H "Cookie: $SESSION" -H "Origin: $ORIGIN"
+    [ "$STATUS" = 401 ] || fail "a tunnel to sshd on the session cookie -> $STATUS"
+    req GET "/_gate/tunnel?target=tcp:2222" -H "Cookie: $SESSION"
+    case "$STATUS" in 101|200) fail "a plain GET of the sshd tunnel -> $STATUS" ;; esac
     req GET "/a/$APP/sw.js" -H "Cookie: $SESSION" -H 'Service-Worker: script'
     [ "$STATUS" = 403 ] || fail "an app's service worker script -> $STATUS"
     if [ "$(hits)" = "$before" ]; then
@@ -592,7 +599,7 @@ for CADDYFILE in $CADDYFILES; do
     # and to herdr, on the data plane, with the token left behind.
     if [ -n "$TOKEN" ]; then
         ok=1
-        for t in tcp:5173 tcp:8080 herdr; do
+        for t in tcp:5173 tcp:8080 tcp:2222 herdr; do
             want="/tunnel/tcp/${t#tcp:}"
             [ "$t" = herdr ] && want=/tunnel/herdr
             ws "/_gate/tunnel?target=$t" -H "Authorization: Bearer $TOKEN"

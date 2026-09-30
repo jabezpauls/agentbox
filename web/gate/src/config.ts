@@ -75,7 +75,7 @@ function port(raw: string | undefined, fallback: number): number {
 }
 
 /** agentbox's own listeners: the editor, the three ttyd services, the bridge's two planes, the gate's two sides. */
-export const INFRA_PORTS = [8080, 7681, 7682, 7683, 7800, 7801, 7900, 7901];
+export const INFRA_PORTS = [8080, 7681, 7682, 7683, 2222, 7800, 7801, 7900, 7901];
 
 /** A comma-separated list of ports, as the operator writes it. */
 function portList(raw: string | undefined): number[] {

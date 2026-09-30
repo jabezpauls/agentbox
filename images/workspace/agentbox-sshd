@@ -1,0 +1,44 @@
+#!/bin/sh
+# The box's sshd, as the sandbox user (see /etc/agentbox/sshd_config).
+#
+#   agentbox-sshd        the `ssh` service: listen on 127.0.0.1:2222, in the foreground
+#   agentbox-sshd -i     one connection on stdin/stdout, for
+#                        `docker exec -i <ssh container> agentbox-sshd -i` on the host
+#                        (`agentbox ssh-setup --via <host>`)
+#
+# The host key is made once and kept on the home volume, so it outlives the
+# container and `agentbox ssh-setup` can pin it. authorized_keys is made here,
+# 0600, so the CLI's write through the files API keeps that mode.
+set -eu
+
+keys=/home/coder/.agentbox/ssh
+mkdir -p "$keys" /home/coder/.ssh
+chmod 700 "$keys" /home/coder/.ssh
+if [ ! -s "$keys/ssh_host_ed25519_key" ]; then
+    rm -f "$keys/ssh_host_ed25519_key" "$keys/ssh_host_ed25519_key.pub"
+    ssh-keygen -q -t ed25519 -N '' -C agentbox -f "$keys/ssh_host_ed25519_key"
+fi
+[ -e /home/coder/.ssh/authorized_keys ] || : >/home/coder/.ssh/authorized_keys
+chmod 600 /home/coder/.ssh/authorized_keys
+
+# sshd gives a session none of its own environment: hand on the container's.
+conf=/tmp/agentbox-sshd
+mkdir -p "$conf"
+tmp="$(mktemp "$conf/.env.XXXXXX")"
+# One SetEnv line: sshd keeps only the first.
+line=SetEnv
+for name in TZ LANG PATH NPM_CONFIG_PREFIX AGENTBOX_VERSION ANTHROPIC_API_KEY OPENAI_API_KEY; do
+    eval "value=\${$name:-}"
+    # Only what SetEnv can carry as one quoted word.
+    case "$value" in ''|*'"'*|*'\'*|*'
+'*) continue ;; esac
+    line="$line \"$name=$value\""
+done
+[ "$line" = SetEnv ] || printf '%s\n' "$line" >"$tmp"
+chmod 600 "$tmp"
+mv -f "$tmp" "$conf/env.conf"
+
+if [ "${1:-}" = -i ]; then
+    exec /usr/sbin/sshd -i -f /etc/agentbox/sshd_config
+fi
+exec /usr/sbin/sshd -D -e -f /etc/agentbox/sshd_config

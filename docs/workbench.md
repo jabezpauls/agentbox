@@ -426,7 +426,7 @@ off`, or `./scripts/agentbox update --sharing off`): the Share button goes, and
 anything shared is private again.
 
 agentbox's own services are never apps: the editor, the terminals and the
-bridge (ports 8080, 7681–7683, 7800, 7801) and the box's front door (7900,
+bridge (ports 8080, 7681–7683, 7800, 7801), the SSH endpoint (2222) and the box's front door (7900,
 7901) are refused, whoever asks.
 
 ### What proves it

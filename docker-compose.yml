@@ -105,6 +105,19 @@ services:
     depends_on:
       - code
 
+  # The box as an SSH host, for `herdr --remote`, editors' Remote-SSH and
+  # rsync: OpenSSH's sshd as the sandbox user, key-only, on 127.0.0.1:2222 in
+  # the sandbox and nowhere else. From outside it is reached only through the
+  # gate's tunnel, which takes a device token (or, with `agentbox ssh-setup
+  # --via`, by `docker exec` on the host). See docs/security.md.
+  ssh:
+    <<: *sandbox
+    command: ["agentbox-sshd"]
+    network_mode: "service:code"
+    pid: "service:code"
+    depends_on:
+      - code
+
   # Live resource usage for the sandbox itself.
   monitor:
     <<: *sandbox
