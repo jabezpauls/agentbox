@@ -59,6 +59,10 @@ is revoked rather than kept.
 
 `agentbox whoami` says who and where you are signed in.
 
+A sign-in ends by setting up SSH to the box (`agentbox ssh-setup`, below), and
+says what it changed. If that fails — a box from before the SSH endpoint, no
+`ssh-keygen` here — the sign-in stands and a warning says so.
+
 ### Several boxes
 
 Every box you sign in to is kept by name, and one is current.
@@ -97,13 +101,16 @@ clean.
 | `boxes` · `use <name>` | the boxes you are signed in to, and which is current |
 | `status` | the box's version, herdr, the agents and their states, apps, and the system |
 | `open [surface\|path]` | the box in your browser: a surface (`workbench`, `files`, `terminal`, …) or a path in Files |
-| `attach` | herdr's TUI in this terminal |
+| `attach [herdr options…]` · `attach --web` | herdr in this terminal: `herdr --remote <box>` when herdr is installed here, else its TUI streamed from the box |
 | `shell [--cwd <dir>]` | a bash shell in the box |
+| `ssh-setup [--via <host>\|--tunnel]` · `ssh [command…]` | make `ssh <box>` work here (key, pinned host key, `~/.ssh/config`), and ssh in |
+| `proxy tcp:<port>` | stdin/stdout joined to a port in the box: ssh's ProxyCommand |
 | `files ls\|stat\|get\|put\|rm\|mv\|cp\|mkdir\|cat\|edit` | the workspace's files |
 | `mount [dir] [--no-mount]` | the workspace as a folder here (WebDAV) |
 | `forward <port>[:<local>]…` | a port in the box at `localhost` here |
 | `apps ls\|open\|share\|unshare\|forward` | the box's apps (`/a/<id>/`): list, open, share (`--expires 7d`, `--passcode`, `--set-passcode`), make private, forward to localhost |
 | `agents ls` · `review ls\|open` | the agents at work, and pages awaiting your review |
+| `herdr add` | the box as a saved machine in herdr here (`herdr machine add <box>`) |
 | `herdr call <method> [json]` · `herdr socket [path]` | raw herdr RPC, and a local Unix socket that speaks to the box's herdr (not on Windows) |
 | `update` | the CLI your box serves, in place of this one |
 
@@ -126,9 +133,26 @@ or you detached, 1 otherwise.
 
 ## Terminals: attach and shell
 
-`agentbox attach` is the same herdr session as `/terminal` in the browser —
-every workspace, pane and agent — in your local terminal. **Ctrl-] then q**
-detaches and leaves everything running; Ctrl-] twice sends one Ctrl-]. It
+`agentbox attach` is the same herdr session as `/terminal` in the browser and
+the Workbench — every workspace, pane and agent — in your local terminal. It
+works one of two ways.
+
+**With herdr installed here** (the CLI offers to run herdr's installer,
+`curl -fsSL https://herdr.dev/install.sh | sh`, the first time), it runs
+`herdr --remote <box>` over SSH, setting SSH up first if it is not. Your
+herdr draws the UI — sidebar, menus, theme, your keybindings — and the box's
+herdr sends only what the panes show, compressed, reconnecting on its own
+after a dropped network or a sleep. It is much faster than the streamed TUI
+and has none of its redraw glitches. Anything after `attach` goes to herdr
+(`agentbox attach --session work`), and herdr's own keys detach
+(**Ctrl-b q** by default). `agentbox herdr add` instead saves the box as a
+machine in herdr (`herdr machine add <box>`), so its agents sit beside this
+machine's in one window, and `herdr --machine <box> agent list` scripts it.
+
+**Otherwise** (or with `--web`), herdr's whole TUI runs on the box and its
+screen is streamed here through the gate, as `/terminal` does in a browser.
+**Ctrl-] then q** detaches and leaves everything running; Ctrl-] twice sends
+one Ctrl-]. It
 works however your terminal sends the keys — the classic bytes, kitty's
 keyboard protocol (kitty, WezTerm, foot, Ghostty, once herdr turns it on) or
 xterm's modifyOtherKeys. Quitting herdr ends the command.
@@ -150,6 +174,89 @@ dropping a quiet session.
 
 Without a terminal (stdin piped), both still work: keystrokes are what you
 pipe in, and the size is `$COLUMNS`×`$LINES` or 80×24.
+
+### Mouse and clipboard
+
+| | `herdr --remote` (herdr here) | streamed TUI (`--web`, no herdr here) |
+| --- | --- | --- |
+| Clicks and scrolling in herdr (sidebar, tabs, panes) | yes, handled by your herdr | yes, passed through to the box's herdr |
+| Mouse in a TUI in a pane (Claude Code, vim, htop) | yes | yes |
+| A pane copies (OSC 52) → your clipboard | yes | yes |
+| Paste text | yes (bracketed) | yes (bracketed) |
+| Paste an image | yes: herdr puts it in a temp file on the box and pastes the path | no |
+
+A copy reaches your clipboard as OSC 52, so your terminal must allow OSC 52
+writes (kitty, WezTerm, Ghostty, foot, Windows Terminal do; iTerm2 has a
+setting; inside tmux, `set -g set-clipboard on`). The end-to-end tests check,
+on both paths, that a click reaches a mouse-reporting program in a pane and
+that a pane's copy reaches your terminal.
+
+## SSH: the box as a host
+
+`agentbox ssh-setup` (which `login` runs) makes `ssh <box>` work, using the
+box's name here:
+
+- a key: `~/.ssh/id_ed25519` if you have one, else a new
+  `~/.ssh/agentbox_ed25519`;
+- that key added once to the box's `~/.ssh/authorized_keys` (0600), through
+  the files API;
+- the box's host key, fetched the same way and pinned in
+  `~/.ssh/agentbox_known_hosts` under `agentbox-<box>`;
+- a marked block at the top of `~/.ssh/config` (edits inside it are
+  replaced; everything outside is left alone):
+
+  ```text
+  # >>> agentbox: work (managed by `agentbox ssh-setup`; edits inside are replaced)
+  Host work
+    User coder
+    ProxyCommand /home/you/.local/bin/agentbox proxy tcp:2222 --box work
+    HostKeyAlias agentbox-work
+    UserKnownHostsFile /home/you/.ssh/agentbox_known_hosts
+    StrictHostKeyChecking yes
+    IdentityFile /home/you/.ssh/id_ed25519
+    IdentitiesOnly yes
+  # <<< agentbox: work
+  ```
+
+It prints what it changed, and running it again changes nothing. Run it again
+if you move the CLI. The ProxyCommand is `agentbox proxy`: ssh's bytes through
+the gate's tunnel, with this device's token, to the box's sshd, which listens
+on the sandbox's loopback only. See [security.md](security.md#ssh) for the
+two locks.
+
+Then anything that speaks OpenSSH works:
+
+```bash
+ssh work                                  # a shell (agentbox ssh does the same)
+agentbox ssh 'cd /workspace && git status'
+rsync -a ./data/ work:/workspace/data/    # scp and sftp too
+```
+
+- **VS Code / Cursor**: Remote-SSH → *Connect to Host…* → `work`, then open
+  `/workspace`. It forwards a port to its server in the box, which the box's
+  sshd allows (to the sandbox's own loopback, nothing else).
+- **Zed**: `zed ssh://work/workspace`, or *Open Remote* → `work`.
+- **herdr**: `agentbox attach` and `agentbox herdr add`, above.
+
+### The fast path: through the box's host
+
+If you can already `ssh` to the machine the box runs on (say a `vps` entry in
+`~/.ssh/config`, as its operator), and run `docker` there:
+
+```bash
+agentbox ssh-setup --via vps        # or: agentbox login <url> --via vps
+```
+
+The ProxyCommand becomes `ssh vps` then `docker exec -i <the box's ssh
+container> agentbox-sshd -i`: the box's sshd speaks over that exec's stdin and
+stdout. It skips Cloudflare and the HTTPS tunnel (lower latency), and needs no
+port for the box on any network: one SSH port on the host serves every box on
+it. ssh-setup finds the box's compose project on the host by its host key, and
+the ProxyCommand looks the container up by its compose labels at every
+connect, so a recreated container is found again. `agentbox ssh-setup
+--tunnel` goes back to the HTTPS tunnel. It leans on your access to the host,
+not on this device's token: anyone who can run docker on the host owns the box
+anyway.
 
 ## Files
 
@@ -283,7 +390,7 @@ The local port listens on `127.0.0.1` only, but there it is the box's port
 with no sign-in in front: while `forward` runs, anyone on this machine can use
 it, and so can a web page, by DNS rebinding, when the service does not check
 its `Host`. Forwarding one of agentbox's own services (the editor on 8080, the
-terminals on 7681–7683, the bridge on 7800/7801, the gate on 7900/7901) hands
+terminals on 7681–7683, sshd on 2222, the bridge on 7800/7801, the gate on 7900/7901) hands
 out that service as this device, and the CLI warns before it does.
 
 ## Troubleshooting

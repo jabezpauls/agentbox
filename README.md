@@ -84,8 +84,10 @@ curl -fsSL https://code.example.com/cli/install | sh
 ```
 
 That installs `agentbox` and signs it in through your browser — no password
-in the terminal; the laptop gets a device token you can revoke. Then
-`agentbox attach` puts herdr's TUI in your terminal, `agentbox shell` a bash,
+in the terminal; the laptop gets a device token you can revoke — and sets up
+SSH, so `ssh <box>`, rsync, and VS Code's or Zed's remote editing work too.
+Then `agentbox attach` puts herdr in your terminal (drawn locally, with
+`herdr --remote`, when herdr is installed here), `agentbox shell` a bash,
 `agentbox files put ./data -r` uploads a folder (resumably), `agentbox mount`
 shows the workspace in Finder or your file manager, and `agentbox status` says
 how the box is doing. See [docs/cli.md](docs/cli.md).

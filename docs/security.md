@@ -266,7 +266,7 @@ publish an app, and so whatever the sandbox serves on it. The gate logs every
 change of who may open an app; if you restrict egress because you distrust
 what runs in the sandbox, run with `--sharing off`, or expect this. What the gate guarantees is
 that nothing is public unless the owner said so, that agentbox's own services
-never are (8080, 7681–7683, 7800, 7801, 7900, 7901 and any the operator adds
+never are (8080, 7681–7683, 2222, 7800, 7801, 7900, 7901 and any the operator adds
 in `AGENTBOX_INFRA_PORTS` are refused as apps when registered, changed and
 served), and that app content never runs with the box's origin. The
 installer's `--sharing off` makes every app private and refuses to share any.
@@ -366,6 +366,42 @@ anything a process in the sandbox could not reach already.
 :7901 and the data plane, and the tunnel's token rule against the real gate
 image; the fidelity suite (`npm run fidelity -w app`) proves the policy in
 Chromium, Firefox and WebKit with real apps.
+
+### SSH
+
+The `ssh` service runs OpenSSH's sshd in the sandbox as the sandbox user
+(uid 1000, no capabilities, `no-new-privileges`), sharing the editor's network
+and process namespaces like the terminals. It listens on **127.0.0.1:2222 in
+the sandbox only**: no port is published, and nothing on any Docker network
+can reach it. It takes public keys only — no passwords, no keyboard-interactive,
+no root (it could not log anyone but the sandbox user in anyway), and allows
+local forwarding to the sandbox's own loopback alone (what VS Code's
+Remote-SSH needs, and what a tunnel reaches anyway); no remote forwarding, no
+agent or X11 forwarding, no tunnels, no Unix-socket forwarding. Its host key is
+made once on the home volume.
+
+From outside there are two ways in, each behind two independent locks:
+
+1. **The gate's tunnel** (the default): `ssh <box>` runs `agentbox proxy
+   tcp:2222`, a WebSocket to `/_gate/tunnel?target=tcp:2222` that the gate
+   opens for a **device token** only — not a session cookie, not signed out
+   (the gate bypass suite checks both). Then sshd wants a **key** in
+   `~/.ssh/authorized_keys`. A stolen key without a token reaches nothing; a
+   stolen token already opens every tunnel and the files API, key or not.
+2. **Through the host** (`agentbox ssh-setup --via <host>`): `ssh <host>`, then
+   `docker exec -i <the ssh container> agentbox-sshd -i`. The locks are your
+   account on the host (with docker, which is root there) and the key.
+
+The client pins the box's host key, fetched through the files API over the
+authenticated HTTPS channel, under an alias of its own
+(`HostKeyAlias agentbox-<box>`, in `~/.ssh/agentbox_known_hosts`), with
+`StrictHostKeyChecking yes`.
+
+What sshd does not do is add a boundary inside the box: it runs as the same
+user as the agents, so anything in the sandbox can read its host key, add a
+key to `authorized_keys` or change its settings (Include files under the ssh
+container's `/tmp`). That gains nothing an agent does not already have, and a
+key it adds still needs a device token, or the host, to be used from outside.
 
 ### What a compromised sandbox can still do
 
