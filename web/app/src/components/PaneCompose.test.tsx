@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const { probe } = vi.hoisted(() => ({ probe: vi.fn(() => Promise.resolve(false)) }));
+vi.mock("../terminal/fullscreen.ts", () => ({ probeFullScreen: probe }));
+
 import { PaneCompose } from "./PaneCompose.tsx";
 import { focusTerminal, registerTerminal, type TerminalHandle } from "../terminal/registry.ts";
 import { useAltScreen } from "../terminal/modes.ts";
@@ -11,6 +14,8 @@ let unregister: () => void;
 
 beforeEach(() => {
   localStorage.clear();
+  probe.mockReset();
+  probe.mockResolvedValue(false);
   useAltScreen.setState({ [PANE]: false });
   term = { focus: vi.fn(), text: vi.fn(() => ""), send: vi.fn(), submit: vi.fn(), arrow: vi.fn() };
   unregister = registerTerminal(PANE, term as unknown as TerminalHandle);
@@ -96,6 +101,27 @@ describe("the compose bar", () => {
     expect(term.focus).toHaveBeenCalledTimes(2);
     act(() => useAltScreen.setState({ [PANE]: false }));
     expect(document.activeElement).toBe(field());
+  });
+});
+
+describe("knowing a full-screen program", () => {
+  it("steps aside while herdr reports one in the foreground, since herdr does not relay the alternate screen", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<PaneCompose paneId={PANE} />);
+    field().focus();
+    probe.mockResolvedValue(true);
+    await act(async () => {
+      fireEvent.change(field(), { target: { value: "vim notes.md" } });
+      fireEvent.keyDown(field(), { key: "Enter" });
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(probe).toHaveBeenCalledWith(PANE);
+    expect(screen.queryByLabelText("Compose a line for the terminal")).toBeNull();
+    probe.mockResolvedValue(false);
+    await act(() => vi.advanceTimersByTimeAsync(1600));
+    expect(field()).toBeInTheDocument();
+    expect(document.activeElement).toBe(field());
+    vi.useRealTimers();
   });
 });
 

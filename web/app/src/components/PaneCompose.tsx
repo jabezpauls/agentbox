@@ -3,6 +3,10 @@ import { Keyboard } from "lucide-react";
 import { ComposeField } from "./ComposeField.tsx";
 import { loadHistory, pushHistory, useAltScreen } from "../terminal/modes.ts";
 import { registerCompose, terminalHandle } from "../terminal/registry.ts";
+import { probeFullScreen } from "../terminal/fullscreen.ts";
+
+/** How often to ask herdr what runs in the pane (see terminal/fullscreen.ts). */
+export const PROBE_MS = 1500;
 
 const QUICK: { label: string; title: string; send: string | { arrow: "A" | "B" | "C" | "D" } }[] = [
   { label: "Esc", title: "Escape", send: "\x1b" },
@@ -25,12 +29,28 @@ const QUICK: { label: string; title: string; send: string | { arrow: "A" | "B" |
  * it comes back when the program exits.
  */
 export function PaneCompose({ paneId }: { paneId: string }) {
-  const alt = useAltScreen((s) => s[paneId] === true);
+  const altScreen = useAltScreen((s) => s[paneId] === true);
+  const [program, setProgram] = useState(false);
+  const alt = altScreen || program;
   const [history, setHistory] = useState(() => loadHistory(paneId));
   const input = useRef<HTMLTextAreaElement>(null);
   const focused = useRef(false);
   // The bar had the keyboard when a full-screen program took over: hand it back after.
   const stepped = useRef(false);
+
+  const probe = useRef(() => {});
+  useEffect(() => {
+    let live = true;
+    probe.current = () => {
+      if (document.visibilityState === "visible") void probeFullScreen(paneId).then((on) => live && setProgram(on));
+    };
+    probe.current();
+    const t = setInterval(() => probe.current(), PROBE_MS);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [paneId]);
 
   useEffect(() => {
     if (alt) {
@@ -63,6 +83,8 @@ export function PaneCompose({ paneId }: { paneId: string }) {
       onSubmit={(text) => {
         term()?.submit(text);
         if (text.trim()) setHistory(pushHistory(paneId, text));
+        // A command just started: if it takes the screen, step aside now rather than at the next poll.
+        setTimeout(() => probe.current(), 300);
         return true;
       }}
       onKey={(e, { text, el, clear }) => {
