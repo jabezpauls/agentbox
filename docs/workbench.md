@@ -138,16 +138,14 @@ screen); a full-screen program that takes the mouse, such as Claude Code or
 `less`, gets arrow keys. `herdr --remote` from your desktop (`agentbox
 attach`) behaves the same way.
 
-Claude Code in the box always starts in its [fullscreen
-renderer](https://code.claude.com/docs/en/fullscreen): the image sets
-`"tui": "fullscreen"` in `/etc/claude-code/managed-settings.json`. That
-renderer takes the mouse, so the wheel scrolls the conversation inside Claude
-Code — in the Workbench, the TUI at `/terminal` and a desktop herdr alike —
-and `PgUp`/`PgDn`, `Ctrl+Home`/`Ctrl+End` work too. Left to itself, Claude
-Code picks the renderer by when the account first used it, and the classic
-one fills herdr's scrollback with its redraws. A session started before the
-image had this setting keeps its renderer until it restarts. For the classic
-renderer anyway, start a session with `CLAUDE_CODE_NO_FLICKER=0 claude`.
+Claude Code picks its renderer itself, and both scroll with the wheel here.
+Its [fullscreen renderer](https://code.claude.com/docs/en/fullscreen) takes
+the mouse, so the wheel scrolls the conversation inside Claude Code — in the
+Workbench, the TUI at `/terminal` and a desktop herdr alike — and
+`PgUp`/`PgDn` work too. The classic renderer stays on the normal screen, so
+the wheel scrolls herdr's history instead. To choose one for a session, use
+`/tui` inside Claude Code, or start it with `CLAUDE_CODE_NO_FLICKER=0 claude`
+for the classic one.
 
 **Dictation.** The compose bar and the agent composer have a microphone:
 click it, or hold `⌃⌥M` (tap it to start and stop). Words appear as they are
