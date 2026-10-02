@@ -1072,6 +1072,46 @@
   font-size: var(--fs-xs);
   color: var(--text-2);
 }
+/* herdr's scrollback, drawn from where herdr says the pane stands: a thin
+   marker while live, plainer once scrolled back, with the way back to live. */
+.term-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 1px;
+  bottom: 0;
+  width: 4px;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.term-host:hover .term-scrollbar,
+.term-scrollbar.is-back {
+  opacity: 1;
+}
+.term-scrollbar-thumb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  min-height: 12px;
+  border-radius: 2px;
+  background: var(--text-2);
+  opacity: 0.5;
+}
+.term-live {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: var(--sp-2);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  box-shadow: var(--shadow-md);
+}
+.term-live-count {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
 /* herdr renders the viewport server-side (scrollback: 0), so the local
    scrollbar is inert; hide it rather than show a dead track. */
 .term-host .xterm-viewport {

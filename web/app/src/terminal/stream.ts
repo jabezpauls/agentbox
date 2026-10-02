@@ -16,6 +16,13 @@ type DataCb = (bytes: Uint8Array) => void;
 type SizeCb = (size: TermSize) => void;
 type StateCb = (state: ConnState) => void;
 type GoneCb = (reason: string) => void;
+/** herdr's scrollback position: `offset` lines above live, of at most `max`, `rows` on screen. */
+export interface ScrollState {
+  offset: number;
+  max: number;
+  rows: number;
+}
+type ScrollCb = (s: ScrollState) => void;
 
 export const BACKOFF_BASE_MS = 500;
 export const BACKOFF_MAX_MS = 15_000;
@@ -241,6 +248,7 @@ export class TerminalSocket {
   private sizeCb: SizeCb | null = null;
   private stateCb: StateCb | null = null;
   private goneCb: GoneCb | null = null;
+  private scrollCb: ScrollCb | null = null;
   private state: ConnState = "connecting";
 
   constructor(paneId: string, size: TermSize) {
@@ -257,6 +265,7 @@ export class TerminalSocket {
       notice: (msg) => {
         if (msg.type === "pong") return;
         if (msg.type === "size") this.sizeCb?.({ cols: msg.cols, rows: msg.rows });
+        else if (msg.type === "scrolled") this.scrollCb?.({ offset: msg.offset, max: msg.max, rows: msg.rows });
         else if (msg.type === "closed") {
           // The pane itself is gone; retrying would only fail the same way.
           this.closed = true;
@@ -325,8 +334,18 @@ export class TerminalSocket {
     this.send({ type: "resize", cols, rows });
   }
 
+  /** Where herdr's scrollback for the pane stands, whenever it moves. */
+  onScroll(cb: ScrollCb): void {
+    this.scrollCb = cb;
+  }
+
   scroll(direction: "up" | "down", lines: number): void {
     this.send({ type: "scroll", direction, lines });
+  }
+
+  /** Scroll herdr's view to `offset` lines above live; 0 is back to live. */
+  scrollTo(offset: number): void {
+    this.send({ type: "scrollTo", offset });
   }
 
   focus(): void {

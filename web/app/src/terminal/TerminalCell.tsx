@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Copy } from "lucide-react";
+import { ArrowDownToLine, ClipboardPaste, Copy } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -14,7 +14,8 @@ import { actionCtx } from "../api/call.ts";
 import { comboFromEvent } from "../keys/combo.ts";
 import { runAction } from "../keys/actions.ts";
 import { machine, reflectHud } from "../keys/machine.ts";
-import { TerminalSocket, terminalRtt, type ConnState } from "./stream.ts";
+import { TerminalSocket, terminalRtt, type ConnState, type ScrollState } from "./stream.ts";
+import { thumb, WheelLines } from "./wheel.ts";
 import { Predictor } from "./predict.ts";
 import { PREDICT_MIN_RTT_MS, PredictionLayer, xtermScreen } from "./predictLayer.ts";
 import { paneMode, useAltScreen, useTermModes } from "./modes.ts";
@@ -42,6 +43,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
   const [conn, setConn] = useState<ConnState>("connecting");
   const [gone, setGone] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: boolean } | null>(null);
+  const [scroll, setScroll] = useState<ScrollState | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -144,10 +146,18 @@ export function TerminalCell({ paneId, resolved }: Props) {
     let disposed = false;
     let socket: TerminalSocket | null = null;
     let ro: ResizeObserver | null = null;
-    const onWheel = (e: WheelEvent) => {
+    // The wheel goes to herdr, which knows what the program in the pane wants
+    // of it (see wheel.ts). xterm's own handling would turn it into arrow keys,
+    // since this terminal keeps no scrollback, and send those as typing.
+    const wheel = new WheelLines();
+    term.attachCustomWheelEventHandler((e) => {
       e.preventDefault();
-      socket?.scroll(e.deltaY > 0 ? "down" : "up", 3);
-    };
+      const screen = term.element?.querySelector(".xterm-screen");
+      const rowHeight = screen ? screen.clientHeight / term.rows : 16;
+      const act = wheel.take(e, rowHeight, term.rows);
+      if (act) socket?.scroll(act.direction, act.lines);
+      return false;
+    });
     const onMouseUp = () => {
       // Copy on mouse-up when a selection exists, like the TUI — unless
       // Settings turned that off.
@@ -188,6 +198,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
       );
       socket.onState(setConn);
       socket.onGone(setGone);
+      socket.onScroll(setScroll);
       // Another viewer resized or focused this pane: herdr's geometry is
       // authoritative for everyone attached, so follow it.
       socket.onSize(({ cols, rows }) => {
@@ -251,7 +262,6 @@ export function TerminalCell({ paneId, resolved }: Props) {
       });
 
       term.textarea?.addEventListener("focus", onFocus);
-      host.addEventListener("wheel", onWheel, { passive: false });
       host.addEventListener("mouseup", onMouseUp);
       host.addEventListener("contextmenu", onContextMenu);
 
@@ -278,7 +288,6 @@ export function TerminalCell({ paneId, resolved }: Props) {
       layer.dispose();
       useAltScreen.setState({ [paneId]: false });
       ro?.disconnect();
-      host.removeEventListener("wheel", onWheel);
       host.removeEventListener("mouseup", onMouseUp);
       host.removeEventListener("contextmenu", onContextMenu);
       osc52.dispose();
@@ -299,10 +308,31 @@ export function TerminalCell({ paneId, resolved }: Props) {
   }, [resolved]);
 
   const notice = gone ?? NOTICE[conn] ?? null;
+  const bar = scroll ? thumb(scroll.offset, scroll.max, scroll.rows) : null;
+  const back = scroll !== null && scroll.offset > 0;
   const mac = isMacPlatform();
 
   return (
     <div className="term-host" ref={hostRef}>
+      {bar && (
+        <div className={`term-scrollbar${back ? " is-back" : ""}`} aria-hidden="true">
+          <div className="term-scrollbar-thumb" style={{ top: `${bar.top * 100}%`, height: `${bar.height * 100}%` }} />
+        </div>
+      )}
+      {back && (
+        <button
+          className="term-live btn btn-small"
+          title="Back to the live screen (or just type)"
+          onClick={() => {
+            socketRef.current?.scrollTo(0);
+            termRef.current?.focus();
+          }}
+        >
+          <ArrowDownToLine size={14} aria-hidden="true" />
+          Jump to live
+          <span className="term-live-count">{scroll.offset} lines up</span>
+        </button>
+      )}
       {notice && (
         <div className="term-notice" role="status">
           <span className="term-notice-text">{notice}</span>
