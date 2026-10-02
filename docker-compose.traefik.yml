@@ -18,6 +18,9 @@
 # Cloudflare: Caddy then trusts Cloudflare's published ranges as well as
 # Traefik when working out a client's address, and Traefik's own outer limit
 # counts per CF-Connecting-IP. Set it to off when nothing fronts Traefik.
+#
+# This is AGENTBOX_TLS=edge, Traefik terminating TLS. For a DNS-only record
+# with a certificate of the box's own, see docker-compose.traefik-passthrough.yml.
 services:
   proxy:
     networks:

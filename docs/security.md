@@ -188,6 +188,26 @@ proxy.
   another container on a shared edge network, a machine on the host's LAN —
   can write what it likes further left in `X-Forwarded-For` and pick its own
   budget. It still meets the global ceiling, and it still needs the password.
+- **Direct TLS (traefik mode, `--tls passthrough`).** Traefik passes the TLS
+  connection through unopened and names the client in a PROXY protocol v2
+  header; Caddy terminates TLS with its own Let's Encrypt certificate. The
+  client is whom that header names, believed only from
+  `AGENTBOX_PROXY_PROTOCOL_FROM` (every private range unless narrowed); a
+  PROXY header from any other peer is ignored and the peer keyed on its own
+  address, and no forwarding header — `X-Forwarded-For`, `CF-Connecting-IP`,
+  a real-IP header — is believed from anyone. What that costs, plainly:
+  - **No CDN in front.** The record is DNS-only, so the host's address is
+    public and every visitor, a flood included, reaches it directly; nothing
+    absorbs a volumetric attack before the host's own link.
+  - **The gate's limits are the rate limiting.** Traefik's HTTP middlewares
+    cannot act on a connection it does not open, so its outer limit (60
+    requests a second per client) is gone; the gate's per-address and global
+    sign-in limits above, its lockout and its request deadlines remain, and
+    a flood of signed-out requests costs the gate a session lookup each.
+  - Same residual as above: a container with a private address on the shared
+    edge network can send Caddy a PROXY header of its own and pick its budget,
+    unless `AGENTBOX_PROXY_PROTOCOL_FROM` is narrowed to Traefik's address or
+    the edge network's subnet.
 - **Two-factor (optional).** TOTP (RFC 6238: SHA-1, six digits, 30-second
   steps, one step of clock drift either way), each code usable once. Enrolling
   gives ten single-use recovery codes of 80 bits each, stored as SHA-256
@@ -442,7 +462,9 @@ What the gate guarantees regardless:
 
 `tests/proxy/gate-bypass.sh` runs the real Caddyfiles and the real gate image,
 wired as compose wires them, against stand-ins for every sandbox port, a real
-Traefik and a stand-in Cloudflare edge, and proves the first four.
+Traefik and a stand-in Cloudflare edge, and proves the first four; for direct
+TLS, a real Traefik reads the overlay's labels and Caddy gets its certificate
+from a local ACME server through the passthrough.
 
 Residuals, stated plainly:
 

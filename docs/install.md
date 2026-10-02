@@ -25,6 +25,7 @@ prints the resolved command before it runs anything.
 | `--bind-public` | off | Allow a `--bind` address other hosts can reach, for a proxy on another machine. It serves plain HTTP and believes `X-Forwarded-For` from any private address, so firewall it to your proxy alone. |
 | `--edge-network <name>` | `edge-prod` | traefik: the external network your Traefik already watches. |
 | `--cert-resolver <name>` | `letsencrypt` | traefik: the Traefik certificate resolver for this host. |
+| `--tls <edge\|passthrough>` | `edge` | traefik: who terminates TLS — Traefik (`edge`), or this box's own Caddy with its own certificate, Traefik passing TLS through (`passthrough`, for a DNS-only record; implies `--cloudflare off`). See [direct TLS](#direct-tls-passthrough). |
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
 | `--sharing <on\|off>` | `on` | Whether you may share an app from the Preview panel (anyone with the link, or a passcode, for as long as you choose). `off` keeps every app private. `--preview path\|off`, its old name, still works. See [sharing apps](workbench.md#sharing-an-app). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
@@ -67,6 +68,68 @@ headers, is still counted as itself. If nothing fronts Traefik, pass
 `--cloudflare off`. Cloudflare's ranges ship with agentbox;
 `scripts/refresh-cloudflare-ips.sh` refreshes them if Cloudflare ever changes
 them.
+
+#### Direct TLS (passthrough)
+
+`--tls passthrough` serves the hostname with a DNS-only (grey-cloud) record
+and a publicly trusted certificate of the box's own, through the same shared
+Traefik, without touching Traefik's configuration. Use it when you want
+browsers to reach the host directly — no Cloudflare hop, so lower latency for
+the terminals and the editor — but Traefik cannot present a public
+certificate for the name (say it serves `*.example.com` with a Cloudflare
+Origin CA wildcard, which only Cloudflare trusts).
+
+```bash
+curl -fsSL .../install.sh | bash -s -- \
+  --mode traefik --domain code.example.com --edge-network edge-prod --tls passthrough
+```
+
+What changes (`docker-compose.traefik-passthrough.yml`, used in place of
+`docker-compose.traefik.yml`):
+
+- Traefik gets a **TCP** router on `websecure` with
+  ``HostSNI(`code.example.com`)`` and TLS passthrough, so it forwards the
+  connection unopened to Caddy's :443, prefixed with a PROXY protocol v2 header
+  naming the client. Only labels on agentbox's own proxy container do this.
+- Caddy terminates TLS with a Let's Encrypt certificate it gets over
+  **TLS-ALPN-01**, on the same :443 connection — nothing needs :80. The
+  certificate and the ACME account live in the `caddy_data` volume.
+- Caddy believes the PROXY header only from `AGENTBOX_PROXY_PROTOCOL_FROM`
+  (every private range by default; narrow it to the edge network's subnet,
+  e.g. `AGENTBOX_PROXY_PROTOCOL_FROM=172.18.0.0/16`, if you like), trusts no
+  forwarding header at all, and sets HSTS and `nosniff` itself.
+- Traefik's HTTP middlewares cannot act on a connection it does not open, so
+  its rate limit no longer applies; the gate's own sign-in limits are the rate
+  limiting (see [docs/security.md](security.md)). `--cloudflare` and
+  `--real-ip-header` do not apply.
+
+Requirements on the shared Traefik, none of which you change:
+
+- **No HTTP router with an exact `Host` rule for this name on `websecure`.**
+  Traefik prefers one over a TCP router for the same name. A wildcard
+  (`HostRegexp`) router is fine: the exact `HostSNI` TCP router wins over it.
+  agentbox's own edge-mode HTTP router goes away with the overlay switch.
+- **No certificate resolver using `tlsChallenge`** (unless `websecure` sets
+  `allowACMEByPass`). With one, Traefik answers every TLS-ALPN-01 challenge
+  itself, and Caddy never gets a certificate. DNS-01 and HTTP-01 resolvers are
+  fine.
+
+Cutover from edge mode, in order:
+
+1. Deploy: `./scripts/agentbox update --tls passthrough` (or re-run
+   `install.sh --tls passthrough`). This sets `AGENTBOX_TLS=passthrough` and
+   `AGENTBOX_CLOUDFLARE=off` and recreates the proxy with the TCP router.
+   While the record is still proxied, Cloudflare cannot complete the TLS
+   handshake with the box: the site is down until step 2.
+2. Set the DNS record to **DNS-only** (grey cloud), pointing at the host.
+3. Caddy asks for the certificate as it starts and retries with backoff (a
+   minute, then two, then longer). Rather than wait,
+   `./scripts/agentbox restart` once the record resolves to the host; the
+   certificate arrives within seconds. `./scripts/agentbox logs proxy` shows
+   `certificate obtained successfully`.
+
+To go back: `./scripts/agentbox update --tls edge --cloudflare on`, and set the
+record back to proxied. The edge settings (`--cert-resolver`) were kept.
 
 ### Choosing coding agents
 
@@ -251,7 +314,9 @@ it against `.env.example` after updating and copy across anything missing.
 To adopt a setting on an existing box, pass the install flag to `update`, which
 writes the matching `.env` key and re-applies it: `agentbox update --agents
 claude` rebuilds with just Claude, `agentbox update --mode traefik` swaps the
-overlay, and `--cloudflare`, `--real-ip-header`, `--isolate-host`, `--cert-resolver`,
+overlay, `agentbox update --tls passthrough` swaps it for
+[direct TLS](#direct-tls-passthrough), and `--cloudflare`, `--real-ip-header`,
+`--isolate-host`, `--cert-resolver`,
 `--edge-network`, `--cpus`, `--memory`, `--proxy-cpus` and `--proxy-memory`
 all work the same way. `update`
 checks every flag before it writes any of them.
