@@ -67,6 +67,41 @@ describe("TerminalStreams", () => {
     a1.detach();
   });
 
+  it("scrolls herdr's scrollback, reports where it stands, and returns to live", async () => {
+    const p = await newPane("scroll");
+    const v = recorder();
+    const a = streams.attach(p, v.viewer, 80, 24);
+    await waitFor(() => v.frames.length >= 1, 2_000);
+    // herdr reports scroll positions once the pane's shell is up; output
+    // printed before that never raises the event.
+    await new Promise((r) => setTimeout(r, 800));
+    a.input("for i in $(seq 1 500); do [ $i -le 400 ] && echo early-$i || echo late-$i; done\n");
+    const last = () => v.json.filter((m) => m.type === "scrolled").at(-1);
+    await waitFor(() => (last()?.max ?? 0) > 400, 5_000);
+
+    // The wheel: the frames herdr sends now show earlier lines.
+    v.frames.length = 0;
+    a.scroll("up", 150);
+    await waitFor(() => last()?.offset === 150, 3_000);
+    await waitFor(() => /early-3\d\d/.test(v.text()), 3_000);
+
+    a.scrollTo(0);
+    await waitFor(() => last()?.offset === 0, 3_000);
+
+    // Typing snaps a scrolled pane back to live.
+    a.scroll("up", 10);
+    await waitFor(() => last()?.offset === 10, 3_000);
+    a.input(" ");
+    await waitFor(() => last()?.offset === 0, 3_000);
+
+    // A late viewer learns the position at once.
+    const v2 = recorder();
+    const a2 = streams.attach(p, v2.viewer, 80, 24);
+    expect(v2.json.some((m) => m.type === "scrolled")).toBe(true);
+    a2.detach();
+    a.detach();
+  });
+
   it("replays the full screen to a late-joining second viewer", async () => {
     const v1 = recorder();
     const a1 = streams.attach(pane, v1.viewer, 80, 24);

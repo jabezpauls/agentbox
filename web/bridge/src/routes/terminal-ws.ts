@@ -68,6 +68,9 @@ function control(a: Attachment, msg: TerminalClientMessage, size: { cols: number
     case "scroll":
       if (msg.direction === "up" || msg.direction === "down") a.scroll(msg.direction, Number(msg.lines));
       break;
+    case "scrollTo":
+      a.scrollTo(Number(msg.offset));
+      break;
     case "focus":
       a.focus();
       break;

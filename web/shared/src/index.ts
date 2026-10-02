@@ -171,9 +171,20 @@ export interface ProjectCloneEvent extends ProjectCloneStart {
 export type TerminalClientMessage =
   | { type: "input"; text?: string; bytes?: string }
   | { type: "resize"; cols: number; rows: number }
+  /**
+   * The mouse wheel, in lines. herdr decides what it means for the program in
+   * the pane: its scrollback on the normal screen, a wheel report if the
+   * program took the mouse, arrow keys otherwise.
+   */
   | { type: "scroll"; direction: "up" | "down"; lines: number }
+  /** Scroll herdr's scrollback to `offset` lines above the live screen; 0 is live. */
+  | { type: "scrollTo"; offset: number }
   | { type: "focus" };
-export type TerminalServerMessage = { type: "closed"; reason: string } | { type: "size"; cols: number; rows: number };
+export type TerminalServerMessage =
+  | { type: "closed"; reason: string }
+  | { type: "size"; cols: number; rows: number }
+  /** Where herdr's scrollback stands: `offset` lines above live, of at most `max`, `rows` on screen. */
+  | { type: "scrolled"; offset: number; max: number; rows: number };
 
 /**
  * The shared form of /ws/terminal, opened without `?pane=`: one socket carries

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import readline from "node:readline";
 import type { TerminalServerMessage } from "@workbench/shared";
+import { request, subscribe } from "./socket.js";
 
 /**
  * A single browser connection watching one pane. Frames arrive as raw ANSI
@@ -22,6 +23,7 @@ export interface Attachment {
   input(text?: string, bytes?: string): void;
   resize(cols: number, rows: number): void;
   scroll(direction: "up" | "down", lines: number): void;
+  scrollTo(offset: number): void;
   focus(): void;
   detach(): void;
 }
@@ -35,6 +37,12 @@ interface HerdrFrame {
   full: boolean;
   bytes: string;
 }
+interface ScrollInfo {
+  offset_from_bottom: number;
+  max_offset_from_bottom: number;
+  viewport_rows: number;
+}
+type Scrolled = Extract<TerminalServerMessage, { type: "scrolled" }>;
 interface HerdrClosed {
   type: "terminal.closed";
   reason?: string;
@@ -97,6 +105,9 @@ class PaneStream {
   /** True once the child process has actually exited (not merely signalled). */
   private childExited = false;
   private killTimer: NodeJS.Timeout | null = null;
+  /** Where herdr's scrollback stands, from its pane.scroll_changed events. */
+  private scrolled: Scrolled | null = null;
+  private scrollSub: { close(): void } | null = null;
 
   constructor(
     private readonly paneId: string,
@@ -108,7 +119,42 @@ class PaneStream {
   ) {
     this.cols = cols;
     this.rows = rows;
+    this.watchScroll();
     this.child = this.spawn();
+  }
+
+  /**
+   * Follow herdr's scrollback position for this pane and pass it to every
+   * viewer, for the scrollbar and the way back to live. herdr reports it on a
+   * scroll, on output that grows the history, and when typing snaps the pane
+   * back to live. Without the socket the pane still scrolls, just unmarked.
+   */
+  private watchScroll(): void {
+    const socketPath = this.env.HERDR_SOCKET_PATH;
+    if (!socketPath) return;
+    subscribe(
+      socketPath,
+      [{ type: "pane.scroll_changed", pane_id: this.paneId }],
+      (e) => {
+        const info = (e.data as { scroll?: ScrollInfo } | null)?.scroll;
+        if (!info) return;
+        const m: Scrolled = { type: "scrolled", offset: info.offset_from_bottom, max: info.max_offset_from_bottom, rows: info.viewport_rows };
+        this.scrolled = m;
+        for (const v of this.viewers) v.sendJson(m);
+      },
+      () => {},
+    ).then(
+      (sub) => {
+        if (this.dead || this.released) sub.close();
+        else this.scrollSub = sub;
+      },
+      () => {},
+    );
+  }
+
+  private unwatchScroll(): void {
+    this.scrollSub?.close();
+    this.scrollSub = null;
   }
 
   /** True once the child has exited/errored or herdr reported the pane closed. */
@@ -164,6 +210,7 @@ class PaneStream {
    * any remaining viewers. Called on child exit/error and on terminal.closed.
    */
   private markDead(reason: string): void {
+    this.unwatchScroll();
     if (!this.dead) {
       this.dead = true;
       this.onDead(this.paneId, this);
@@ -214,6 +261,7 @@ class PaneStream {
   addViewer(v: Viewer, cols: number, rows: number): void {
     this.viewers.add(v);
     this.viewerSize.set(v, { cols, rows });
+    if (this.scrolled) v.sendJson(this.scrolled);
     // A late joiner whose size matches the current one, with a small replay
     // buffer, gets the last full frame plus diffs. Otherwise force a repaint by
     // resizing to its size (any resize, even to the same size, repaints).
@@ -233,6 +281,7 @@ class PaneStream {
   private release(): void {
     if (this.released) return;
     this.released = true;
+    this.unwatchScroll();
     this.write({ type: "terminal.release" });
     this.child.stdin?.end();
     setTimeout(() => this.killWithFallback(), RELEASE_GRACE_MS).unref();
@@ -241,6 +290,7 @@ class PaneStream {
   /** Kill the child immediately; used on shutdown, not on normal release. */
   destroy(): void {
     this.released = true;
+    this.unwatchScroll();
     this.child.stdin?.end();
     this.killWithFallback();
   }
@@ -270,6 +320,14 @@ class PaneStream {
 
   scroll(direction: "up" | "down", lines: number): void {
     this.write({ type: "terminal.scroll", direction, lines: Math.max(1, lines | 0), source: "wheel" });
+  }
+
+  /** Put herdr's view of the pane `offset` lines above live; 0 is back to live. */
+  scrollTo(offset: number): void {
+    const socketPath = this.env.HERDR_SOCKET_PATH;
+    if (!socketPath || !Number.isFinite(offset)) return;
+    const offset_from_bottom = Math.max(0, Math.floor(offset));
+    request(socketPath, "pane.scroll", { pane_id: this.paneId, offset_from_bottom }).catch(() => {});
   }
 
   size(): { cols: number; rows: number } {
@@ -310,6 +368,7 @@ export class TerminalStreams {
       input: (text, bytes) => s.input(text, bytes),
       resize: (c, r) => s.resizeFor(viewer, c, r),
       scroll: (direction, lines) => s.scroll(direction, lines),
+      scrollTo: (offset) => s.scrollTo(offset),
       focus: () => s.focus(viewer),
       detach: () => {
         // Idempotent per attachment: a double detach from the same viewer must
