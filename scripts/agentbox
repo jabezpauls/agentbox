@@ -6,8 +6,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 [ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
-MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
-DC=(docker compose -f docker-compose.yml -f "docker-compose.${MODE}.yml")
+# The mode's overlay; traefik with TLS passed through to Caddy has its own.
+overlay() {
+    local mode tls
+    mode="$(grep -m1 '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
+    tls="$(grep -m1 '^AGENTBOX_TLS=' .env | cut -d= -f2- || true)"
+    if [ "$mode" = traefik ] && [ "$tls" = passthrough ]; then echo traefik-passthrough; else echo "$mode"; fi
+}
+DC=(docker compose -f docker-compose.yml -f "docker-compose.$(overlay).yml")
 
 # Run the gate's admin command. The running gate owns its store, so the command
 # goes to it (it waits for a gate that is still starting); with the gate
@@ -150,6 +156,12 @@ case "${1:-help}" in
                     shift 2 ;;
                 --edge-network)   PENDING+=("AGENTBOX_EDGE_NETWORK=$val"); shift 2 ;;
                 --cert-resolver)  PENDING+=("AGENTBOX_CERT_RESOLVER=$val"); shift 2 ;;
+                --tls)
+                    case "$val" in
+                        edge|passthrough) ;;
+                        *) echo "--tls must be edge or passthrough" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_TLS=$val"); shift 2 ;;
                 --cpus)           PENDING+=("AGENTBOX_CPUS=$val"); shift 2 ;;
                 --memory)         PENDING+=("AGENTBOX_MEMORY=$val"); shift 2 ;;
                 --proxy-cpus)     PENDING+=("AGENTBOX_PROXY_CPUS=$val"); shift 2 ;;
@@ -199,14 +211,29 @@ case "${1:-help}" in
             fi
             unset_env AGENTBOX_PREVIEW_MODE
         fi
+        # Passthrough serves a DNS-only record with nothing in front of Caddy
+        # reading the request (the overlay ignores both settings; .env should
+        # say so too).
+        if [ "$(grep -m1 '^AGENTBOX_TLS=' .env | cut -d= -f2- || true)" = passthrough ]; then
+            if [ "$(grep -m1 '^AGENTBOX_MODE=' .env | cut -d= -f2-)" != traefik ]; then
+                echo "--tls passthrough is for traefik mode" >&2; exit 1
+            fi
+            if grep -q '^AGENTBOX_CLOUDFLARE=on$' .env; then
+                echo "note: --tls passthrough serves a DNS-only record; setting AGENTBOX_CLOUDFLARE=off" >&2
+                set_env AGENTBOX_CLOUDFLARE off
+            fi
+            if grep -q '^AGENTBOX_REAL_IP_HEADER=.' .env; then
+                echo "note: --tls passthrough: no proxy in front of Caddy sets a header; clearing AGENTBOX_REAL_IP_HEADER" >&2
+                set_env AGENTBOX_REAL_IP_HEADER ""
+            fi
+        fi
         # A header set by hand is checked before anything restarts.
         real_ip_header_problem "$(grep -m1 '^AGENTBOX_REAL_IP_HEADER=' .env | cut -d= -f2- || true)" && exit 1
         git pull --ff-only
         # The version the rebuilt images will report (see install.sh).
         set_env AGENTBOX_VERSION "$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
         # Recompute the overlay in case --mode just changed.
-        MODE="$(grep '^AGENTBOX_MODE=' .env | cut -d= -f2-)"
-        OVERLAYS=(-f docker-compose.yml -f "docker-compose.${MODE}.yml")
+        OVERLAYS=(-f docker-compose.yml -f "docker-compose.$(overlay).yml")
         # Builds the gate as well as the sandbox. On a box updating from before
         # the gate existed, the gate's store is seeded from the password hash
         # already in .env, so the same password signs in on the new page.
@@ -317,7 +344,7 @@ agentbox <command>
   workbench             follow the Workbench bridge's logs
   update [flags]        pull, rebuild, restart; accepts the install flags
                         (--agents, --sharing, --cloudflare, --real-ip-header, --mode,
-                        --cert-resolver, --edge-network, --cpus, --memory, --proxy-cpus,
+                        --cert-resolver, --tls, --edge-network, --cpus, --memory, --proxy-cpus,
                         --proxy-memory, --isolate-host)
   passwd [new]          set the sign-in password (prompted, or generated);
                         signs every session out

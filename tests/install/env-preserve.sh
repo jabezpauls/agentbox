@@ -394,5 +394,34 @@ else
     fail "--bind-public: $(cat "$DIR/err")"
 fi
 
+echo "--tls: who terminates TLS in traefik mode"
+seed
+run --isolate-host
+expect AGENTBOX_TLS edge "an install that never said is edge, as before"
+seed
+echo "AGENTBOX_CLOUDFLARE=on" >> "$DIR/.env"
+run --tls passthrough 2>/dev/null
+expect AGENTBOX_TLS passthrough "--tls passthrough is written"
+expect AGENTBOX_CLOUDFLARE off "and Cloudflare trust carried over from edge mode is turned off"
+expect AGENTBOX_REAL_IP_HEADER "" "and a carried-over real-IP header is cleared"
+expect AGENTBOX_CERT_RESOLVER cloudflare "and the edge settings are kept for a way back"
+run --isolate-host
+expect AGENTBOX_TLS passthrough "a re-run keeps passthrough"
+for args in "--tls passthrough --cloudflare on" "--tls passthrough --real-ip-header X-Real-IP" \
+    "--tls passthrough --mode standalone --domain x.example.com" "--tls both"; do
+    seed
+    # shellcheck disable=SC2086  # each is several words
+    if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes $args >/dev/null 2>&1; then
+        fail "$args was accepted"
+    else
+        pass "$args is refused"
+    fi
+done
+seed
+echo "AGENTBOX_CLOUDFLARE=on" >> "$DIR/.env"
+(cd / && "$DIR/scripts/agentbox" update --tls passthrough) >/dev/null 2>&1 || true
+expect AGENTBOX_TLS passthrough "update --tls passthrough is written"
+expect AGENTBOX_CLOUDFLARE off "and turns Cloudflare trust off"
+
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

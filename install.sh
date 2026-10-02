@@ -27,6 +27,9 @@ CLOUDFLARE=""
 REAL_IP_HEADER=""
 EDGE_NETWORK="edge-prod"
 CERT_RESOLVER="letsencrypt"
+# traefik: who terminates TLS. edge = Traefik (an HTTP router, its certificate);
+# passthrough = Caddy, with its own certificate, Traefik passing TLS through.
+TLS="edge"
 PROXY_CPUS="1"
 PROXY_MEMORY="256m"
 AGENTS="claude,codex"
@@ -58,6 +61,11 @@ Run with no options for an interactive walk-through.
                         (see docs/install.md before using it)
   --edge-network <name> traefik: external network Traefik watches (default edge-prod)
   --cert-resolver <n>   traefik: Traefik cert resolver (default letsencrypt)
+  --tls <edge|passthrough>
+                        traefik: who terminates TLS. edge (default): Traefik,
+                        with its resolver's certificate. passthrough: Caddy,
+                        with its own Let's Encrypt certificate, for a DNS-only
+                        record (implies --cloudflare off; see docs/install.md)
   --user <name>         Login username (default admin)
   --password <pass>     Login password (default: generated and printed once);
                         on an existing install, replaces the current one
@@ -104,6 +112,7 @@ while [ $# -gt 0 ]; do
         --bind-public)   flag BIND_PUBLIC on; shift ;;
         --edge-network)  flag EDGE_NETWORK "${2:-}"; shift 2 ;;
         --cert-resolver) flag CERT_RESOLVER "${2:-}"; shift 2 ;;
+        --tls)           flag TLS "${2:-}"; shift 2 ;;
         --user)          flag USERNAME "${2:-}"; shift 2 ;;
         --password)      flag PASSWORD "${2:-}"; shift 2 ;;
         --preview-domain)
@@ -144,7 +153,7 @@ done
 ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND AGENTBOX_BIND_PUBLIC:BIND_PUBLIC
-AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER
+AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER AGENTBOX_TLS:TLS
 AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
@@ -189,7 +198,7 @@ if [ -z "$CLOUDFLARE" ]; then
         esac
     else
         CF_FROM_MODE="true"
-        if [ "$MODE" = "traefik" ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
+        if [ "$MODE" = "traefik" ] && [ "$TLS" != passthrough ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
     fi
 fi
 # That older key also named the header Traefik's rate limit keyed on. Caddy now
@@ -239,22 +248,27 @@ if [ "$INTERACTIVE" = "true" ]; then
     [ "$MODE" = "behind-proxy" ] && ask "Loopback listen address" "$BIND" BIND
     if [ "$MODE" = "traefik" ]; then
         ask "External Traefik network" "$EDGE_NETWORK" EDGE_NETWORK
-        ask "Traefik cert resolver" "$CERT_RESOLVER" CERT_RESOLVER
+        ask "Who terminates TLS: Traefik, or this box behind a DNS-only record? (edge / passthrough)" "$TLS" TLS
+        [ "$TLS" = passthrough ] || ask "Traefik cert resolver" "$CERT_RESOLVER" CERT_RESOLVER
     fi
     ask "Login username" "$USERNAME" USERNAME
     ask "Coding agents to build in (comma-separated: claude,codex)" "$AGENTS" AGENTS
     # The mode may have just changed; so may its default.
     if [ "$CF_FROM_MODE" = "true" ]; then
-        if [ "$MODE" = "traefik" ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
+        if [ "$MODE" = "traefik" ] && [ "$TLS" != passthrough ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
     fi
-    ask "Is the hostname proxied through Cloudflare? (on / off)" "$CLOUDFLARE" CLOUDFLARE
+    if [ "$MODE" = "traefik" ] && [ "$TLS" = passthrough ]; then
+        CLOUDFLARE="off"
+    else
+        ask "Is the hostname proxied through Cloudflare? (on / off)" "$CLOUDFLARE" CLOUDFLARE
+    fi
     ask_yn "Firewall the sandbox off the host (shared host only)?" n ISOLATE_HOST
 
     # Echo the equivalent one-liner so the choices are reproducible and auditable.
     RESOLVED="install.sh --mode $MODE"
     [ -n "$DOMAIN" ] && RESOLVED="$RESOLVED --domain $DOMAIN"
     [ "$MODE" = "behind-proxy" ] && RESOLVED="$RESOLVED --bind $BIND"
-    [ "$MODE" = "traefik" ] && RESOLVED="$RESOLVED --edge-network $EDGE_NETWORK --cert-resolver $CERT_RESOLVER"
+    [ "$MODE" = "traefik" ] && RESOLVED="$RESOLVED --edge-network $EDGE_NETWORK --cert-resolver $CERT_RESOLVER --tls $TLS"
     RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS --cloudflare $CLOUDFLARE"
     [ "$ISOLATE_HOST" = "true" ] && RESOLVED="$RESOLVED --isolate-host"
     printf '\n'
@@ -274,6 +288,27 @@ case "$CLOUDFLARE" in
     on|off) ;;
     *) die "--cloudflare must be on or off" ;;
 esac
+case "$TLS" in
+    edge|passthrough) ;;
+    *) die "--tls must be edge or passthrough" ;;
+esac
+# Passthrough means nothing in front of Caddy reads the request: no Cloudflare
+# proxy (it could not reach Caddy's certificate) and no proxy header to read.
+# What .env carried over from edge mode gives way; what was asked for now is
+# refused.
+if [ "$TLS" = passthrough ]; then
+    [ "$MODE" = traefik ] || die "--tls passthrough is for traefik mode (standalone already terminates TLS itself)"
+    if [ "$CLOUDFLARE" = on ]; then
+        case "$EXPLICIT" in *" CLOUDFLARE "*) die "--tls passthrough serves a DNS-only record: it cannot be behind Cloudflare's proxy (--cloudflare off)" ;; esac
+        warn "--tls passthrough: the record must be DNS-only, so AGENTBOX_CLOUDFLARE becomes off"
+        CLOUDFLARE="off"
+    fi
+    if [ -n "$REAL_IP_HEADER" ]; then
+        case "$EXPLICIT" in *" REAL_IP_HEADER "*) die "--tls passthrough: no proxy reads the request in front of Caddy, so --real-ip-header cannot apply" ;; esac
+        warn "--tls passthrough: no proxy sets $REAL_IP_HEADER any more, so AGENTBOX_REAL_IP_HEADER is cleared"
+        REAL_IP_HEADER=""
+    fi
+fi
 # Caddy reads the header as well as X-Forwarded-For (and, with --cloudflare on,
 # CF-Connecting-IP); naming one of those again would stop it starting, and it
 # is spliced into Caddy's config, so it must be a bare header name.
@@ -427,6 +462,7 @@ AGENTBOX_BIND=$BIND
 AGENTBOX_BIND_PUBLIC=$BIND_PUBLIC
 AGENTBOX_EDGE_NETWORK=$EDGE_NETWORK
 AGENTBOX_CERT_RESOLVER=$CERT_RESOLVER
+AGENTBOX_TLS=$TLS
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_SHARING=$SHARING
@@ -445,7 +481,10 @@ mv "$NEW_ENV" .env
 [ -n "$ENV_ONLY" ] && { log "Wrote .env (env-only run; nothing else done)"; exit 0; }
 
 # --- Launch -----------------------------------------------------------------
-COMPOSE=(-f docker-compose.yml -f "docker-compose.$MODE.yml")
+# Traefik with TLS passed through has an overlay of its own.
+OVERLAY="$MODE"
+[ "$MODE" = traefik ] && [ "$TLS" = passthrough ] && OVERLAY="traefik-passthrough"
+COMPOSE=(-f docker-compose.yml -f "docker-compose.$OVERLAY.yml")
 
 log "Building the sandbox and gate images (first run takes a few minutes)"
 docker compose "${COMPOSE[@]}" build
