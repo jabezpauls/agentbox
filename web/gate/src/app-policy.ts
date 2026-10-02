@@ -14,6 +14,13 @@ import { setsOurCookie } from "./cookies.js";
  */
 export const APP_SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads";
 
+/**
+ * No app gets the microphone, whatever it asks for: the Workbench's dictation
+ * is the app's own page, and an app is someone else's code. Sent after the
+ * app's own `Permissions-Policy`, if any — a repeated key's last value wins.
+ */
+export const APP_PERMISSIONS = "microphone=()";
+
 /** Headers an app may not send the browser as they stand. */
 const DROPPED = new Set(["clear-site-data", "strict-transport-security", "service-worker-allowed"]);
 /** The gate answers CORS for the app's own origin; an app's own answer for it would contradict it. */
@@ -103,6 +110,7 @@ export function appResponseHeaders(pairs: Array<[string, string]>, ctx: PolicyCo
     out.push([name, value]);
   }
   out.push(["Content-Security-Policy", APP_SANDBOX]);
+  out.push(["Permissions-Policy", APP_PERMISSIONS]);
   if (nullOrigin) {
     // The app's own page has an opaque origin, which the browser names
     // `null`: answered as a credentialed CORS request, so module scripts,

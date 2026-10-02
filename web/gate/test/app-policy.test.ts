@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  APP_PERMISSIONS,
   APP_SANDBOX,
   appOriginAllowed,
   appResponseHeaders,
@@ -62,6 +63,12 @@ describe("the response policy", () => {
     expect(out.filter(([n]) => n === "Set-Cookie")).toEqual([["Set-Cookie", `app=1; Path=${P}/; Secure; SameSite=None`]]);
     // The app's own policy stays, and the sandbox is added beside it.
     expect(out.filter(([n]) => n.toLowerCase() === "content-security-policy").map(([, v]) => v)).toEqual(["default-src 'self'", APP_SANDBOX]);
+  });
+
+  it("never lets an app have the microphone, whatever it asks for", () => {
+    const out = appResponseHeaders([["Permissions-Policy", "microphone=*, geolocation=()"]], ctx);
+    // Its own policy stays; ours comes last, and a repeated key's last value wins.
+    expect(out.filter(([n]) => n.toLowerCase() === "permissions-policy").map(([, v]) => v)).toEqual(["microphone=*, geolocation=()", APP_PERMISSIONS]);
   });
 
   it("answers CORS for the app's own opaque origin, and only that", () => {

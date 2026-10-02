@@ -75,6 +75,8 @@ describe("static route framing headers", () => {
     const res = await app.inject({ method: "GET", url: "/files/some/client/route" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-security-policy"]).toBe(APP_CSP);
+    // Dictation needs the microphone, for this origin alone.
+    expect(res.headers["permissions-policy"]).toBe("microphone=(self)");
     expect(res.headers["x-frame-options"]).toBe("SAMEORIGIN");
   });
 });

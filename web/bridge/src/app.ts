@@ -76,8 +76,16 @@ export interface AppDeps {
  */
 export const APP_CSP = "frame-ancestors 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'";
 
+/**
+ * The microphone is the page's own, for dictation in the composers, and no
+ * other origin's: an app in a frame (opaque, under its sandbox) never has it,
+ * and the gate denies it to `/a/` outright as well.
+ */
+export const APP_PERMISSIONS = "microphone=(self)";
+
 const FRAME_GUARD: Record<string, string> = {
   "content-security-policy": APP_CSP,
+  "permissions-policy": APP_PERMISSIONS,
   "x-frame-options": "SAMEORIGIN",
 };
 
