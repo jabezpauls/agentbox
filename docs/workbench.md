@@ -129,6 +129,26 @@ and neither changes what the program receives.
 **Settings → Terminal** holds the defaults; each pane's `⋯` menu turns either
 one on or off for that pane.
 
+**Scrolling.** The mouse wheel or trackpad over a pane goes to herdr, which
+treats it as its own TUI does: on a shell or anything else on the normal
+screen it scrolls the pane's history (a marker at the right edge shows where
+you are, and **Jump to live** — or any key you type — returns to the live
+screen); a full-screen program that takes the mouse, such as Claude Code or
+`vim` with `mouse=a`, gets the wheel itself; one that does not, such as
+`less`, gets arrow keys. `herdr --remote` from your desktop (`agentbox
+attach`) behaves the same way.
+
+Claude Code in the box always starts in its [fullscreen
+renderer](https://code.claude.com/docs/en/fullscreen): the image sets
+`"tui": "fullscreen"` in `/etc/claude-code/managed-settings.json`. That
+renderer takes the mouse, so the wheel scrolls the conversation inside Claude
+Code — in the Workbench, the TUI at `/terminal` and a desktop herdr alike —
+and `PgUp`/`PgDn`, `Ctrl+Home`/`Ctrl+End` work too. Left to itself, Claude
+Code picks the renderer by when the account first used it, and the classic
+one fills herdr's scrollback with its redraws. A session started before the
+image had this setting keeps its renderer until it restarts. For the classic
+renderer anyway, start a session with `CLAUDE_CODE_NO_FLICKER=0 claude`.
+
 **Dictation.** The compose bar and the agent composer have a microphone:
 click it, or hold `⌃⌥M` (tap it to start and stop). Words appear as they are
 heard and land at the cursor once settled; nothing is sent until you press
