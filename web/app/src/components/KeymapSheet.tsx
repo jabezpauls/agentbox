@@ -82,6 +82,14 @@ export function KeymapSheet() {
     { keys: ["A–Z"], label: "Jump to a name" },
     { keys: ["← →"], label: "Previous or next file, in quick look" },
   ];
+  const compose: Row[] = [
+    { keys: ["↵"], label: "Send the line (and Enter)" },
+    { keys: ["⇧↵"], label: "New line" },
+    { keys: ["↑", "↓"], label: "Earlier lines, from the first or last line" },
+    { keys: ["Tab"], label: "Send what is typed, then Tab (completion)" },
+    { keys: ["Esc", "or", "⌃C", "or", "⌃D"], label: "Straight to the program (⌃D when empty)" },
+    { keys: [mac ? "⌃⌥M" : "Ctrl+Alt+M"], label: "Dictate: hold to talk, or tap to start and stop" },
+  ];
 
   return (
     <div className="scrim" onMouseDown={close}>
@@ -113,6 +121,7 @@ export function KeymapSheet() {
               <Group title="Where nothing is being typed" rows={letters} />
               <Group title="Files" rows={files} />
             </div>
+            <Group title="Compose bars" rows={compose} />
           </div>
           <h3 className="keymap-part">
             The Workbench — press <kbd className="kbd">⌃B</kbd>, then a key. Twice sends a literal ⌃B.
