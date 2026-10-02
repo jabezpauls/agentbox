@@ -6,6 +6,8 @@ import { call } from "../api/call.ts";
 import { rectsToPercent, splitHandles, splitPath } from "../layout/scale.ts";
 import { TerminalCell } from "../terminal/TerminalCell.tsx";
 import { PaneHeader } from "./PaneHeader.tsx";
+import { PaneCompose } from "./PaneCompose.tsx";
+import { paneMode, useTermModes } from "../terminal/modes.ts";
 import { SplitHandle } from "./SplitHandle.tsx";
 
 interface Props {
@@ -26,6 +28,7 @@ export function PaneGrid({ resolved }: Props) {
   const focusedPaneId = useApp((s) => s.session.focusedPaneId);
   const focusPane = useApp((s) => s.focusPane);
   const prefixArmed = useApp((s) => s.ui.prefixArmed);
+  const modes = useTermModes();
 
   if (!layout || layout.panes.length === 0) {
     return (
@@ -74,6 +77,7 @@ export function PaneGrid({ resolved }: Props) {
               <div className="pane-body">
                 <TerminalCell paneId={lp.pane_id} resolved={resolved} />
               </div>
+              {paneMode(modes, lp.pane_id, "compose") && <PaneCompose paneId={lp.pane_id} />}
             </div>
           </div>
         );

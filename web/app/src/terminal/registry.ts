@@ -9,6 +9,12 @@ export interface TerminalHandle {
   focus(): void;
   /** The visible buffer as plain text, one line per row. */
   text(): string;
+  /** Send bytes to the program as they are (a quick key from the compose bar). */
+  send(data: string): void;
+  /** Send a composed line, and Enter, in one write. */
+  submit(text: string): void;
+  /** An arrow key, in the form the program asked for (normal or application cursor keys). */
+  arrow(dir: "A" | "B" | "C" | "D"): void;
 }
 
 const terminals = new Map<string, TerminalHandle>();
@@ -20,13 +26,33 @@ export function registerTerminal(paneId: string, handle: TerminalHandle): () => 
   };
 }
 
-/** Focus a pane's terminal. Returns false when that pane has no live cell. */
+const composers = new Map<string, () => void>();
+
+/** A pane's compose bar is up: keyboard focus for the pane goes to it. */
+export function registerCompose(paneId: string, focus: () => void): () => void {
+  composers.set(paneId, focus);
+  return () => {
+    if (composers.get(paneId) === focus) composers.delete(paneId);
+  };
+}
+
+/**
+ * Focus a pane's terminal — its compose bar, when it has one up. Returns
+ * false when that pane has no live cell.
+ */
 export function focusTerminal(paneId: string | null): boolean {
   if (!paneId) return false;
   const handle = terminals.get(paneId);
   if (!handle) return false;
-  handle.focus();
+  const compose = composers.get(paneId);
+  if (compose) compose();
+  else handle.focus();
   return true;
+}
+
+/** The live terminal of a pane, for the compose bar. */
+export function terminalHandle(paneId: string): TerminalHandle | null {
+  return terminals.get(paneId) ?? null;
 }
 
 /** What a pane's terminal currently shows, or null when it has no live cell. */

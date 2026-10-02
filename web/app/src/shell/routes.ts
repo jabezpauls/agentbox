@@ -20,8 +20,8 @@
  */
 
 export type SurfaceId = "home" | "workbench" | "editor" | "files" | "apps" | "system" | "settings";
-export type SettingsSection = "account" | "cli" | "sharing" | "appearance" | "about";
-export const SETTINGS_SECTIONS: SettingsSection[] = ["account", "cli", "sharing", "appearance", "about"];
+export type SettingsSection = "account" | "cli" | "sharing" | "appearance" | "terminal" | "about";
+export const SETTINGS_SECTIONS: SettingsSection[] = ["account", "cli", "sharing", "appearance", "terminal", "about"];
 
 export type Route =
   | { surface: "home" }

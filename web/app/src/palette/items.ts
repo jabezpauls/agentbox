@@ -80,6 +80,7 @@ const SETTINGS: { id: SettingsSection; label: string }[] = [
   { id: "cli", label: "Settings: devices and the CLI" },
   { id: "sharing", label: "Settings: sharing" },
   { id: "appearance", label: "Settings: appearance" },
+  { id: "terminal", label: "Settings: terminal typing and dictation" },
   { id: "about", label: "Settings: about" },
 ];
 

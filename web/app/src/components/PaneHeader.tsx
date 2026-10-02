@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Columns2, MoreHorizontal, Pencil, Rows2, Maximize2, X } from "lucide-react";
+import { Check, Columns2, MoreHorizontal, Pencil, Rows2, Maximize2, X } from "lucide-react";
 import type { PaneInfo } from "@workbench/shared";
 import { useApp } from "../store/app.ts";
 import { call } from "../api/call.ts";
 import { paneTitle } from "../store/session.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { paneMode, useTermModes, type ModeKey } from "../terminal/modes.ts";
 
 interface Props {
   pane: PaneInfo;
@@ -24,6 +25,8 @@ function basename(path: string): string {
 export function PaneHeader({ pane }: Props) {
   const agent = useApp((s) => s.session.agents[pane.pane_id]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const compose = useTermModes((s) => paneMode(s, pane.pane_id, "compose"));
+  const predict = useTermModes((s) => paneMode(s, pane.pane_id, "predict"));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -99,6 +102,10 @@ export function PaneHeader({ pane }: Props) {
     void call("pane.close", { pane_id: pane.pane_id });
     setMenuOpen(false);
   };
+  const toggle = (key: ModeKey, on: boolean) => {
+    useTermModes.getState().setPane(pane.pane_id, key, !on);
+    setMenuOpen(false);
+  };
   const startRename = () => {
     setMenuOpen(false);
     setDraft(pane.label ?? title);
@@ -160,6 +167,12 @@ export function PaneHeader({ pane }: Props) {
           </button>
           <button className="ctx-item" role="menuitem" onClick={zoom}>
             <Maximize2 size={14} /> Zoom
+          </button>
+          <button className="ctx-item" role="menuitemcheckbox" aria-checked={compose} onClick={() => toggle("compose", compose)}>
+            <Check size={14} style={{ opacity: compose ? 1 : 0 }} /> Compose bar
+          </button>
+          <button className="ctx-item" role="menuitemcheckbox" aria-checked={predict} onClick={() => toggle("predict", predict)}>
+            <Check size={14} style={{ opacity: predict ? 1 : 0 }} /> Predictive echo
           </button>
           <button className="ctx-item" role="menuitem" onClick={startRename}>
             <Pencil size={14} /> Rename

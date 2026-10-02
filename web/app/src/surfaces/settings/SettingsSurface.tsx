@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useEditorFollowsTheme } from "../../theme/editorSync.ts";
 import { useCopyOnSelect } from "../../terminal/clipboard.ts";
-import { BookOpen, Info, Keyboard, KeyRound, Laptop, Monitor, Moon, Palette, Share2, Sun, type LucideIcon } from "lucide-react";
+import { BookOpen, Info, Keyboard, KeyRound, Laptop, Monitor, Moon, Palette, Share2, SquareTerminal, Sun, type LucideIcon } from "lucide-react";
 import { useApp } from "../../store/app.ts";
 import type { Theme } from "../../theme/useTheme.ts";
 import { useSystem } from "../../system/model.ts";
@@ -13,12 +13,14 @@ import { gateApi } from "../../settings/gate.ts";
 import { AccountSection } from "./AccountSection.tsx";
 import { DevicesSection } from "./DevicesSection.tsx";
 import { SharingSection } from "./SharingSection.tsx";
+import { TerminalSection } from "./TerminalSection.tsx";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon; hint: string }[] = [
   { id: "account", label: "Account", icon: KeyRound, hint: "Password, two-factor, sessions" },
   { id: "cli", label: "Devices & CLI", icon: Laptop, hint: "The agentbox command, device sign-ins" },
   { id: "sharing", label: "Sharing", icon: Share2, hint: "Public apps, default expiry" },
   { id: "appearance", label: "Appearance", icon: Palette, hint: "Light, dark or the system's" },
+  { id: "terminal", label: "Terminal", icon: SquareTerminal, hint: "Predictive echo, the compose bar, dictation" },
   { id: "about", label: "About", icon: Info, hint: "Versions and help" },
 ];
 
@@ -234,6 +236,7 @@ export function SettingsSurface() {
           {section === "cli" && <DevicesSection />}
           {section === "sharing" && <SharingSection />}
           {section === "appearance" && <AppearanceSection />}
+          {section === "terminal" && <TerminalSection />}
           {section === "about" && <AboutSection />}
         </div>
       </div>

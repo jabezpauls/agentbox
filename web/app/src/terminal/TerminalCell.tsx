@@ -14,7 +14,10 @@ import { actionCtx } from "../api/call.ts";
 import { comboFromEvent } from "../keys/combo.ts";
 import { runAction } from "../keys/actions.ts";
 import { machine, reflectHud } from "../keys/machine.ts";
-import { TerminalSocket, type ConnState } from "./stream.ts";
+import { TerminalSocket, terminalRtt, type ConnState } from "./stream.ts";
+import { Predictor } from "./predict.ts";
+import { PREDICT_MIN_RTT_MS, PredictionLayer, xtermScreen } from "./predictLayer.ts";
+import { paneMode, useAltScreen, useTermModes } from "./modes.ts";
 import { terminalTheme } from "./themes.ts";
 import { registerTerminal } from "./registry.ts";
 import { handleChord } from "../shell/actions.ts";
@@ -79,8 +82,57 @@ export function TerminalCell({ paneId, resolved }: Props) {
       return true;
     });
 
+    // Predictive echo: guesses painted over the screen until the echo lands.
+    const predictor = new Predictor(xtermScreen(term), { timeoutMs: () => Math.max(1000, 3 * (terminalRtt() ?? 0)) });
+    const layer = new PredictionLayer(term);
+    let tickTimer: ReturnType<typeof setTimeout> | null = null;
+    const redraw = () => layer.render(predictor.overlay());
+    const predicting = () => paneMode(useTermModes.getState(), paneId, "predict") && (terminalRtt() ?? 0) > PREDICT_MIN_RTT_MS;
+    const guess = (d: string) => {
+      if (!predicting()) {
+        if (predictor.pending) predictor.reset();
+      } else {
+        predictor.input(d);
+        if (tickTimer) clearTimeout(tickTimer);
+        tickTimer = setTimeout(() => {
+          predictor.tick();
+          redraw();
+        }, 1000 + 3 * (terminalRtt() ?? 0) + 20);
+      }
+      redraw();
+    };
+    const forget = () => {
+      predictor.reset();
+      redraw();
+    };
+    const unsubModes = useTermModes.subscribe(() => {
+      if (!paneMode(useTermModes.getState(), paneId, "predict")) forget();
+    });
+    const altSub = term.buffer.onBufferChange((b) => {
+      useAltScreen.setState({ [paneId]: b.type === "alternate" });
+      forget();
+    });
+
     const unregister = registerTerminal(paneId, {
       focus: () => term.focus(),
+      send: (data) => {
+        // Not through xterm's onData: no guess is made for what the bar sends.
+        forget();
+        socketRef.current?.input(data);
+      },
+      submit: (text) => {
+        forget();
+        // Several lines go as one paste when the program asked for bracketed
+        // paste, so a shell does not run them one by one; then Enter.
+        const body = text.replace(/\r?\n/g, "\r");
+        const multi = body.includes("\r");
+        const wrapped = multi && term.modes.bracketedPasteMode ? `\x1b[200~${body}\x1b[201~` : body;
+        socketRef.current?.input(`${wrapped}\r`);
+      },
+      arrow: (dir) => {
+        forget();
+        socketRef.current?.input(`${term.modes.applicationCursorKeysMode ? "\x1bO" : "\x1b["}${dir}`);
+      },
       text: () => {
         const buf = term.buffer.active;
         const lines: string[] = [];
@@ -127,7 +179,13 @@ export function TerminalCell({ paneId, resolved }: Props) {
       }
       socket = new TerminalSocket(paneId, { cols: term.cols, rows: term.rows });
       socketRef.current = socket;
-      socket.onData((bytes) => term.write(bytes));
+      socket.onData((bytes) =>
+        term.write(bytes, () => {
+          if (!predictor.pending) return;
+          predictor.update();
+          redraw();
+        }),
+      );
       socket.onState(setConn);
       socket.onGone(setGone);
       // Another viewer resized or focused this pane: herdr's geometry is
@@ -179,11 +237,18 @@ export function TerminalCell({ paneId, resolved }: Props) {
         // prefix layer truly swallows the key.
         e.preventDefault();
         e.stopPropagation();
-        if (r.passthrough) socket?.input(r.passthrough);
+        if (r.passthrough) {
+          forget();
+          socket?.input(r.passthrough);
+        }
         if (r.action) runAction(r.action, actionCtx());
         return false;
       });
-      term.onData((d) => socket?.input(d)); // real input and pastes
+      term.onData((d) => {
+        // Real input and pastes go out first and untouched; the guess is only paint.
+        socket?.input(d);
+        guess(d);
+      });
 
       term.textarea?.addEventListener("focus", onFocus);
       host.addEventListener("wheel", onWheel, { passive: false });
@@ -197,6 +262,7 @@ export function TerminalCell({ paneId, resolved }: Props) {
           return;
         }
         socket?.resize(term.cols, term.rows);
+        forget();
       });
       ro.observe(host);
     });
@@ -205,6 +271,11 @@ export function TerminalCell({ paneId, resolved }: Props) {
       disposed = true;
       cancelAnimationFrame(raf);
       unregister();
+      if (tickTimer) clearTimeout(tickTimer);
+      unsubModes();
+      altSub.dispose();
+      layer.dispose();
+      useAltScreen.setState({ [paneId]: false });
       ro?.disconnect();
       host.removeEventListener("wheel", onWheel);
       host.removeEventListener("mouseup", onMouseUp);
