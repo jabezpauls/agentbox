@@ -186,9 +186,11 @@ export type TerminalServerMessage = { type: "closed"; reason: string } | { type:
 export type TerminalMuxClientMessage = (
   | { type: "attach"; pane: string; cols: number; rows: number }
   | { type: "detach" }
+  /** Asks for a `pong` carrying `t` back at once: the client's round-trip clock. Any `ch`. */
+  | { type: "ping"; t: number }
   | TerminalClientMessage
 ) & { ch: number };
-export type TerminalMuxServerMessage = TerminalServerMessage & { ch: number };
+export type TerminalMuxServerMessage = (TerminalServerMessage | { type: "pong"; t: number }) & { ch: number };
 
 /** Review: an artifact an agent published, and the comments a human anchored to it. */
 export type ReviewStatus = "open" | "ended";

@@ -7,6 +7,7 @@ import {
   backoffDelay,
   prewarmTerminalSocket,
   resetTerminalSocketForTests,
+  terminalRtt,
 } from "./stream.ts";
 
 describe("the shared terminal socket", () => {
@@ -91,13 +92,25 @@ describe("the shared terminal socket", () => {
     b.close();
   });
 
+  it("measures its round trip from ping to pong", () => {
+    const t = new TerminalSocket("w5:p1", { cols: 80, rows: 24 });
+    const ws = FakeWS.made[0]!;
+    expect(terminalRtt()).toBeNull();
+    ws.open();
+    const ping = ws.sent.find((m) => m.type === "ping")!;
+    expect(ping.ch).toBe(0);
+    ws.json({ ch: 0, type: "pong", t: (ping.t as number) - 120 });
+    expect(terminalRtt()).toBeGreaterThanOrEqual(120);
+    t.close();
+  });
+
   it("holds input until the socket opens, attaching first", () => {
     const t = new TerminalSocket("w2:p1", { cols: 80, rows: 24 });
     t.input("x");
     const ws = FakeWS.made[0]!;
     expect(ws.sent).toEqual([]);
     ws.open();
-    expect(ws.sent.map((m) => m.type)).toEqual(["attach", "input"]);
+    expect(ws.sent.map((m) => m.type)).toEqual(["attach", "input", "ping"]);
     t.close();
   });
 

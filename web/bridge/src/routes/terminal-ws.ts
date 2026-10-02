@@ -148,6 +148,9 @@ function shared(socket: WebSocket, streams: TerminalStreams): void {
     if (!msg) return;
     const ch = Number(msg.ch);
     if (!Number.isInteger(ch) || ch < 0 || ch > 0xffff) return;
+    // The browser's own round-trip clock (WebSocket pings are invisible to
+    // page script): answered at once, whatever the channel.
+    if (msg.type === "ping") return sendJson(socket, { type: "pong", ch, t: Number(msg.t) || 0 });
     if (msg.type === "attach") return attach(ch, msg.pane, msg.cols, msg.rows);
     const c = channels.get(ch);
     if (!c) return;

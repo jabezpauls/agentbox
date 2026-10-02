@@ -110,6 +110,8 @@ describe("terminal ws route", () => {
       ws.once("error", reject);
     });
     const send = (m: object) => ws.send(JSON.stringify(m));
+    // A ping is answered at once, on any channel, attached or not.
+    send({ ch: 0, type: "ping", t: 1234.5 });
     // Before an attach, a channel is nothing: its input goes nowhere.
     send({ ch: 1, type: "input", text: "echo NOPE\n" });
     send({ ch: 1, type: "attach", pane: a, cols: 80, rows: 24 });
@@ -126,6 +128,7 @@ describe("terminal ws route", () => {
     await until(() => (out.get(1) ?? "").includes("MUX_A_42") && (out.get(300) ?? "").includes("MUX_B_42"), "both echoes");
     expect(out.get(1)).not.toContain("MUX_B_42");
     expect(out.get(300)).not.toContain("MUX_A_42");
+    expect(notices).toContainEqual({ type: "pong", ch: 0, t: 1234.5 });
 
     // A bad pane is refused on its channel alone; the socket stays up.
     send({ ch: 7, type: "attach", pane: "../etc", cols: 80, rows: 24 });

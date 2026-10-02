@@ -21,6 +21,24 @@ export const BACKOFF_BASE_MS = 500;
 export const BACKOFF_MAX_MS = 15_000;
 export const MAX_ATTEMPTS = 8;
 const MAX_QUEUED = 256;
+/** How often the shared socket measures its round trip while a pane is on it. */
+export const PING_MS = 5_000;
+
+/**
+ * Round trip to the bridge, smoothed (an RTT estimator in TCP's manner), or
+ * null before the first answer. Predictive echo reads it: through the public
+ * proxy every keystroke's echo waits a round trip, and only then is a guess
+ * worth painting.
+ */
+let srtt: number | null = null;
+export function terminalRtt(): number | null {
+  return srtt;
+}
+/** Fold one measured round trip into the estimate. */
+export function sampleRtt(ms: number): void {
+  if (!Number.isFinite(ms) || ms < 0) return;
+  srtt = srtt === null ? ms : srtt * 0.75 + ms * 0.25;
+}
 
 /** Exponential backoff, in milliseconds, for the nth consecutive attempt. */
 export function backoffDelay(attempt: number): number {
@@ -82,6 +100,7 @@ class SharedSocket {
   private readonly policy = new ReconnectPolicy();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private gaveUp = false;
+  private pinger: ReturnType<typeof setInterval> | null = null;
 
   /** Open the socket now unless it is open, opening, or waiting to retry. */
   ensure(): void {
@@ -126,6 +145,10 @@ class SharedSocket {
     this.connect();
   }
 
+  private ping(): void {
+    this.send({ ch: 0, type: "ping", t: performance.now() });
+  }
+
   private connect(): void {
     const ws = new WebSocket(wsUrl("/ws/terminal"));
     ws.binaryType = "arraybuffer";
@@ -135,6 +158,10 @@ class SharedSocket {
       this.open = true;
       this.policy.reset();
       for (const c of [...this.channels.values()]) c.opened();
+      this.ping();
+      this.pinger = setInterval(() => {
+        if (this.channels.size > 0) this.ping();
+      }, PING_MS);
     };
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {
@@ -149,12 +176,15 @@ class SharedSocket {
       } catch {
         return;
       }
+      if (msg.type === "pong") return sampleRtt(performance.now() - msg.t);
       this.channels.get(msg.ch)?.notice(msg);
     };
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
       this.open = false;
+      if (this.pinger) clearInterval(this.pinger);
+      this.pinger = null;
       // With no pane on it, wait for the next one to reopen; otherwise retry.
       if (this.channels.size === 0) return;
       const delay = this.policy.next();
@@ -189,6 +219,7 @@ export function prewarmTerminalSocket(): void {
 /** Forget the shared socket (tests only): the next terminal starts afresh. */
 export function resetTerminalSocketForTests(): void {
   shared = null;
+  srtt = null;
 }
 
 /**
@@ -224,6 +255,7 @@ export class TerminalSocket {
       },
       data: (bytes) => this.dataCb?.(bytes),
       notice: (msg) => {
+        if (msg.type === "pong") return;
         if (msg.type === "size") this.sizeCb?.({ cols: msg.cols, rows: msg.rows });
         else if (msg.type === "closed") {
           // The pane itself is gone; retrying would only fail the same way.
