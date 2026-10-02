@@ -31,19 +31,31 @@
 # keyed on its own address, while a request through (a stand-in for)
 # Cloudflare's edge is keyed on the CF-Connecting-IP Cloudflare sets.
 #
+# And traefik mode with direct TLS (AGENTBOX_TLS=passthrough): the overlay's own
+# labels on Caddy, read by a real Traefik's Docker provider, next to HTTP
+# routers on the same entrypoint, a wildcard one included. Caddy gets its
+# certificate from a local ACME server (pebble) over TLS-ALPN-01 through the
+# passthrough; the client address arrives in Traefik's PROXY header and is the
+# key, whatever forwarding headers the client forges; a PROXY header from
+# anyone but Traefik is not believed; other hosts still route over HTTP.
+#
 #   tests/proxy/gate-bypass.sh                        # everything
 #   CADDYFILES=proxy/Caddyfile.behind-proxy tests/proxy/gate-bypass.sh
 #   GATE_IMAGE=agentbox/gate:ci SKIP_BUILD=1 tests/proxy/gate-bypass.sh
 #   FULL_LOCKOUT=0 tests/proxy/gate-bypass.sh         # skip the 90 s lockout run
-#   TRAEFIK=0 tests/proxy/gate-bypass.sh              # skip the traefik section
+#   TRAEFIK=0 tests/proxy/gate-bypass.sh              # skip the traefik sections
 #
-# Needs Docker and curl.
+# Needs Docker, curl (8.2 or later, for --haproxy-clientip) and openssl.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CADDY_IMAGE="${CADDY_IMAGE:-caddy:2-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
 TRAEFIK_IMAGE="${TRAEFIK_IMAGE:-traefik:v3.1}"
+# The passthrough section reads labels with Traefik's Docker provider, which in
+# v3.1 speaks a Docker API that Docker 29 no longer accepts.
+TRAEFIK_DOCKER_IMAGE="${TRAEFIK_DOCKER_IMAGE:-traefik:v3.6}"
+PEBBLE_IMAGE="${PEBBLE_IMAGE:-ghcr.io/letsencrypt/pebble:latest}"
 GATE_IMAGE="${GATE_IMAGE:-agentbox/gate:bypass-test}"
 CADDYFILES="${CADDYFILES:-$ROOT/proxy/Caddyfile.behind-proxy $ROOT/proxy/Caddyfile.standalone}"
 FULL_LOCKOUT="${FULL_LOCKOUT:-1}"
@@ -64,11 +76,12 @@ ECHO="$ID-code"
 GATE="$ID-gate"
 CADDY="$ID-caddy"
 TRAEFIK_C="$ID-traefik"
+PEBBLE="$ID-pebble"
 FAILED=0
 WORK="$(mktemp -d)"
 
 cleanup() {
-    docker rm -f -v "$TRAEFIK_C" "$CADDY" "$GATE" "$ECHO" >/dev/null 2>&1 || true
+    docker rm -f -v "$PEBBLE" "$TRAEFIK_C" "$CADDY" "$GATE" "$ECHO" >/dev/null 2>&1 || true
     for n in "$NET_FRONT" "$NET_INTERNAL" "$NET_EDGE"; do docker network rm "$n" >/dev/null 2>&1 || true; done
     rm -rf "$WORK"
 }
@@ -151,7 +164,9 @@ client() {
     local ip="$1"; shift
     local at=()
     [ "$ip" = - ] || at=(--ip "$ip")
-    docker run --rm --network "$NET_EDGE" "${at[@]}" -v "$ROOT/tests/proxy/harness.mjs:/harness.mjs:ro" \
+    # (Any certificate will do: the passthrough section's come from a test CA,
+    # and what is checked there is the address, not the chain.)
+    docker run --rm --network "$NET_EDGE" "${at[@]}" -e NODE_TLS_REJECT_UNAUTHORIZED=0 -e NODE_NO_WARNINGS=1 -v "$ROOT/tests/proxy/harness.mjs:/harness.mjs:ro" \
         "$NODE_IMAGE" node /harness.mjs signins "$@"
 }
 
@@ -821,6 +836,177 @@ EOF
             pass "the gate saw the visitor's address, not Cloudflare's or Traefik's"
         else
             fail "the gate did not see the visitor's address: $(docker logs "$GATE" 2>&1 | tail -3)"
+        fi
+    fi
+fi
+
+if [ "$RUN_TRAEFIK" = 1 ]; then
+    printf '\n== traefik mode, direct TLS (a real Traefik passing TLS through, Caddy with its own ACME certificate)\n'
+    docker rm -f -v "$TRAEFIK_C" "$CADDY" >/dev/null 2>&1 || true
+    start_gate
+    DOMAIN_T="work.test"
+    CLIENT_A="$EDGE.30"
+    CLIENT_B="$EDGE.31"
+    PT="$WORK/passthrough"
+    mkdir -p "$PT"
+
+    # A local ACME server, validating TLS-ALPN-01 on :443 of the name it is
+    # asked for — which resolves to Traefik, as the public name resolves to
+    # the host. HTTP-01 would need :80, where nothing of ours listens.
+    cat > "$PT/pebble.json" <<EOF
+{"pebble": {"listenAddress": "0.0.0.0:14000", "managementListenAddress": "0.0.0.0:15000",
+  "certificate": "/test/certs/localhost/cert.pem", "privateKey": "/test/certs/localhost/key.pem",
+  "httpPort": 5002, "tlsPort": 443, "ocspResponderURL": "", "externalAccountBindingRequired": false}}
+EOF
+    docker run -d --name "$PEBBLE" --network "$NET_EDGE" --network-alias pebble \
+        -e PEBBLE_VA_NOSLEEP=1 -e PEBBLE_WFE_NONCEREJECT=0 -v "$PT/pebble.json:/cfg/pebble.json:ro" \
+        "$PEBBLE_IMAGE" -config /cfg/pebble.json >/dev/null
+    # Caddy must trust the ACME server's own TLS certificate, as it trusts
+    # Let's Encrypt's from the system store.
+    docker cp "$PEBBLE:/test/certs/pebble.minica.pem" "$PT/acme-root.pem" >/dev/null
+
+    # Caddy as the passthrough overlay runs it, wearing the overlay's labels.
+    labels=(--label "agentbox.test=$ID")
+    while IFS= read -r l; do
+        l="${l//\$\{AGENTBOX_DOMAIN\}/$DOMAIN_T}"
+        l="${l//\$\{AGENTBOX_EDGE_NETWORK:-edge-prod\}/$NET_EDGE}"
+        labels+=(--label "$l")
+    done < <(sed -n 's/^ *- \(traefik\..*\)$/\1/p' "$ROOT/docker-compose.traefik-passthrough.yml")
+    [ "${#labels[@]}" -gt 8 ] || fail "no traefik labels found in docker-compose.traefik-passthrough.yml"
+    trust="$(sed -n 's/^ *AGENTBOX_TRUST: *\(.*\)$/\1/p' "$ROOT/docker-compose.traefik-passthrough.yml")"
+    docker create --name "$CADDY" --network "$NET_FRONT" --network-alias proxy -p 127.0.0.1::443 \
+        --read-only --tmpfs /tmp --tmpfs /data --tmpfs /config --cap-drop ALL --cap-add NET_BIND_SERVICE \
+        --security-opt no-new-privileges "${labels[@]}" \
+        -v "$ROOT/proxy/Caddyfile.passthrough:/etc/caddy/Caddyfile:ro" -v "$TRUST:/etc/caddy/trust:ro" \
+        -v "$PT/acme-root.pem:/acme-root.pem:ro" -e SSL_CERT_FILE=/acme-root.pem \
+        -e AGENTBOX_DOMAIN="$DOMAIN_T" -e AGENTBOX_TRUST="$trust" -e AGENTBOX_REAL_IP_HEADER= \
+        -e AGENTBOX_PROXY_PROTOCOL_FROM="$TRAEFIK_IP/32" -e AGENTBOX_ACME_CA=https://pebble:14000/dir \
+        "$CADDY_IMAGE" >/dev/null
+    docker network connect --alias proxy "$NET_EDGE" "$CADDY"
+    docker start "$CADDY" >/dev/null
+
+    # Traefik as a shared one runs: its Docker provider reads our labels, and
+    # its own file config holds HTTP routers on the same entrypoint — one for
+    # another host, and a wildcard one that matches this host too, which the
+    # TCP router must beat. (An HTTP router with an exact Host rule for this
+    # very name would beat the TCP router instead: Traefik prefers it, by
+    # design. docs/install.md says so.)
+    cat > "$PT/dynamic.yml" <<EOF
+http:
+  routers:
+    other:
+      rule: Host(\`other.test\`)
+      entryPoints: [websecure]
+      tls: {}
+      service: api@internal
+    wildcard:
+      rule: HostRegexp(\`^.+\\.test$\`)
+      priority: 1
+      entryPoints: [websecure]
+      tls: {}
+      service: api@internal
+EOF
+    docker run -d --name "$TRAEFIK_C" --network "$NET_EDGE" --ip "$TRAEFIK_IP" \
+        --network-alias "$DOMAIN_T" --network-alias other.test -p 127.0.0.1::443 \
+        -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$PT:/dyn:ro" "$TRAEFIK_DOCKER_IMAGE" \
+        --entrypoints.web.address=:80 --entrypoints.websecure.address=:443 --api=true --api.insecure=true \
+        --providers.docker=true --providers.docker.exposedbydefault=false \
+        "--providers.docker.constraints=Label(\`agentbox.test\`,\`$ID\`)" \
+        --providers.file.filename=/dyn/dynamic.yml --log.level=ERROR >/dev/null
+    # Caddy asks for its certificate as it starts, and the first attempt can
+    # beat Traefik to its labels (then the next is a minute away): once
+    # Traefik routes the name, start Caddy over with nothing obtained yet.
+    for _ in $(seq 1 100); do
+        docker exec "$TRAEFIK_C" wget -qO- http://127.0.0.1:8080/api/tcp/routers 2>/dev/null \
+            | grep -q "HostSNI(\`$DOMAIN_T\`)" && break
+        sleep 0.2
+    done
+    docker restart "$CADDY" >/dev/null
+    # The gate resolves the proxy's address as it starts.
+    docker restart "$GATE" >/dev/null
+    # (Published ports are chosen anew on a restart.)
+    TPORT=""
+    CPORT=""
+    for _ in $(seq 1 100); do
+        TPORT="$(docker port "$TRAEFIK_C" 443/tcp 2>/dev/null | head -n1 | sed 's/.*://')"
+        CPORT="$(docker port "$CADDY" 443/tcp 2>/dev/null | head -n1 | sed 's/.*://')"
+        [ -n "$TPORT" ] && [ -n "$CPORT" ] && break
+        sleep 0.2
+    done
+    at() { printf -- '--resolve %s:%s:127.0.0.1 https://%s:%s' "$1" "$TPORT" "$1" "$TPORT"; }
+    # Caddy asks for the certificate as it starts; wait for it.
+    up=""
+    for _ in $(seq 1 150); do
+        # shellcheck disable=SC2046
+        [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 $(at "$DOMAIN_T")/login || true)" = 200 ] && { up=1; break; }
+        sleep 0.4
+    done
+    if [ -z "$up" ]; then
+        fail "the box did not come up through the passthrough"
+        docker logs "$CADDY" 2>&1 | tail -20 >&2; docker logs "$TRAEFIK_C" 2>&1 | tail -20 >&2
+    else
+        issuer="$(openssl s_client -connect "127.0.0.1:$TPORT" -servername "$DOMAIN_T" </dev/null 2>/dev/null \
+            | openssl x509 -noout -issuer 2>/dev/null || true)"
+        if [[ "$issuer" == *Pebble* ]] && grep -q '"challenge_type":"tls-alpn-01"' <(docker logs "$CADDY" 2>&1); then
+            pass "through Traefik, Caddy serves its own certificate, got over TLS-ALPN-01 through the passthrough"
+        else
+            fail "the box's certificate: '$issuer'"
+        fi
+        # shellcheck disable=SC2046
+        hdrs="$(curl -sk -D - -o /dev/null $(at "$DOMAIN_T")/login | tr -d '\r')"
+        if grep -qi '^strict-transport-security: max-age=31536000$' <<<"$hdrs" \
+            && grep -qi '^x-content-type-options: nosniff$' <<<"$hdrs" \
+            && [ "$(grep -i '^referrer-policy:' <<<"$hdrs" | sed 's/^[^:]*: *//' | paste -sd, -)" = same-origin ]; then
+            pass "Caddy adds HSTS and nosniff, and the sign-in page keeps the gate's Referrer-Policy"
+        else
+            fail "response headers through the passthrough: $hdrs"
+        fi
+        # shellcheck disable=SC2046
+        other="$(curl -sk --max-time 5 $(at other.test)/api/version || true)"
+        if [[ "$other" == *'"Version"'* ]]; then
+            pass "another host on the same Traefik entrypoint still routes over HTTP"
+        else
+            fail "other.test through Traefik: '$other'"
+        fi
+
+        # A client forging every forwarding header anew each time: the PROXY
+        # header Traefik wrote names it, and that is the key.
+        a="$(client "$CLIENT_A" "https://$DOMAIN_T" 6 "$PASSWORD" \
+            "X-Forwarded-For=198.51.100.{i}" "CF-Connecting-IP=198.51.100.{i}" \
+            "X-Real-IP=198.51.100.{i}" "X-Agentbox-Client-IP=198.51.100.{i}")"
+        b="$(client "$CLIENT_B" "https://$DOMAIN_T" 1 "$PASSWORD")"
+        if [ "$a" = "401 401 401 401 401 429" ] && [ "$b" = 200 ]; then
+            pass "forged forwarding headers change nothing; each client has a budget of its own"
+        else
+            fail "through the passthrough: client A [$a], client B [$b]"
+        fi
+        if docker logs "$GATE" 2>&1 | grep -q "sign-in failed from $CLIENT_A" \
+            && ! docker logs "$GATE" 2>&1 | grep -q "from 198\.51\.100\."; then
+            pass "the gate saw the client's address from the PROXY header, not a forged one or Traefik's"
+        else
+            fail "the gate's view: $(docker logs "$GATE" 2>&1 | grep 'sign-in' | tail -3)"
+        fi
+
+        # Straight at Caddy, not from Traefik, with a PROXY header of one's own
+        # naming a new address each time: ignored, so one budget runs out.
+        codes=""
+        for i in 1 2 3 4 5 6; do
+            pw="wrong-password"; [ "$i" = 6 ] && pw="$PASSWORD"
+            s="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --haproxy-clientip "198.51.100.20$i" \
+                --resolve "$DOMAIN_T:$CPORT:127.0.0.1" -X POST "https://$DOMAIN_T:$CPORT/_gate/login" \
+                -H "Origin: https://$DOMAIN_T:$CPORT" -H 'Content-Type: application/json' \
+                --data "{\"username\":\"$USER_NAME\",\"password\":\"$pw\"}" || true)"
+            codes="$codes $s"
+        done
+        # (The same peer without a header of its own is served: it is the
+        # header that is refused, not the peer.)
+        plain="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$DOMAIN_T:$CPORT:127.0.0.1" \
+            "https://$DOMAIN_T:$CPORT/login" || true)"
+        if [ "$plain" = 200 ] && ! docker logs "$GATE" 2>&1 | grep -q "from 198\.51\.100\.20" \
+            && [ "$codes" = " 401 401 401 401 401 429" ]; then
+            pass "a PROXY header from anyone but Traefik is ignored: the peer is keyed on its own address"
+        else
+            fail "a forged PROXY header straight at Caddy: [$codes], without one $plain; $(docker logs "$GATE" 2>&1 | grep 'sign-in' | tail -2)"
         fi
     fi
 fi

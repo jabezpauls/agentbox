@@ -4,8 +4,9 @@
 # The gate believes a client address only from the proxy, so nothing in the
 # sandbox may be able to send through the proxy: the proxy must share a network
 # with the gate and nothing else of ours, and no sandbox service may join the
-# gate-only network. Also: the traefik overlay publishes no port, and the other
-# two publish exactly the proxy's. The checks are in topology.py.
+# gate-only network. Also: the traefik overlays publish no port, and the other
+# two publish exactly the proxy's; the passthrough overlay passes TLS through
+# by SNI with a PROXY header, and trusts no forwarding header. The checks are in topology.py.
 #
 # Needs Docker Compose and python3; builds nothing.
 set -euo pipefail
@@ -20,7 +21,7 @@ cp .env.example "$ENV"
 # shellcheck disable=SC2016
 sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholderplaceholderplaceholderplaceholder|' "$ENV"
 
-for mode in standalone behind-proxy traefik; do
+for mode in standalone behind-proxy traefik traefik-passthrough; do
     printf '== %s\n' "$mode"
     if ! docker compose --env-file "$ENV" -f docker-compose.yml -f "docker-compose.$mode.yml" config --format json \
         | python3 "$ROOT/tests/proxy/topology.py" "$mode" | sed 's/^/  /'; then

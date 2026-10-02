@@ -29,14 +29,14 @@ jobs:
           # is written by install.sh.
           cp .env.example .env
           sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholderplaceholderplaceholderplaceholder|' .env
-          for mode in standalone behind-proxy traefik; do
+          for mode in standalone behind-proxy traefik traefik-passthrough; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
           done
           # The first update from an older checkout runs the older script, which
           # adds the (now empty) previews overlay when AGENTBOX_PREVIEW_DOMAIN
           # is set: that must still compose.
           echo "AGENTBOX_PREVIEW_DOMAIN=p.example.com" >> .env
-          for mode in standalone behind-proxy traefik; do
+          for mode in standalone behind-proxy traefik traefik-passthrough; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" -f docker-compose.previews.yml config -q
           done
 
@@ -77,15 +77,17 @@ jobs:
         # the way docker-compose.yml mounts them, with and without a
         # --real-ip-header. The older AGENTBOX_CLIENT_IP_HEADER is set to what
         # an .env from before may still hold: Caddy must not read it (listed
-        # twice, a header name stops Caddy starting).
+        # twice, a header name stops Caddy starting). The passthrough Caddyfile
+        # also reads the addresses Traefik's PROXY header is believed from.
         run: |
-          for file in Caddyfile.standalone Caddyfile.behind-proxy; do
+          for file in Caddyfile.standalone Caddyfile.behind-proxy Caddyfile.passthrough; do
             for trust in standalone-off standalone-on proxied-off proxied-on; do
               for header in "" X-Real-IP; do
                 echo "== $file $trust header=${header:-none}"
                 docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
                   -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" \
                   -e AGENTBOX_REAL_IP_HEADER="$header" -e AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP \
+                  -e "AGENTBOX_PROXY_PROTOCOL_FROM=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7" \
                   caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
               done
             done
