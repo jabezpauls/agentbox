@@ -138,7 +138,13 @@ RUN set -eu; \
 # Codex's ~/.codex/AGENTS.md.
 COPY images/workspace/agents.md /etc/claude-code/CLAUDE.md
 COPY images/workspace/agents.md /usr/local/share/agentbox/agents.md
-RUN chmod 0644 /etc/claude-code/CLAUDE.md /usr/local/share/agentbox/agents.md
+# Claude Code's fullscreen renderer in every session: it takes the mouse, so
+# the wheel scrolls the conversation in herdr, over SSH and in the Workbench
+# alike. Left to Claude Code, the renderer depends on when the account first
+# used it, and an older account gets the classic one, whose redraws litter
+# herdr's scrollback. CLAUDE_CODE_NO_FLICKER=0 still picks it for a session.
+COPY images/workspace/claude-managed-settings.json /etc/claude-code/managed-settings.json
+RUN chmod 0644 /etc/claude-code/CLAUDE.md /etc/claude-code/managed-settings.json /usr/local/share/agentbox/agents.md
 
 # Keep user-installed npm binaries on PATH for login shells too.
 RUN printf '%s\n' \
