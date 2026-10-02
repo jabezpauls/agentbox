@@ -78,6 +78,8 @@ export class Predictor {
   private work: string[] = [];
   private cursor = 0;
   private edits: Edit[] = [];
+  /** The screen shows neither the line as it was nor any guess: show none. */
+  private glitch = false;
   private readonly now: () => number;
   private readonly timeoutMs: () => number;
 
@@ -99,6 +101,7 @@ export class Predictor {
     this.epoch = null;
     this.base = null;
     this.edits = [];
+    this.glitch = false;
   }
 
   /** A keystroke the user sent (exactly what went to the program). */
@@ -176,20 +179,27 @@ export class Predictor {
 
   /**
    * The screen has taken more of the server's output: confirm the guesses it
-   * now shows, wait on those it does not show yet, and drop them all if it
-   * shows something else.
+   * now shows, and wait on those it does not show yet. If it shows something
+   * else, the guesses go out of sight at once; the screen may be part-way
+   * through a redraw (herdr's frames can split one), so they are only dropped
+   * if it has not come right by the time the echo is overdue (`tick`).
    */
   update(): void {
     const s = this.screen();
     if (s.alt) return this.reset();
     const e = this.epoch;
     if (!e) return;
-    if (s.cursorY !== e.y) return this.reset();
-    if (this.edits.length === 0) return;
+    if (this.edits.length === 0) {
+      if (s.cursorY !== e.y) this.reset();
+      return;
+    }
+    this.glitch = true;
+    if (s.cursorY !== e.y) return;
     for (let i = this.edits.length - 1; i >= 0; i--) {
       const ed = this.edits[i]!;
       if (this.matches(s, ed.line, ed.cursor, ed.lo, ed.hi)) {
         e.trusted = true;
+        this.glitch = false;
         this.edits = this.edits.slice(i + 1);
         if (this.edits.length === 0) this.base = null;
         else this.base = { line: [...ed.line], cursor: ed.cursor };
@@ -197,8 +207,8 @@ export class Predictor {
       }
     }
     const last = this.edits[this.edits.length - 1]!;
-    if (this.base && this.matches(s, this.base.line, this.base.cursor, last.lo, last.hi)) return; // no echo yet
-    this.reset();
+    // The line as it was: no echo yet.
+    if (this.base && this.matches(s, this.base.line, this.base.cursor, last.lo, last.hi)) this.glitch = false;
   }
 
   /** Drop guesses whose echo is overdue: the line may not echo at all. */
@@ -211,7 +221,7 @@ export class Predictor {
   overlay(): Overlay {
     const e = this.epoch;
     const last = this.edits[this.edits.length - 1];
-    if (!e || !last || !e.trusted) return EMPTY;
+    if (!e || !last || !e.trusted || this.glitch) return EMPTY;
     const s = this.screen();
     if (s.alt || s.cursorY !== e.y) return EMPTY;
     const cells: Overlay["cells"] = [];

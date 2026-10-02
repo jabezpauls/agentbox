@@ -256,13 +256,14 @@ export function TerminalCell({ paneId, resolved }: Props) {
       host.addEventListener("contextmenu", onContextMenu);
 
       ro = new ResizeObserver(() => {
+        const was = `${term.cols}x${term.rows}`;
         try {
           fit.fit();
         } catch {
           return;
         }
         socket?.resize(term.cols, term.rows);
-        forget();
+        if (`${term.cols}x${term.rows}` !== was) forget();
       });
       ro.observe(host);
     });

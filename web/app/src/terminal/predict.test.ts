@@ -86,16 +86,32 @@ describe("Predictor", () => {
     expect(t.shown().text).toBe("$ ab");
   });
 
-  it("throws every guess away when the echo differs from it", () => {
+  it("hides every guess at once when the echo differs, and drops them if it does not come right", () => {
     const t = setup();
     trust(t, "abc");
     t.screen.echo("X"); // the program drew something else
     t.p.update();
-    expect(t.p.pending).toBe(0);
     expect(t.shown()).toEqual({ text: "$ aX", cursor: null });
+    t.advance(501);
+    t.p.tick();
+    expect(t.p.pending).toBe(0);
     // And the next guess starts untrusted again.
     t.p.input("d");
     expect(t.p.overlay().cells).toEqual([]);
+  });
+
+  it("rides out a redraw caught half-way, as when a frame arrives in two parts", () => {
+    const t = setup();
+    trust(t, "ab");
+    // The "b" is drawn, but the cursor has not moved on yet; then it has.
+    t.screen.rows[0]![3] = "b";
+    t.p.update();
+    expect(t.p.overlay().cells).toEqual([]);
+    t.screen.cursorX = 4;
+    t.p.update();
+    expect(t.p.pending).toBe(0);
+    t.p.input("c");
+    expect(t.shown().text).toBe("$ abc"); // still trusted
   });
 
   it("never shows anything typed at a prompt that does not echo, like a password", () => {
@@ -188,9 +204,12 @@ describe("Predictor", () => {
     }
     const t = setup();
     trust(t, "ab");
+    t.screen.echo("b");
+    t.p.update();
     t.screen.cursorY = 1;
     t.p.update();
-    expect(t.p.pending).toBe(0);
+    t.p.input("c");
+    expect(t.p.overlay().cells).toEqual([]);
   });
 
   it("does not guess at the last column, where the terminal decides the wrap", () => {
