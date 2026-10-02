@@ -1,0 +1,49 @@
+# Traefik mode with direct TLS (AGENTBOX_MODE=traefik, AGENTBOX_TLS=passthrough):
+# used in place of docker-compose.traefik.yml. A Traefik TCP router on
+# `websecure` passes the TLS connection for AGENTBOX_DOMAIN, by SNI and
+# unopened, to Caddy's :443, which terminates TLS with a Let's Encrypt
+# certificate of its own (TLS-ALPN-01, kept in caddy_data). For a DNS-only
+# record (no Cloudflare proxy) on a Traefik whose certificates cannot cover
+# this host — and nothing in Traefik's own configuration changes: these labels
+# are all of it. An exact HostSNI router takes the host's connections before
+# any HTTP router on the entrypoint sees them.
+#
+# Traefik writes a PROXY protocol v2 header naming the client in front of each
+# connection; Caddy believes it only from AGENTBOX_PROXY_PROTOCOL_FROM, and
+# trusts no forwarding header at all. Not behind Cloudflare by construction,
+# so AGENTBOX_CLOUDFLARE and AGENTBOX_REAL_IP_HEADER do not apply. Traefik's
+# HTTP middlewares cannot act on a passed-through connection: Caddy sets the
+# response headers they set, and the gate's own sign-in limits are the rate
+# limiting. See docs/install.md and docs/security.md.
+services:
+  proxy:
+    networks:
+      - front
+      - edge
+    environment:
+      AGENTBOX_TRUST: standalone-off
+      AGENTBOX_REAL_IP_HEADER: ""
+      # Who may name the client in a PROXY header: Traefik's address on the
+      # edge network. Every private range by default (Traefik's address is not
+      # fixed); narrow it to the edge network's subnet, or Traefik's own
+      # address if it has a fixed one.
+      AGENTBOX_PROXY_PROTOCOL_FROM: ${AGENTBOX_PROXY_PROTOCOL_FROM:-10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7}
+      AGENTBOX_ACME_CA: ${AGENTBOX_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./proxy/Caddyfile.passthrough:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${AGENTBOX_EDGE_NETWORK:-edge-prod}
+      - traefik.tcp.routers.agentbox.rule=HostSNI(`${AGENTBOX_DOMAIN}`)
+      - traefik.tcp.routers.agentbox.entrypoints=websecure
+      - traefik.tcp.routers.agentbox.tls.passthrough=true
+      - traefik.tcp.routers.agentbox.service=agentbox
+      - traefik.tcp.services.agentbox.loadbalancer.server.port=443
+      - traefik.tcp.services.agentbox.loadbalancer.proxyprotocol.version=2
+
+networks:
+  edge:
+    external: true
+    name: ${AGENTBOX_EDGE_NETWORK:-edge-prod}

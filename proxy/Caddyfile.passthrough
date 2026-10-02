@@ -1,0 +1,64 @@
+# Traefik passthrough (AGENTBOX_TLS=passthrough): Traefik routes the TLS
+# connection for AGENTBOX_DOMAIN to this listener by its SNI without opening
+# it, prefixed with a PROXY protocol header naming the client. Caddy is the TLS
+# edge: it gets a publicly trusted certificate for AGENTBOX_DOMAIN itself, over
+# TLS-ALPN-01 (the challenge rides the same :443 connection Traefik passes
+# through, so nothing needs :80), and hands every request to the gate.
+{
+	admin off
+	# No :80 listener and no HTTP-01: Traefik owns :80, and routes nothing of
+	# this host to it.
+	auto_https disable_redirects
+	servers {
+		# Only what can arrive through a TCP passthrough on :443: no HTTP/3,
+		# whose Alt-Svc would send browsers to a UDP port nothing forwards.
+		protocols h1 h2
+		listener_wrappers {
+			# The client address from Traefik's PROXY header, believed only from
+			# the addresses in AGENTBOX_PROXY_PROTOCOL_FROM (Traefik on the edge
+			# network). A header from anyone else is ignored, and the peer is
+			# keyed on its own address.
+			proxy_protocol {
+				timeout 5s
+				allow {$AGENTBOX_PROXY_PROTOCOL_FROM}
+			}
+			tls
+		}
+		# Nobody in front of Caddy is trusted at the HTTP level: the address the
+		# PROXY header gave is the client, and forwarding headers a client sends
+		# are ignored (standalone-off.caddy, set by the overlay).
+		import /etc/caddy/trust/{$AGENTBOX_TRUST}.caddy
+	}
+}
+
+{$AGENTBOX_DOMAIN} {
+	tls {
+		issuer acme {
+			dir {$AGENTBOX_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+			disable_http_challenge
+		}
+	}
+
+	encode zstd gzip
+
+	# What Traefik's header middleware adds in edge mode. No Referrer-Policy:
+	# the gate sets its own (same-origin on its sign-in and approval pages).
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+
+	# The client address, as Caddy worked it out, in a header of its own. A
+	# client's own copy is dropped first; the gate believes this header only on
+	# connections from this container, which shares a network with the gate
+	# alone.
+	request_header -X-Agentbox-Client-IP
+
+	# The original Host passes through unchanged, and Caddy sets
+	# X-Forwarded-For, -Proto and -Host itself. WebSocket upgrades and streamed
+	# responses pass through as they are.
+	reverse_proxy gate:7900 {
+		header_up X-Agentbox-Client-IP {client_ip}
+	}
+}
