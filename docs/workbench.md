@@ -92,9 +92,51 @@ open tab, so two browsers, a phone and the TUI all stay in step.
 - **Pane grid** — herdr's layout, rendered as live terminals. Drag a split to
   resize it; the new ratio is sent to herdr, which is authoritative, so every
   other viewer follows.
-- **Composer** — appears under the grid when the focused pane holds an agent.
-  `Enter` sends, `Shift+Enter` starts a new line, and `Escape` puts focus back
-  in the terminal.
+- **Composer** — appears under the grid when the focused pane holds an agent,
+  and sends to it as a prompt. `Enter` sends, `Shift+Enter` starts a new line,
+  and `Escape` puts focus back in the terminal. The microphone dictates into
+  it (see below).
+
+### Typing over a slow link
+
+Through the public proxy every keystroke waits a round trip — about 125 ms
+behind Cloudflare — before the program's echo comes back. Two things help,
+and neither changes what the program receives.
+
+- **Predictive echo** (on by default) works as mosh does: keys still go
+  straight to the program, and the app paints what it expects the echo to be —
+  typed characters, backspace, `←` and `→` on the cursor's line — at once,
+  dotted-underlined, until the real echo replaces it. A wrong guess is wiped
+  and the screen shows the program's own output. It only paints while the
+  measured round trip is over 30 ms, and a line's guesses stay hidden until
+  one of them has been confirmed, so a prompt that does not echo (a password)
+  never shows what was typed. Enter, Tab, control keys and pastes are never
+  guessed at.
+- **Compose bar** (off by default) — a line editor under a pane: type at local
+  speed, edit, then `Enter` sends the line and Enter in one write. `Shift+Enter`
+  adds a line, `↑`/`↓` on the first or last line walk this pane's history
+  (kept in the browser), and `Tab` sends what is typed and a Tab, for the
+  shell's completion. `Esc`, `Ctrl+C` and `Ctrl+D` (on an empty bar) go
+  straight to the program, as do the quick keys under it; *Raw keys*, or a
+  click on the terminal, types into the terminal directly. When a full-screen
+  program runs — an editor, a pager, `htop` — the bar steps aside and keys go
+  to the program; it comes back when the program exits. herdr sends each
+  pane's picture rather than its programs' mode switches, so the app learns
+  this by asking herdr what is in the pane's foreground (every 1.5 s while the
+  page is visible, and right after a send) and knowing the usual full-screen
+  programs by name.
+
+**Settings → Terminal** holds the defaults; each pane's `⋯` menu turns either
+one on or off for that pane.
+
+**Dictation.** The compose bar and the agent composer have a microphone:
+click it, or hold `⌃⌥M` (tap it to start and stop). Words appear as they are
+heard and land at the cursor once settled; nothing is sent until you press
+`Enter`. It is the browser's own speech recognition (the Web Speech API) —
+Chrome and Edge send the audio to their speech service — and where a browser
+has none (Firefox, many Chromium builds) the button says so. The app's pages
+allow the microphone for their own origin only (`Permissions-Policy:
+microphone=(self)`); apps under `/a/` are always denied it.
 
 ### Working with agents
 
@@ -225,6 +267,7 @@ or not.
   token, each of which you can revoke.
 - **Sharing** — how long a new share lasts, and every public app.
 - **Appearance** — light, dark, or follow the system.
+- **Terminal** — predictive echo and the compose bar, by default.
 - **About** — versions, and the keyboard shortcuts.
 
 Anything that could hand the box to someone else or lock you out — a new
@@ -266,6 +309,10 @@ modifier and VoiceOver takes those keys first — use `⌘K`, the rail and the
 `g` sequences. In Emacs in a terminal, `⌃⌥K` and `⌃⌥D` are also `C-M-k` and
 `C-M-d`, and the app takes them first; `Esc` then `C-k` (or `C-d`) is the
 same command to Emacs.
+
+In a compose bar: `↵` sends, `⇧↵` adds a line, `↑` `↓` walk the history,
+`Tab` sends what is typed and a Tab, `Esc` `⌃C` `⌃D` go to the program, and
+`⌃⌥M` dictates (hold to talk).
 
 In Files: `↑` `↓` move (with `⇧`, select), `↵` opens, `Space` quick look,
 `⌫` or `⌘↑` goes up, `F2` renames, `Delete` or `⌘⌫` moves to the trash, `⌘A`
