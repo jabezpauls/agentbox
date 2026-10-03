@@ -40,8 +40,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     HOME=/home/coder \
     SHELL=/bin/bash \
-    # npm must not try to write to a root-owned prefix at runtime.
+    # npm must not try to write to a root-owned prefix at runtime. Its cache
+    # moves off ~/.npm too: a home volume seeded by an older image has that
+    # owned by root, and `npm create` or `npx` then fail with EACCES.
     NPM_CONFIG_PREFIX=/home/coder/.npm-global \
+    NPM_CONFIG_CACHE=/home/coder/.npm-cache \
     PATH=/home/coder/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -143,6 +146,7 @@ RUN chmod 0644 /etc/claude-code/CLAUDE.md /usr/local/share/agentbox/agents.md
 # Keep user-installed npm binaries on PATH for login shells too.
 RUN printf '%s\n' \
         'export NPM_CONFIG_PREFIX=/home/coder/.npm-global' \
+        'export NPM_CONFIG_CACHE=/home/coder/.npm-cache' \
         'export PATH="/home/coder/.npm-global/bin:$PATH"' \
         > /etc/profile.d/agentbox.sh \
     && chmod 0644 /etc/profile.d/agentbox.sh

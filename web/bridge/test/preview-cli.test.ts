@@ -66,7 +66,7 @@ async function herdr<T>(method: string, params: Record<string, unknown> = {}): P
     children.push(child);
     return {} as T;
   }
-  if (method === "pane.read") return { text: panes.get(String(params.pane_id))?.out ?? "" } as T;
+  if (method === "pane.read") return { read: { text: panes.get(String(params.pane_id))?.out ?? "" } } as T;
   return {} as T;
 }
 

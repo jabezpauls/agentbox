@@ -280,8 +280,8 @@ export class AppsService {
 
   /** The last lines a pane showed, for an app that never came up. */
   async output(paneId: string, lines = 40): Promise<string> {
-    const res = await this.deps.herdr<{ text: string }>("pane.read", { pane_id: paneId, source: "recent_unwrapped", lines });
-    return res.text;
+    const res = await this.deps.herdr<{ read?: { text?: string } }>("pane.read", { pane_id: paneId, source: "recent_unwrapped", lines });
+    return res.read?.text ?? "";
   }
 
   /**

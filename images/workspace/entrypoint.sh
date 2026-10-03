@@ -3,7 +3,7 @@
 # command. Runs as UID 1000; nothing here needs or gains privilege.
 set -euo pipefail
 
-mkdir -p /workspace /home/coder/.config /home/coder/.npm-global
+mkdir -p /workspace /home/coder/.config /home/coder/.npm-global /home/coder/.npm-cache
 
 # Seed a starting point so a brand-new workspace is not an empty void.
 if [ ! -e /workspace/WELCOME.md ] && [ -e /home/coder/welcome.md ]; then

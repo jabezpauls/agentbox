@@ -59,7 +59,7 @@ function rig(opts: { environ?: Record<number, Record<string, string>> } = {}): R
         const ws = String(params.workspace_id);
         return { tab: { tab_id: `${ws}:t${tabs + 1}` }, root_pane: { pane_id: `${ws}:p${tabs + 1}`, workspace_id: ws } } as T;
       }
-      if (method === "pane.read") return { text: "vite ready" } as T;
+      if (method === "pane.read") return { read: { text: "vite ready" } } as T;
       return {} as T;
     },
     herdrReady: () => true,

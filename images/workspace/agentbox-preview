@@ -245,7 +245,7 @@ async function launch(app, opts) {
   if (!(await waitUp(app.port, opts.timeout))) {
     let tail = "";
     try {
-      tail = (await call("GET", `/api/apps/${app.id}/output?paneId=${encodeURIComponent(started.paneId)}&lines=40`)).text;
+      tail = (await call("GET", `/api/apps/${app.id}/output?paneId=${encodeURIComponent(started.paneId)}&lines=40`)).text ?? "";
     } catch {
       // the pane is gone too
     }
