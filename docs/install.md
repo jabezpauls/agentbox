@@ -218,8 +218,10 @@ address out for 15 minutes. The page says how long to wait. To clear it early:
 `curl -fsSL https://<your box>/cli/install | sh` (see [docs/cli.md](cli.md)),
 signs in without your password: it shows a code and opens
 `/settings/devices?code=…`, where you approve it while signed in. It then holds
-a token of its own, which you can revoke. To end every session and revoke
-every device token at once — a lost laptop, say:
+a token of its own, which you can revoke. Signing in also makes `ssh <box>`
+work from that machine, through the gate with that token: the box runs an SSH
+endpoint that publishes no port (see [SSH](cli.md#ssh-the-box-as-a-host)). To
+end every session and revoke every device token at once — a lost laptop, say:
 
 ```bash
 ./scripts/agentbox gate revoke-all
@@ -297,15 +299,21 @@ to prefer behind-proxy mode there.
 ./scripts/agentbox update
 ```
 
-The terminals, the shell, the monitor and the Workbench share the editor
-container's network. If Docker restarts the `code` container on its own (after
-a crash, say), those four lose their network and the box answers 502 until
-they rejoin it; `./scripts/agentbox restart` brings them back in the right order.
+The terminals, the shell, the SSH endpoint, the monitor and the Workbench
+share the editor container's network. If Docker restarts the `code` container
+on its own (after a crash, say), those five lose their network and the box
+answers 502 until they rejoin it; `./scripts/agentbox restart` brings them
+back in the right order.
 
 ## Updating
 
 `./scripts/agentbox update` pulls, rebuilds and restarts. Your workspace and
 home volumes are untouched, so files, agent logins and editor settings survive.
+
+Global npm packages an agent installs go to `~/.npm-global` and npm's cache
+to `~/.npm-cache`, both on the home volume. A home volume from an older image
+may have `~/.npm` owned by root, which made `npm create` and `npx` fail with
+`EACCES`; npm no longer uses it, so it can stay.
 
 A plain update does not rewrite `.env`. When an update adds settings, an
 existing install keeps its old file and the new keys are simply absent — compare

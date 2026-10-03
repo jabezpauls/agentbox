@@ -20,9 +20,10 @@ over the host.
 - The public internet (outbound). Coding agents need it to reach their APIs, and
   package managers need it to install dependencies. If you want to restrict this,
   see "Egress filtering" below.
-- Its own named volume, which persists across restarts and updates.
-- The other sandbox services. `terminal`, `shell`, `monitor` and `workbench`
-  share the `code` container's network and PID namespaces, so
+- Its own named volumes, the workspace and home, which persist across
+  restarts and updates.
+- The other sandbox services. `terminal`, `shell`, `ssh`, `monitor` and
+  `workbench` share the `code` container's network and PID namespaces, so
   `localhost` and the process table are common to all of them. This is
   deliberate: a dev server an agent starts in one pane is reachable as an app
   from the others. The shared namespaces belong to sandbox containers only;

@@ -713,22 +713,22 @@ loopback, `127.0.0.1` or `::1`.
 
 ## firstmate
 
-[firstmate](https://github.com/herdrdev/firstmate) drives a fleet of agents
-across git worktrees. It fits a workspace well:
+[firstmate](https://github.com/kunchenguid/firstmate) lets you talk to one
+agent while it runs a crew of others, each in a git worktree of its own. It is
+a repository you clone and start an agent in, and the box has what it needs
+(`gh`, `tmux`, herdr):
 
 ```bash
 cd /workspace
-git clone https://github.com/you/your-project
-cd your-project
 gh auth login            # gh is in the image; firstmate uses it for PRs
-firstmate                # or: firstmate --backend herdr
+git clone https://github.com/kunchenguid/firstmate
+cd firstmate
+claude                   # or codex; its AGENTS.md takes over from there
 ```
 
-With the tmux backend it manages its own session inside the pane. With the
-herdr backend its panes become herdr panes, which means they show up as
-workspaces and agents in the Workbench like anything else. Either way, create
-the workspace as a **git worktree** first if you want the Workbench's own
-worktree bookkeeping rather than firstmate's.
+Its crew runs in tmux by default, inside the pane. With its herdr backend each
+crewmate gets a herdr tab instead, so it shows up in the Workbench as agents
+like anything else. See firstmate's own README for choosing the backend.
 
 ## Troubleshooting
 
