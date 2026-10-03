@@ -62,7 +62,7 @@ title, and a row on Home. Scroll a pane's history with the mouse wheel. Over a
 slow link, turn on the compose bar and type at local speed. The microphone
 dictates into it.
 
-<img src="docs/media/workbench.png" alt="The Workbench with several agents running in live terminals" width="860">
+<img src="docs/media/workbench.png" alt="Claude Code in the Workbench, with the habit tracker it just built open in the Preview beside it" width="860">
 
 Claude Code and Codex are installed. Any other terminal agent runs in a pane
 the way it would anywhere else.
@@ -77,8 +77,6 @@ When you want someone else to see it, press **Share**: anyone with the link,
 or the link plus a passcode, for an hour, a day, a week, a month or until you
 stop. Only you can share an app. An agent cannot, however it tries.
 
-<img src="docs/media/preview.png" alt="A web app an agent built, open in the Preview beside the terminal that runs it" width="860">
-
 ### Review
 
 Some things are easier to point at than to describe. An agent writes an HTML
@@ -88,6 +86,8 @@ waiting the whole time, and returns with your comments attached to what they
 point at.
 
 ### And the rest
+
+<img src="docs/media/home.png" alt="Home: every project with its agents, terminals and apps, and the box's CPU, memory and disk" width="860">
 
 - **Editor.** VS Code in the browser. It stays loaded while you move around
   the app, so unsaved edits stay where you left them.
