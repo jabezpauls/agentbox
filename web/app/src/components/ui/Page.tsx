@@ -11,7 +11,7 @@ interface Props {
 }
 
 /**
- * A surface's header, rubl's PageHeader: the one page-title size (18px at
+ * A surface's header: the one page-title size (18px at
  * weight 500), a muted line under it, and the actions on the right.
  */
 export function PageHeader({ title, subtitle, actions, children, id }: Props) {

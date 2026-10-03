@@ -1,7 +1,7 @@
 /*
  * Workbench design tokens.
  *
- * A control room for coding agents, in the visual language of rubl: Inter for
+ * A control room for coding agents, drawn in one visual language: Inter for
  * everything, hierarchy carried by weight and colour tier rather than size,
  * hairline borders instead of boxes, one cobalt accent, and a small family of
  * status "lights" that carry the only other real colour. Surfaces are opaque —
@@ -39,7 +39,7 @@
   --accent-tint: #dbeafe;
   --on-accent: #ffffff;
 
-  /* semantic tones — solid ink over a soft fill, the way rubl's pills read */
+  /* semantic tones — solid ink over a soft fill, the way the pills read */
   --success: #147a52;
   --success-soft: #e2f4ec;
   --warning: #965a12;

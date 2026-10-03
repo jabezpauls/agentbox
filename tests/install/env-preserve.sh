@@ -28,7 +28,7 @@ AGENTBOX_MODE=traefik
 AGENTBOX_BIND=127.0.0.1:8443
 AGENTBOX_EDGE_NETWORK=edge-custom
 AGENTBOX_CERT_RESOLVER=cloudflare
-AGENTBOX_USER=jabe
+AGENTBOX_USER=alice
 AGENTBOX_PASSWORD_HASH=$HASH
 AGENTBOX_PREVIEW_DOMAIN=
 AGENTBOX_PUBLIC_URL=https://work.example.com
@@ -58,7 +58,7 @@ expect AGENTBOX_MODE traefik "mode stays traefik (does not flip to standalone an
 expect AGENTBOX_DOMAIN work.example.com "domain kept"
 expect AGENTBOX_EDGE_NETWORK edge-custom "edge network kept"
 expect AGENTBOX_CERT_RESOLVER cloudflare "cert resolver kept"
-expect AGENTBOX_USER jabe "username kept"
+expect AGENTBOX_USER alice "username kept"
 expect AGENTBOX_CPUS 3 "sandbox caps kept"
 expect AGENTBOX_PROXY_MEMORY 128m "proxy caps kept"
 expect ANTHROPIC_API_KEY sk-ant-keepme "API key kept"
@@ -272,7 +272,7 @@ for bad in short "$(printf 'x%.0s' $(seq 1 73))"; do
 done
 if [ "$(cat "$DIR/.env")" = "$before_pw" ]; then pass ".env untouched by a refused password"; else fail ".env changed by a refused password"; fi
 seed
-if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --user $'jabe\nAGENTBOX_MODE=standalone' >/dev/null 2>&1; then
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --user $'alice\nAGENTBOX_MODE=standalone' >/dev/null 2>&1; then
     fail "a newline in a value was accepted"
 else
     pass "a newline in a value is refused"

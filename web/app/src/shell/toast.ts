@@ -2,7 +2,7 @@ import { errorText } from "../api/http.ts";
 import { useApp, type ToastOpts } from "../store/app.ts";
 
 /**
- * Toasts from anywhere in the app, in rubl's voice: a short statement of what
+ * Toasts from anywhere in the app, in one voice: a short statement of what
  * happened, and on a failure `Couldn't <verb> <noun>.` with the server's own
  * sentence underneath.
  */

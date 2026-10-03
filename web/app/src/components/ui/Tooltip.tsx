@@ -32,7 +32,7 @@ interface Place {
 }
 
 /**
- * A tooltip: the inverted ink-on-surface label rubl uses, the one inverted
+ * A tooltip: an inverted ink-on-surface label, the one inverted
  * surface in the app. It waits a moment before the first one shows, so a
  * pointer passing over does not flicker labels; after that, the next one
  * along a toolbar opens straight away and without animation.

@@ -22,7 +22,7 @@ interface Started {
 }
 
 // The CLI sends no Origin and no cookie: these two calls must work without them.
-const start = (hh: Harness, name = "jabe-laptop") => request(hh.base, "POST", "/_gate/device/start", { body: { name } });
+const start = (hh: Harness, name = "my-laptop") => request(hh.base, "POST", "/_gate/device/start", { body: { name } });
 const poll = (hh: Harness, deviceCode: string) => request(hh.base, "POST", "/_gate/device/poll", { body: { deviceCode } });
 
 describe("the device login", () => {
@@ -43,7 +43,7 @@ describe("the device login", () => {
 
     const cookie = await login(h);
     const pending = await request(h.base, "GET", `/_gate/device/pending?code=${s.userCode.toLowerCase().replace("-", "")}`, { headers: { cookie } });
-    expect(pending.json()).toMatchObject({ userCode: s.userCode, name: "jabe-laptop", ip: "127.0.0.1" });
+    expect(pending.json()).toMatchObject({ userCode: s.userCode, name: "my-laptop", ip: "127.0.0.1" });
 
     // Approving hands out full access: it needs the password in the same
     // request.
@@ -79,7 +79,7 @@ describe("the device login", () => {
     if ("ws" in ws) ws.ws.close();
 
     const tokens = (await request(h.base, "GET", "/_gate/tokens", { headers: bearer })).json<Array<{ name: string; current: boolean; lastIp: string }>>();
-    expect(tokens).toEqual([expect.objectContaining({ name: "jabe-laptop", current: true, lastIp: "127.0.0.1" })]);
+    expect(tokens).toEqual([expect.objectContaining({ name: "my-laptop", current: true, lastIp: "127.0.0.1" })]);
   });
 
   it("a denied login gets nothing", async () => {

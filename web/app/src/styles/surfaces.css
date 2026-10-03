@@ -318,7 +318,7 @@ p code,
   gap: var(--sp-4);
   margin: var(--sp-2) 0 var(--sp-3);
 }
-/* rubl's one big number per page: the count of things that need a person. */
+/* One big number per page: the count of things that need a person. */
 .hero-figure {
   font-size: 2rem;
   font-weight: 600;

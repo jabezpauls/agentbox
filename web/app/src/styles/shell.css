@@ -135,7 +135,7 @@
   background: var(--surface-2);
   color: var(--text);
 }
-/* rubl's signature: a 3px accent bar hanging off the rail's inner edge. */
+/* The signature: a 3px accent bar hanging off the rail's inner edge. */
 .rail-item.is-active::before {
   content: "";
   position: absolute;

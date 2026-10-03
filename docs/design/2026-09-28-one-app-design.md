@@ -184,7 +184,7 @@ redirects to the matching new route for old bookmarks.
   1. `POST /_gate/device/start {name}` → `{deviceCode, userCode, verifyUrl,
      interval, expiresIn}` (userCode `XXXX-XXXX`, 10 minutes).
   2. The CLI opens `verifyUrl` (`/settings/devices?code=XXXX-XXXX`); the owner,
-     signed in, sees "Allow *agentbox CLI on jabe-laptop* full access?" and
+     signed in, sees "Allow *agentbox CLI on my-laptop* full access?" and
      approves.
   3. `POST /_gate/device/poll {deviceCode}` → `{token}` once approved.
   Tokens are 256-bit, prefixed `abx_`, stored hashed (SHA-256) with name,
@@ -414,7 +414,7 @@ The Workbench SPA becomes the whole app, served by the bridge at `/`.
   agents, apps, reviews and actions. Inside the editor, where VS Code owns ⌘K,
   the palette and surface switch are reached with combos VS Code does not bind
   by default (the shell listens on the same-origin editor iframe's window).
-- **Design.** The rubl-derived tokens and components already in the app;
+- **Design.** The design tokens and components already in the app;
   light/dark/system theme; the login, passcode and fallback pages share the
   tokens.
 

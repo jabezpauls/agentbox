@@ -352,7 +352,7 @@ root paths every later phase uses.
 - deep links;
 - a mobile layout.
 
-It looks and moves like the rest of the rubl-derived app.
+It looks and moves like the rest of the app.
 
 **Deliver:**
 - A shell frame with client-side routing: the spec's routes, deep links that

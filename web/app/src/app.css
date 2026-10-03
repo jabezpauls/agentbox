@@ -1,6 +1,6 @@
 /* Workbench chrome. Tokens live in theme/tokens.css.
  *
- * House rules, all borrowed from rubl:
+ * House rules:
  *   - Separate with hairlines and space, not with boxes and shadows. Elevation
  *     is reserved for surfaces that genuinely float (menus, modals, toasts).
  *   - Hierarchy comes from weight (400 → 500 → 600 → 700) and colour tier
@@ -411,7 +411,7 @@
   padding: 0;
 }
 
-/* workspace rows — 28px, rounded, with rubl's 2px active bar hanging at the
+/* workspace rows — 28px, rounded, with a 2px active bar hanging at the
    left edge. The bar is the signature marker; the fill alone is hover. */
 .ws-row {
   position: relative;
@@ -719,7 +719,7 @@
 .tabbar-tabs::-webkit-scrollbar {
   display: none;
 }
-/* rubl's pill tabs: no border, no elevation, just a soft fill when live. */
+/* Pill tabs: no border, no elevation, just a soft fill when live. */
 .tab {
   display: inline-flex;
   align-items: center;

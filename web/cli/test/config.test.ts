@@ -245,13 +245,13 @@ describe("boxes and use", () => {
     const dir = tmpDir();
     const store = new ConfigStore(dir);
     store.update((d) => {
-      d.boxes.work = { url: "https://work.example.com", token: TOKEN, addedAt: 1, user: "jabe" };
+      d.boxes.work = { url: "https://work.example.com", token: TOKEN, addedAt: 1, user: "alice" };
       d.boxes.home = { url: "https://home.example.com", token: TOKEN, addedAt: 2 };
       d.current = "work";
     });
     const human = await runCli(["boxes"], { configDir: dir });
     expect(human.code).toBe(0);
-    expect(human.stdout).toMatch(/\*\s+work\s+https:\/\/work\.example\.com\s+jabe/);
+    expect(human.stdout).toMatch(/\*\s+work\s+https:\/\/work\.example\.com\s+alice/);
     const asJson = await runCli(["boxes", "--json"], { configDir: dir });
     expect(JSON.parse(asJson.stdout)).toHaveLength(2);
     for (const out of [human.stdout, asJson.stdout, human.stderr, asJson.stderr]) expect(out).not.toContain(TOKEN);

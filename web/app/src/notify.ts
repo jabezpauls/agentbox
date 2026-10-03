@@ -52,7 +52,7 @@ export function notifyTransitions(
 }
 
 /**
- * The human sentence for a failed call. rubl's rule: a person never sees a
+ * The human sentence for a failed call. The rule: a person never sees a
  * method name or an `Error: HTTP nnn`, so every failure reads
  * `Couldn't <verb> the <noun>.` and the server's own message becomes the
  * second line.

@@ -90,7 +90,7 @@ export function AppShell({ resolved }: { resolved: Resolved }) {
       }
       if (handleShellKey(e)) return;
       if (useRouter.getState().route.surface !== "workbench") return;
-      // ⌘B hides and shows the sidebar, as it does in rubl. Only the Meta
+      // ⌘B hides and shows the sidebar. Only the Meta
       // variant: Ctrl+B is the terminal prefix and must stay untouched.
       if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "b" || e.key === "B")) {
         e.preventDefault();

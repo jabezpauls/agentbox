@@ -84,12 +84,12 @@ describe("the managed block in ~/.ssh/config", () => {
   });
 
   it("goes through the host with --via: ssh there, then the box's sshd over docker exec", () => {
-    const words = viaProxy("fludigo", "agentbox", ["-F", "/h/.ssh/config"]);
+    const words = viaProxy("vps", "agentbox", ["-F", "/h/.ssh/config"]);
     expect(words.slice(0, 7)).toEqual(["ssh", "-F", "/h/.ssh/config", "-T", "-o", "ClearAllForwardings=yes", "--"]);
-    expect(words[7]).toBe("fludigo");
+    expect(words[7]).toBe("vps");
     expect(words[8]).toMatch(/^sh -c '.*label=com\.docker\.compose\.project=agentbox -f label=com\.docker\.compose\.service=ssh.*exec docker exec -i "\$c" agentbox-sshd -i'$/);
     expect(() => viaProxy("-oProxyCommand=x", "agentbox")).toThrow(/not an ssh host/);
-    expect(() => viaProxy("fludigo", "Bad;name")).toThrow(/compose project/);
+    expect(() => viaProxy("vps", "Bad;name")).toThrow(/compose project/);
     const answer = `other ${KEY_A} root@x\nagentbox-2 ${HOST} agentbox\njunk\n`;
     expect(projectWithKey(answer, key(HOST))).toBe("agentbox-2");
     expect(projectWithKey(answer, key(KEY_B))).toBeNull();
