@@ -1,179 +1,172 @@
 # agentbox
 
-A sandboxed coding environment for a VPS, reachable from any browser.
+**A sandbox on your own server where coding agents keep working after you close the laptop.**
 
-One app for your coding agents and everything around them — a control room
-for the agents, VS Code, a file manager, your dev servers with links you can
-share, and the box's health — behind a real sign-in with optional two-factor,
-in containers that cannot reach the host.
+<p>
+  <a href="docs/media/agentbox-flow.mp4">
+    <img src="docs/media/agentbox-flow.gif" alt="An agent builds a web app in the agentbox Workbench, the app opens in the Preview beside it, and it is shared by link" width="860">
+  </a>
+</p>
+
+<p>
+  <a href="#install">Install</a> ·
+  <a href="#whats-in-the-box">What's in the box</a> ·
+  <a href="#from-your-own-terminal">CLI</a> ·
+  <a href="#security">Security</a> ·
+  <a href="docs/install.md">Docs</a>
+</p>
+
+Agents that run on your laptop stop when you close the lid. agentbox moves
+them to a VPS. You install it once, and from then on your agents keep working
+around the clock while you check in from a browser, your phone, or your own
+terminal.
+
+It is one app at your own domain. Run Claude Code or Codex in live terminals,
+watch the web app an agent is building open beside it, edit in VS Code, move
+files around, and send someone a link to what got built. All of it runs in
+unprivileged containers, behind a sign-in the agents cannot touch.
+
+## Install
+
+On a Linux VPS, with a DNS name pointed at it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
   | bash -s -- --domain code.example.com
 ```
 
-That installs Docker if it is missing, generates a password, obtains a TLS
-certificate and starts the stack. It prints the password once.
+The script installs Docker if it is missing, builds the images, gets a TLS
+certificate and starts everything. It prints a password once. Open
+`https://code.example.com`, sign in as `admin`, and start an agent in the
+Workbench. Turn on two-factor in Settings → Account.
 
-**First steps.** Open `https://code.example.com` and sign in as `admin` with
-that password ([signing in](docs/install.md#signing-in)). Turn on two-factor
-in Settings → Account. Install the CLI on your laptop from Settings → Devices
-& CLI ([docs/cli.md](docs/cli.md)). Ask an agent to put something in your
-preview, then press **Share** on it ([sharing an app](docs/workbench.md#sharing-an-app)).
+Something already on ports 80 and 443? Use `--mode behind-proxy` or
+`--mode traefik`. Run the script with no options for a walk-through that asks
+the same questions. Every option is in [docs/install.md](docs/install.md).
 
-## What you get
+You need a Linux server (x86_64 or arm64) with 2 GB of RAM and about 5 GB of
+disk. The image carries VS Code, Node, Python and a compiler, because agents
+keep installing things that need them.
 
-| Path | What it is |
-| --- | --- |
-| `/login` | The sign-in page; every other path sends you here first |
-| `/` | The app: Home, and a rail to every other surface |
-| `/workbench` | Many agents in live terminals across workspaces, with previews and review beside them. Old `/workbench/…` links redirect here |
-| `/editor` | VS Code in the browser (code-server, at `/vscode/`), kept running while you use the rest |
-| `/files/…` | A file manager for the workspace: drop folders to upload, download zips, a trash, quick look |
-| `/apps` | Your dev servers, each with its own link, private until you share it |
-| `/a/<id>/` | An app: a server an agent (or you) started, private until you share it — see [apps](docs/workbench.md#apps) |
-| `/system` | CPU, memory, disks and processes; btop in full at `/system/monitor` |
-| `/settings/…` | Password, two-factor, sessions, devices and the CLI, sharing, appearance |
-| `/terminal` | herdr's TUI full-screen — the same session, keyboard-first |
-| `/shell` | A plain bash shell, pleasant on a phone |
-| `/monitor` | btop full-screen, the same as System's detailed monitor |
+## What's in the box
 
-Sign-in is served by the **gate**, a small container outside the sandbox that
-holds the password, sessions, optional two-factor (TOTP with recovery codes)
-and device tokens, rate-limits and locks out guessing, and strips your
-credentials from everything it passes on. See
-[docs/install.md](docs/install.md#signing-in).
+### Workbench
 
-## The app
-
-The whole thing is one app at the root of the box. A rail (a bottom bar on a
-phone) moves between **Home** — what needs you, your projects, your apps and
-how the box is doing — the **Workbench**, the **Editor**, **Files**, **Apps**,
-**System** and **Settings**, and nothing reloads when you move: the editor
-keeps its unsaved edits and the terminals their sessions. **Preview** and
-**Review** live in a dock beside every surface, `⌘K` searches everything, and
-every screen has an address you can reload or bookmark.
-
-![Home](docs/images/home-dark.png)
-
+Every agent in every workspace, each in a live terminal, all on one screen.
 The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
-the agent multiplexer in the image. It shows every agent across every
-workspace at once, each in a live terminal, with the web apps they build
-running in a Preview beside them — ask an agent to "put it in my preview" —
-and the same `Ctrl+B` keymap the TUI uses. Each app has its own address on the
-box, private until you share it. herdr owns the session, so closing the tab
-detaches instead of killing, and `/terminal` is the same session seen from a
-keyboard.
+which owns the sessions. Closing the tab, losing Wi-Fi or switching to your
+phone only detaches. Nothing stops.
 
-![The Workbench](docs/images/workbench-dark.png)
+When an agent is blocked on a question you get a toast, a count in the tab
+title, and a row on Home. Scroll a pane's history with the mouse wheel. Over a
+slow link, turn on the compose bar and type at local speed. The microphone
+dictates into it.
 
-It is also where an agent shows you something rather than describing it: it
-publishes an HTML page with `agentbox-review open plan.html`, you click the
-part you mean and comment on it, and its blocked command returns with what you
-said. No extra hostname and no extra container.
+<img src="docs/media/workbench.png" alt="The Workbench with several agents running in live terminals" width="860">
 
-See [docs/workbench.md](docs/workbench.md) for every surface, the keyboard and
-using it from a phone.
+Claude Code and Codex are installed. Any other terminal agent runs in a pane
+the way it would anywhere else.
 
-## From your laptop
+### Preview and sharing
 
-The box serves its own command-line client. On any machine with Node.js 20+:
+Ask an agent to "put it in my preview". It runs
+`agentbox-preview start -- npm run dev`, and the app opens beside its
+terminal at a private address on your box, `/a/<id>/`. Live reload works.
+
+When you want someone else to see it, press **Share**: anyone with the link,
+or the link plus a passcode, for an hour, a day, a week, a month or until you
+stop. Only you can share an app. An agent cannot, however it tries.
+
+<img src="docs/media/preview.png" alt="A web app an agent built, open in the Preview beside the terminal that runs it" width="860">
+
+### Review
+
+Some things are easier to point at than to describe. An agent writes an HTML
+page and runs `agentbox-review open plan.html`. You click the heading or select
+the sentence you mean and write a comment on it. The agent's command was
+waiting the whole time, and returns with your comments attached to what they
+point at.
+
+### And the rest
+
+- **Editor.** VS Code in the browser. It stays loaded while you move around
+  the app, so unsaved edits stay where you left them.
+- **Files.** The workspace as a file manager. Drop whole folders to upload,
+  download a folder as a zip, look inside files without opening them. Deleting
+  goes to a trash.
+- **Apps.** Every dev server in the box, whether it is up, and who can open it.
+- **System.** CPU, memory, disks and processes, for the sandbox and the host.
+  btop when you want more.
+- **Settings.** Password, two-factor, sessions, devices, sharing, appearance.
+
+It works on a phone, and `⌘K` searches everything. The full tour is in
+[docs/workbench.md](docs/workbench.md).
+
+## From your own terminal
+
+Your box serves its own command-line client. On a machine with Node.js 20 or
+newer:
 
 ```bash
 curl -fsSL https://code.example.com/cli/install | sh
 ```
 
-That installs `agentbox` and signs it in through your browser — no password
-in the terminal; the laptop gets a device token you can revoke — and sets up
-SSH, so `ssh <box>`, rsync, and VS Code's or Zed's remote editing work too.
-Then `agentbox attach` puts herdr in your terminal (drawn locally, with
-`herdr --remote`, when herdr is installed here), `agentbox shell` a bash,
-`agentbox files put ./data -r` uploads a folder (resumably), `agentbox mount`
-shows the workspace in Finder or your file manager, and `agentbox status` says
-how the box is doing. See [docs/cli.md](docs/cli.md).
-
-## Coding agents
-
-[Claude Code](https://github.com/anthropics/claude-code) and
-[Codex](https://github.com/openai/codex) are installed and on the `PATH`. Run
-them from the editor's integrated terminal, from a pane in the Workbench (or
-*Agent* on any project on Home, or any folder in Files), or full-screen in the
-TUI at `/terminal`.
-
-Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` to skip the interactive
-login. Otherwise sign in once inside the sandbox; credentials persist in a
-volume across restarts and updates.
-
-Which agents are baked in is a build-time choice. The default is both; pick with
-`--agents`:
+That installs `agentbox` and signs it in through your browser with a device
+code. Your password never goes near the terminal, and the laptop gets a token
+you can revoke. It also sets up SSH, so the box is a normal host:
 
 ```bash
-./install.sh --agents claude          # just Claude Code
-./install.sh --agents claude,codex    # the default
-./install.sh --agents ''              # a plain environment, no agents
+agentbox attach                 # your agents in this terminal
+ssh code                        # rsync, scp, VS Code Remote-SSH and Zed work too
+agentbox files put ./data -r    # upload a folder; run it again to resume
+agentbox mount                  # the workspace as a folder in Finder or your file manager
+agentbox forward 5173           # a port in the box at localhost:5173 here
 ```
 
-`herdr`, the multiplexer the Workbench and the TUI attach to, is always
-installed. Adding another agent is a one-line entry in the manifest — the `case`
-in `images/workspace/Dockerfile` mapping a name to its npm package — after which
-that name is a valid `--agents` value.
+With herdr installed locally, `agentbox attach` runs `herdr --remote` over SSH:
+your herdr draws the UI and the box sends only what the panes show. Without
+it, the TUI is streamed from the box. See [docs/cli.md](docs/cli.md).
 
-## The sandbox boundary
+## Security
 
-This is the point of the project, so it is enforced rather than asserted:
+The agents run in the sandbox, so the sandbox is where things can go wrong. We
+built the rest around that.
 
-- **No Docker socket.** Mounting it would make the container root on the host.
-- **No host bind mounts in the sandbox.** `/workspace` is a named volume; `/`,
-  `/home` and `/etc` are not visible. The proxy — a separate container, not the
-  sandbox — mounts only its own configuration files, read-only.
-- **No privileges.** Every sandbox process runs as UID 1000 with all
-  capabilities dropped and `no-new-privileges` set. The gate runs as UID
-  10001, likewise with no capabilities and a read-only filesystem. The proxy
-  (Caddy's image) runs as root in its own container, with a read-only
-  filesystem, no capability but binding ports 80/443, and `no-new-privileges`.
-- **Bounded.** CPU, memory and PID ceilings stop a runaway agent from taking
-  the host down with it.
-- **One door, outside.** Only the proxy publishes a port, and everything it
-  receives goes through the gate — its own container, user and volume, which
-  the sandbox cannot touch — before anything reaches the sandbox. No password,
-  session cookie or token is ever passed on to it.
+- **Sign-in lives outside the sandbox.** A small container, the gate, holds the
+  password, sessions, two-factor and device tokens. Every request goes through
+  it first. The sandbox can't read or change any of it.
+- **No front-door credential enters the sandbox.** The gate strips your
+  password, session cookie and tokens from everything it passes on.
+- **No Docker socket, no host mounts, no root.** Sandbox processes run as UID
+  1000 with every capability dropped, under CPU, memory and process limits.
+- **Two-factor** (TOTP, with recovery codes), and rate limits with lockout on
+  every password check.
+- **A firewall for shared hosts.** `--isolate-host` installs nftables rules
+  that stop the sandbox reaching the host and private networks. The public
+  internet stays open, because agents need it.
+- **Apps can't reach the box.** Everything under `/a/` runs in a sandboxed,
+  opaque origin, so a page an agent wrote can't touch your session.
 
-It protects the host from the sandbox. It does not make the code inside safe:
-an agent with your keys can still push commits and spend tokens. See
-[docs/security.md](docs/security.md) for the full threat model.
+What it does not do is make the code inside safe. An agent with your API keys
+can still push commits, spend tokens, and send anything in the workspace
+anywhere on the internet. [docs/security.md](docs/security.md) has the full
+threat model, including what a compromised sandbox can still do and how to
+check the boundary yourself.
 
-## Behind a Cloudflare Tunnel
+## Status and limits
 
-If your server is already reachable through a Cloudflare Tunnel, use
-behind-proxy mode and add a published application route pointing at the bind
-address — no ports are opened and Cloudflare terminates TLS:
+agentbox is young and changes quickly. There are no tagged releases yet;
+`./scripts/agentbox update` pulls the latest and rebuilds.
 
-```
-code.example.com  →  http://127.0.0.1:8443
-```
-
-Pass `--cloudflare on` to the installer so sign-in limits count each visitor
-(read past Cloudflare's addresses) rather than the tunnel as one.
-
-**Order matters.** `cloudflared` matches ingress rules top to bottom, so a
-route placed below a wildcard such as `*.example.com` never runs. The symptom
-is confusing: the hostname answers, but with whatever the wildcard points at,
-so you get a `200` from the wrong service rather than an obvious error. Move
-the specific hostname above the wildcard (row menu → **Move up**), and confirm
-with the connector's own log, which prints the resolved ingress list.
-
-## If ports 80 and 443 are taken
-
-Common on a VPS that already runs something. Bind to loopback and let your
-existing proxy front it:
-
-```bash
-curl -fsSL .../install.sh | bash -s -- --mode behind-proxy --bind 127.0.0.1:8443
-```
-
-For the strongest isolation, run it under
-[rootless Docker](docs/install.md#rootless-docker) so the daemon itself is not
-root.
+- One user per box: one username and password, signed in from as many
+  browsers and devices as you like.
+- Outbound internet from the sandbox is open by default. Restricting it is
+  up to you ([egress filtering](docs/security.md#egress-filtering)).
+- Apps in the Preview get no service workers or IndexedDB, because they run
+  in an opaque origin. `agentbox forward` gives you the real thing on
+  `localhost`.
+- Dictation uses the browser's own speech recognition. Chrome and Edge have
+  it; Firefox does not.
 
 ## Running it
 
@@ -181,22 +174,21 @@ root.
 ./scripts/agentbox status
 ./scripts/agentbox logs code
 ./scripts/agentbox shell            # a shell inside the sandbox
-./scripts/agentbox workbench        # follow the Workbench bridge's log
 ./scripts/agentbox passwd           # change the password
 ./scripts/agentbox totp reset       # turn two-factor off (lost phone)
 ./scripts/agentbox backup           # archive workspace, home and the gate's store
 ./scripts/agentbox update           # pull, rebuild, restart
 ```
 
-## Requirements
+## Docs
 
-A Linux VPS with 2 GB RAM. Docker is installed for you if absent. A domain is
-needed only for standalone mode's certificate.
-
-Allow about 5 GB of disk: the image carries VS Code, Node, a Python toolchain
-and a compiler, because agents routinely install dependencies that need them.
-Build with fewer agents (`--agents`, above) or drop `build-essential` from the
-Dockerfile if you want it smaller.
+- [Installing](docs/install.md): every option, behind-proxy and Traefik
+  setups, Cloudflare, direct TLS, rootless Docker, updating
+- [The app](docs/workbench.md): every surface, the keyboard, using it from a
+  phone, apps and review
+- [The CLI](docs/cli.md): attach, ssh, files, mount, forward
+- [Security model](docs/security.md): the boundary and its residuals, stated
+  plainly
 
 ## Licence
 

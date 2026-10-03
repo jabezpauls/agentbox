@@ -141,6 +141,11 @@ is a one-line entry in the manifest — the `case` in `images/workspace/Dockerfi
 mapping a name to its npm package — after which it becomes a valid `--agents`
 value.
 
+Each agent signs in once, inside the sandbox, the first time you run it; its
+login is kept on the home volume across restarts and updates. To skip that,
+set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` and run
+`./scripts/agentbox restart`.
+
 ### Isolating the sandbox from the host
 
 On a **shared** host — one that also runs other services, a management UI or a
@@ -269,6 +274,23 @@ services that guess the port. Two things your proxy must do:
 
 The box must be reached over HTTPS (or on `localhost`): the session cookie is
 `Secure`, and a browser will not keep it over plain HTTP.
+
+### Behind a Cloudflare Tunnel
+
+If the server is already reachable through a Cloudflare Tunnel, install in
+behind-proxy mode with `--cloudflare on` and add a published application route
+pointing at the bind address. No port is opened, and Cloudflare terminates TLS:
+
+```
+code.example.com  →  http://127.0.0.1:8443
+```
+
+**Order matters.** `cloudflared` matches ingress rules top to bottom, so a
+route placed below a wildcard such as `*.example.com` never runs. The symptom
+is confusing: the hostname answers, but with whatever the wildcard points at,
+so you get a `200` from the wrong service rather than an obvious error. Move
+the specific hostname above the wildcard (row menu → **Move up**), and confirm
+with the connector's own log, which prints the resolved ingress list.
 
 ## Rootless Docker
 
