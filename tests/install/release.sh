@@ -141,5 +141,30 @@ else
 fi
 [ ! -e "$COPY/VERSION" ] && pass "and changes nothing" || fail "the copy was changed"
 
+echo "a box from before releases, a git clone, keeps building, and moves onto releases in place"
+CLONE="$WORK/clone"
+mkdir -p "$WORK/upstream"
+git -C "$ROOT" archive HEAD | tar -x -C "$WORK/upstream"
+git -C "$WORK/upstream" -c init.defaultBranch=main init -q
+git -C "$WORK/upstream" add -A
+git -C "$WORK/upstream" -c user.name=t -c user.email=t@example.com commit -q -m old
+git clone -q "$WORK/upstream" "$CLONE"
+# Its .env, as an installer from before releases wrote it.
+grep -v '^AGENTBOX_\(TAG\|BUILD\|RELEASE_URL\|WORKSPACE_IMAGE\|GATE_IMAGE\)=' "$BOX/.env" > "$CLONE/.env"
+sed -i 's/^AGENTBOX_VERSION=.*/AGENTBOX_VERSION=abc1234/' "$CLONE/.env"
+rm -f "$WORK/calls"
+(cd / && AGENTBOX_RELEASE_URL= "$CLONE/scripts/agentbox" update) >"$WORK/out" 2>&1 || fail "update in a clone failed: $(tail -3 "$WORK/out")"
+called "build --pull" && pass "update in a clone pulls the code and builds" || fail "no build in a clone"
+cget() { grep -m1 "^$1=" "$CLONE/.env" | cut -d= -f2-; }
+[ "$(cget AGENTBOX_WORKSPACE_IMAGE)" = agentbox/workspace:latest ] && pass "under the names it always had" || fail "clone image: '$(cget AGENTBOX_WORKSPACE_IMAGE)'"
+mv "$CLONE/.git" "$WORK/clone-git-backup"
+rm -f "$WORK/calls"
+(cd / && "$CLONE/scripts/agentbox" update --version latest) >"$WORK/out" 2>&1 || fail "moving onto releases failed: $(tail -3 "$WORK/out")"
+[ "$(cget AGENTBOX_TAG)" = v0.0.2 ] && pass "update --version latest pins the latest release" || fail "tag: '$(cget AGENTBOX_TAG)'"
+called " build" && fail "it still builds" || pass "and pulls its images"
+[ -z "$(cget AGENTBOX_WORKSPACE_IMAGE)" ] && pass "the local image names go" || fail "local names stayed"
+[ "$(cget ANTHROPIC_API_KEY)" = sk-ant-keepme ] && [ "$(cget AGENTBOX_PASSWORD_HASH)" = "$hash" ] \
+    && pass "and .env is kept" || fail ".env lost keys"
+
 [ "$FAILED" -eq 0 ] || { echo "release check FAILED" >&2; exit 1; }
 echo "release check passed"
