@@ -31,14 +31,18 @@ unprivileged containers, behind a sign-in the agents cannot touch.
 On a Linux VPS, with a DNS name pointed at it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
-  | bash -s -- --domain code.example.com
+curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/install.sh -o install.sh
+sudo bash install.sh --domain code.example.com
 ```
 
-The script installs Docker if it is missing, builds the images, gets a TLS
-certificate and starts everything. It prints a password once. Open
-`https://code.example.com`, sign in as `admin`, and start an agent in the
-Workbench. Turn on two-factor in Settings → Account.
+The script installs Docker if it is missing, downloads the latest release to
+`~/agentbox` (root's home, under sudo), pulls the prebuilt images, gets a TLS
+certificate and starts everything. Nothing is cloned or compiled. It prints a
+password once. Open `https://code.example.com`, sign in as `admin`, and start
+an agent in the Workbench. Turn on two-factor in Settings → Account.
+
+To update later, run `./scripts/agentbox update` in that folder. It moves to
+the newest release and keeps your settings and files.
 
 Something already on ports 80 and 443? Use `--mode behind-proxy` or
 `--mode traefik`. Run the script with no options for a walk-through that asks
@@ -112,7 +116,14 @@ curl -fsSL https://code.example.com/cli/install | sh
 ```
 
 That installs `agentbox` and signs it in through your browser with a device
-code. Your password never goes near the terminal, and the laptop gets a token
+code. It is also on npm:
+
+```bash
+npm i -g @jabezpauls/agentbox
+agentbox login https://code.example.com
+```
+
+Either way, the sign-in is the same. Your password never goes near the terminal, and the laptop gets a token
 you can revoke. It also sets up SSH, so the box is a normal host:
 
 ```bash

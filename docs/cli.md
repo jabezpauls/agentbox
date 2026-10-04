@@ -21,9 +21,27 @@ for your box at the end of `install.sh`. Options go after `sh -s --`:
 The file is named `.mjs` because Node reads it as an ES module only by that
 name before releases 20.19 and 22.12; the link keeps the name.
 
-On Windows, where there is no `sh`, download `https://<box>/cli/agentbox.mjs`
-and run it with `node agentbox.mjs …`. From a checkout: `cd web && npm ci &&
+### From npm
+
+The same CLI is published to npm as
+[`@jabezpauls/agentbox`](https://www.npmjs.com/package/@jabezpauls/agentbox),
+one version per agentbox release:
+
+```bash
+npm i -g @jabezpauls/agentbox
+agentbox login https://work.example.com
+```
+
+Use this on Windows, or anywhere you would rather npm kept track of it. Pick
+the version your box runs with `npm i -g @jabezpauls/agentbox@1.2.0` for a box
+on `v1.2.0`. (The unscoped `agentbox` on npm is someone else's placeholder,
+not this.)
+
+On Windows without npm, download `https://<box>/cli/agentbox.mjs` and run it
+with `node agentbox.mjs …`. From a checkout: `cd web && npm ci &&
 npm run build -w cli && npm i -g ./cli`.
+
+### Updating the CLI
 
 `agentbox update` replaces the CLI with the build your box serves: it
 downloads `/cli/agentbox.mjs`, checks that it is an agentbox build (and not
@@ -31,7 +49,9 @@ larger than any build is) and that it starts, and swaps it in with one rename.
 From a box on plain http that is not this machine it refuses, since anyone on
 the way could swap what runs next; `--insecure-http` says the network is yours.
 The install script, likewise, downloads from an https box over https only. Once a day the CLI asks the box which
-version it runs (`/_gate/version`) and says so when they differ.
+version it runs (`/_gate/version`) and says so when they differ. A CLI
+installed from npm is npm's to replace: there `agentbox update` prints the
+`npm i -g @jabezpauls/agentbox@<version>` line that matches the box instead.
 
 ## Sign in
 

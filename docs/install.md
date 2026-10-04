@@ -1,15 +1,35 @@
 # Installing
 
-## One command
+## Two commands
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
-  | bash -s -- --domain code.example.com
+curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/install.sh -o install.sh
+sudo bash install.sh --domain code.example.com
+```
+
+Or in one line, if you would rather not keep the file:
+
+```bash
+curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/install.sh \
+  | sudo bash -s -- --domain code.example.com
 ```
 
 Point `code.example.com` at the server first; the certificate is issued on your
 first visit. The installer prints a generated password once; sign in with it at
 `https://code.example.com/login` (any page sends you there).
+
+What it does: installs Docker if it is missing, downloads the release bundle
+(`agentbox.tar.gz`: the compose files, the proxy configuration, the scripts and
+the image sources) to `~/agentbox`, checks it against the release's
+`SHA256SUMS`, pulls the prebuilt images from
+`ghcr.io/jabezpauls/agentbox-workspace` and `-gate` (amd64 and arm64), writes
+`.env` and starts the stack. Nothing is cloned and nothing is compiled. The
+release is pinned in `.env` as `AGENTBOX_TAG`, so the box only moves to a new
+version when you run `./scripts/agentbox update`.
+
+`~` is the home of whoever runs the script, so under `sudo` it is
+`/root/agentbox`. Pass `--dir /opt/agentbox` to put it elsewhere. A user in the
+`docker` group can run it without `sudo`.
 
 ## Options
 
@@ -30,16 +50,20 @@ prints the resolved command before it runs anything.
 | `--sharing <on\|off>` | `on` | Whether you may share an app from the Preview panel (anyone with the link, or a passcode, for as long as you choose). `off` keeps every app private. `--preview path\|off`, its old name, still works. See [sharing apps](workbench.md#sharing-an-app). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
 | `--real-ip-header <name>` | none | behind-proxy/traefik: a header your own proxy writes the visitor's address into and overwrites on every request (e.g. `X-Real-IP`), read before `X-Forwarded-For`. Rarely needed; see [behind-proxy](#if-something-already-serves-ports-80-and-443). |
-| `--agents <list>` | `claude,codex` | Which coding agents to build into the image, comma-separated (`claude`, `codex`). `herdr` is always installed. |
+| `--agents <list>` | `claude,codex` | Which coding agents the sandbox carries, comma-separated (`claude`, `codex`). `herdr` is always installed. The prebuilt image has both; any other list builds the image on the server. See [below](#choosing-coding-agents). |
+| `--version <tag>` | the latest | The release to install, e.g. `v1.2.0`. On an existing install, moves it to that release. |
+| `--build` / `--no-build` | off | Build the images on the server from the release's sources instead of pulling them, or go back to pulling. |
+| `--from-git` | — | Clone the repository into `--dir` and build from it, the way installs worked before releases. See [from a clone](#from-a-clone). |
 | `--isolate-host` | off | Firewall the sandbox off the host and other private networks — see below. |
 | `--cpus` / `--memory` | `2` / `4g` | Sandbox ceilings per service. |
 | `--proxy-cpus` / `--proxy-memory` | `1` / `256m` | Proxy container ceilings. |
-| `--dir <path>` | `~/agentbox` | Where to install. |
+| `--dir <path>` | `~/agentbox` | Where to install. Run from inside a clone, the clone itself. |
 | `--yes` | — | Do not prompt. |
 
 Re-running the installer keeps every setting you already have — mode, domain,
-caps, API keys, anything you added to `.env` by hand — and changes only the
-ones you pass. `install.sh --isolate-host` on an existing traefik box adds the
+caps, API keys, anything you added to `.env` by hand, and the release — and
+changes only the ones you pass. Run it again from the install folder
+(`sudo bash ~/agentbox/install.sh --isolate-host`, say), or download it again. `install.sh --isolate-host` on an existing traefik box adds the
 firewall and leaves it a traefik box. The password is kept unless you pass
 `--password`. `--preview-domain` is still accepted, and ignored with a warning:
 per-port preview hostnames were removed.
@@ -51,7 +75,7 @@ When your reverse proxy is itself a container, prefer `traefik` mode over
 network Traefik already watches, so nothing binds a routable host address.
 
 ```bash
-curl -fsSL .../install.sh | bash -s -- \
+sudo bash install.sh \
   --mode traefik --domain code.example.com \
   --edge-network edge-prod --cert-resolver letsencrypt
 ```
@@ -80,7 +104,7 @@ certificate for the name (say it serves `*.example.com` with a Cloudflare
 Origin CA wildcard, which only Cloudflare trusts).
 
 ```bash
-curl -fsSL .../install.sh | bash -s -- \
+sudo bash install.sh \
   --mode traefik --domain code.example.com --edge-network edge-prod --tls passthrough
 ```
 
@@ -133,11 +157,16 @@ record back to proxied. The edge settings (`--cert-resolver`) were kept.
 
 ### Choosing coding agents
 
-The agents baked into the image are a build-time choice. `--agents claude,codex`
-is the default; `--agents claude` builds a smaller image with just one, and
-`--agents ''` builds none. The
-Workbench multiplexer `herdr` is always installed regardless. Adding a new agent
-is a one-line entry in the manifest — the `case` in `images/workspace/Dockerfile`
+The agents in the image are a build-time choice. The prebuilt image has the
+default, `--agents claude,codex`. Any other list builds the sandbox image on
+the server, from the sources in the release bundle: `--agents claude` builds a
+smaller image with just one, and `--agents ''` builds none. That first build
+takes several minutes and a few GB of memory; later updates rebuild it too.
+The local build is named `agentbox/workspace:latest` (and the gate
+`agentbox/gate:latest`) in `.env`, so a pull never replaces it.
+`--agents claude,codex` (in either order) goes back to pulling. The Workbench
+multiplexer `herdr` is always installed regardless. Adding a new agent is a
+one-line entry in the manifest — the `case` in `images/workspace/Dockerfile`
 mapping a name to its npm package — after which it becomes a valid `--agents`
 value.
 
@@ -245,7 +274,7 @@ Most VPSes running other workloads already have nginx, Traefik or Caddy on those
 ports. Use behind-proxy mode, which binds loopback only:
 
 ```bash
-curl -fsSL .../install.sh | bash -s -- --mode behind-proxy --bind 127.0.0.1:8443
+sudo bash install.sh --mode behind-proxy --bind 127.0.0.1:8443
 ```
 
 Then forward to `127.0.0.1:8443` from your existing proxy. Authentication still
@@ -300,7 +329,7 @@ normal user account instead of root. Recommended on shared hosts:
 ```bash
 curl -fsSL https://get.docker.com/rootless | sh
 export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
-curl -fsSL .../install.sh | bash -s -- --mode behind-proxy
+bash install.sh --mode behind-proxy
 ```
 
 Ports below 1024 are unavailable to a rootless daemon, which is another reason
@@ -329,8 +358,59 @@ back in the right order.
 
 ## Updating
 
-`./scripts/agentbox update` pulls, rebuilds and restarts. Your workspace and
-home volumes are untouched, so files, agent logins and editor settings survive.
+```bash
+cd ~/agentbox
+./scripts/agentbox update                    # the latest release
+./scripts/agentbox update --version v1.2.0   # a particular one, older or newer
+```
+
+`update` downloads the release bundle, checks it against the release's
+`SHA256SUMS`, unpacks it over the install folder, sets `AGENTBOX_TAG` to the
+new release, pulls its images and restarts. `.env` is kept as it is. Your
+workspace and home volumes are untouched, so files, agent logins and editor
+settings survive. A box that builds its own images (other `--agents`, or
+`--build`) rebuilds them from the new release's sources instead of pulling.
+`./scripts/agentbox apply` pulls (or builds) and restarts without changing the
+release, for after you edit `.env` by hand.
+
+Releases are listed at
+[github.com/jabezpauls/agentbox/releases](https://github.com/jabezpauls/agentbox/releases).
+`AGENTBOX_RELEASE_URL` and `AGENTBOX_IMAGE_PREFIX`, set in the environment of
+the first install, point the box at a mirror of the releases and the images;
+both are kept in `.env`.
+
+### Installs from before releases
+
+A box installed with `git clone` (every box before the first release) keeps
+working as it did: `update` sees the `.git` folder, pulls and rebuilds. To move
+it onto releases, in place, keeping `.env` and every volume:
+
+```bash
+cd ~/agentbox
+./scripts/agentbox update                     # once more the old way, for the new scripts
+mv .git ../agentbox-git-backup                # no longer a clone
+./scripts/agentbox update --version latest    # onto releases: pulls from now on
+```
+
+A folder that is neither a release nor a clone, copied over by hand, is left
+alone by `update`, which says so. `./scripts/agentbox update --version latest`
+moves it onto releases, keeping its `.env`. If such a box builds its own images
+under local names, keep `AGENTBOX_WORKSPACE_IMAGE=agentbox/workspace:latest`
+and `AGENTBOX_GATE_IMAGE=agentbox/gate:latest` (and `AGENTBOX_BUILD=on`) in its
+`.env`, and the compose files use those names rather than pulling.
+
+### From a clone
+
+Running `install.sh` from inside a clone of the repository installs that
+clone, and builds the images from it rather than pulling:
+
+```bash
+git clone https://github.com/jabezpauls/agentbox.git && cd agentbox
+sudo bash install.sh --domain code.example.com
+```
+
+`install.sh --from-git` does the clone for you. `update` in a clone runs
+`git pull` and rebuilds; check out a tag first to stay on a release.
 
 Global npm packages an agent installs go to `~/.npm-global` and npm's cache
 to `~/.npm-cache`, both on the home volume. A home volume from an older image
@@ -343,15 +423,15 @@ it against `.env.example` after updating and copy across anything missing.
 
 To adopt a setting on an existing box, pass the install flag to `update`, which
 writes the matching `.env` key and re-applies it: `agentbox update --agents
-claude` rebuilds with just Claude, `agentbox update --mode traefik` swaps the
+claude` builds with just Claude, `agentbox update --mode traefik` swaps the
 overlay, `agentbox update --tls passthrough` swaps it for
 [direct TLS](#direct-tls-passthrough), and `--cloudflare`, `--real-ip-header`,
 `--isolate-host`, `--cert-resolver`,
-`--edge-network`, `--cpus`, `--memory`, `--proxy-cpus` and `--proxy-memory`
-all work the same way. `update`
+`--edge-network`, `--cpus`, `--memory`, `--proxy-cpus`, `--proxy-memory`,
+`--build` and `--no-build` all work the same way. `update`
 checks every flag before it writes any of them.
 
-Updating a box from before the gate existed builds the gate, which seeds its
+Updating a box from before the gate existed brings in the gate, which seeds its
 store from the password hash already in `.env` — the same password signs in —
 and the proxy stops authenticating. What changes for you:
 
