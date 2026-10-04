@@ -242,24 +242,39 @@ try {
     }
     assert(seen(), `the pane's copy never reached this terminal:\n${p.text().slice(-600)}`);
   };
+  // The echo programs below each say what they got under a number of their
+  // own, so waiting for one's answer is never satisfied by an earlier one's
+  // still in the pane, and the next command is never typed while it runs.
+  // Each reads once, and a report still on its way when it turns the mouse
+  // off (the second of two clicks, say) would reach the shell as typed text
+  // and garble the next command: what arrives in the half second after is
+  // thrown away before it answers.
+  let echoes = 0;
+  const DRAIN = `time.sleep(0.5);termios.tcflush(0,termios.TCIFLUSH);`;
   // A program that asks for mouse reports, and says what it got.
-  const mouseEcho = () =>
+  const mouseEcho = () => {
+    const n = ++echoes;
     inPane(
-      `python3 -c 'import os,tty,select;tty.setraw(0);os.write(1,b"\\033[?1000h\\033[?1006h");r=select.select([0],[],[],8)[0];` +
-        `d=os.read(0,99) if r else b"";os.write(1,b"\\033[?1000l\\033[?1006l\\r\\nGOT "+repr(d).encode()+b"\\r\\n")'`,
+      `python3 -c 'import os,tty,select,time,termios;tty.setraw(0);os.write(1,b"\\033[?1000h\\033[?1006h");r=select.select([0],[],[],8)[0];` +
+        `d=os.read(0,99) if r else b"";os.write(1,b"\\033[?1000l\\033[?1006l");${DRAIN}os.write(1,b"\\r\\nGOT${n} "+repr(d).encode()+b"\\r\\n")'`,
     );
+    return n;
+  };
   const CLICK = "\x1b[<0;100;12M\x1b[<0;100;12m";
-  const CLICKED = /GOT b'\\x1b\[<0;\d+;\d+M/;
+  const clicked = (n) => new RegExp(String.raw`GOT${n} b'\\x1b\[<0;\d+;\d+M`);
   // A full-screen program with the mouse modes Claude Code's fullscreen
   // renderer asks for, and says what a wheel notch reached it as.
-  const wheelEcho = (seconds) =>
+  const wheelEcho = (seconds) => {
+    const n = ++echoes;
     inPane(
-      `python3 -c 'import os,tty,select;tty.setraw(0);on=b"\\033[?1049h\\033[?1000h\\033[?1002h\\033[?1003h\\033[?1006h";os.write(1,on);` +
+      `python3 -c 'import os,tty,select,time,termios;tty.setraw(0);on=b"\\033[?1049h\\033[?1000h\\033[?1002h\\033[?1003h\\033[?1006h";os.write(1,on);` +
         `r=select.select([0],[],[],${seconds})[0];d=os.read(0,99) if r else b"";` +
-        `os.write(1,b"\\033[?1006l\\033[?1003l\\033[?1002l\\033[?1000l\\033[?1049l\\r\\nGOT "+repr(d).encode()+b"\\r\\n")'`,
+        `os.write(1,b"\\033[?1006l\\033[?1003l\\033[?1002l\\033[?1000l\\033[?1049l");${DRAIN}os.write(1,b"\\r\\nGOT${n} "+repr(d).encode()+b"\\r\\n")'`,
     );
+    return n;
+  };
   const WHEEL_UP = "\x1b[<64;100;12M";
-  const WHEELED = /GOT b'\\x1b\[<64;\d+;\d+M/;
+  const wheeled = (n) => new RegExp(String.raw`GOT${n} b'\\x1b\[<64;\d+;\d+M`);
 
   await step("attach", "--web: herdr's TUI through the gate, then Ctrl-] q", async () => {
     const p = start(["attach", "--web"], { env: { COLUMNS: "120", LINES: "36" } });
@@ -292,10 +307,10 @@ try {
     p.child.stdin.write("n\r");
     await p.waitFor(HERDR_UI);
     await copyReaches(p, Buffer.from("e2e-copy-web").toString("base64"));
-    mouseEcho();
+    const echo = mouseEcho();
     await new Promise((r) => setTimeout(r, 1000));
     p.child.stdin.write(CLICK + CLICK);
-    await paneShows(CLICKED);
+    await paneShows(clicked(echo));
     p.child.stdin.write("\x1d");
     await new Promise((r) => setTimeout(r, 100));
     p.child.stdin.write("q");
@@ -353,10 +368,10 @@ try {
     await p.waitFor(/\x1b\[\?1049h/, "stdout", 60_000);
     await new Promise((r) => setTimeout(r, 2000));
     await copyReaches(p, Buffer.from("e2e-copy-ssh").toString("base64"));
-    mouseEcho();
+    const echo = mouseEcho();
     await new Promise((r) => setTimeout(r, 1000));
     p.child.stdin.write(CLICK + CLICK);
-    await paneShows(CLICKED);
+    await paneShows(clicked(echo));
     p.child.stdin.write("\x02");
     await new Promise((r) => setTimeout(r, 200));
     p.child.stdin.write("q");
@@ -367,14 +382,14 @@ try {
   await step("ssh", "attach: the wheel scrolls herdr's scrollback, and reaches a program that took the mouse before herdr --remote attached", async () => {
     // As Claude Code's fullscreen renderer does: it asks for the mouse once, at
     // start, long before the owner's herdr attaches.
-    wheelEcho(30);
+    const echo = wheelEcho(30);
     await new Promise((r) => setTimeout(r, 1000));
     const cmd = `stty cols 120 rows 36; ${process.execPath} ${bundle} attach; echo "exit $?"`;
     const p = start(["-qfec", cmd, "/dev/null"], { command: "script", env: { SHELL: "/bin/sh" } });
     await p.waitFor(/\x1b\[\?1049h/, "stdout", 60_000);
     await new Promise((r) => setTimeout(r, 2000));
     p.child.stdin.write(WHEEL_UP);
-    await paneShows(WHEELED);
+    await paneShows(wheeled(echo));
     // Back on the normal screen, the wheel scrolls herdr's scrollback, and a
     // key brings the pane back to live.
     inPane("seq 1 500");
