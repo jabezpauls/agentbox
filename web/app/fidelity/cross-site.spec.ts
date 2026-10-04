@@ -3,7 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
-import { BASE, TINY_APPS, WORKSPACES, api, freePort, makeApp, signIn, startServer, stopServers, test, waitPort } from "./helpers.ts";
+import { BASE, TINY_APPS, WORKSPACES, freePort, makeApp, signIn, startServer, stopServers, test, waitPort } from "./helpers.ts";
 
 /**
  * Another site that knows a private app's id, visited by the owner.
@@ -50,7 +50,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   stopServers();
-  await new Promise<void>((r) => evil.close(() => r()));
+  // Not there when a fixture failed before beforeAll ran.
+  if (evil) await new Promise<void>((r) => evil.close(() => r()));
 });
 
 /** What the other site's frame managed against `id`. */
@@ -95,9 +96,12 @@ test("another site gets nothing once the owner has signed out", async ({ browser
   await page.getByLabel("Password").fill(process.env.E2E_PASSWORD ?? "e2e-password-1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Please sign in" })).toBeVisible();
-  await page.goto(`${BASE}/workbench`);
-  expect((await api(page, "POST", "/_gate/logout")).status).toBe(204);
-  // The open app sees its session end and goes to /login by itself, which
+  // Signed out as the Workbench does it (a same-origin POST), but from the
+  // context's own request client, with this context's cookies: from inside a
+  // page, the page can notice its session end and navigate away while the
+  // call is still being answered, and take the call with it.
+  expect((await ctx.request.post(`${BASE}/_gate/logout`, { headers: { origin: BASE } })).status()).toBe(204);
+  // The open app may see its session end and go to /login by itself, which
   // would race the next page load: the other site opens in a tab of its own.
   // That tab is opened before this one closes: this is the only page in the
   // browser, and Chromium's headless shell can refuse to open a page
