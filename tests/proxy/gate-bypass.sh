@@ -109,10 +109,10 @@ docker run -d --name "$ECHO" --network "$NET_INTERNAL" --network-alias code \
     -v "$ROOT/tests/proxy/harness.mjs:/harness.mjs:ro" \
     "$NODE_IMAGE" node /harness.mjs >/dev/null
 for _ in $(seq 1 50); do
-    docker logs "$ECHO" 2>/dev/null | grep -q READY && break
+    docker logs "$ECHO" 2>/dev/null | grep >/dev/null READY && break
     sleep 0.2
 done
-docker logs "$ECHO" 2>/dev/null | grep -q READY || { echo "echo harness did not start:" >&2; docker logs "$ECHO" >&2; exit 1; }
+docker logs "$ECHO" 2>/dev/null | grep >/dev/null READY || { echo "echo harness did not start:" >&2; docker logs "$ECHO" >&2; exit 1; }
 
 HASH="$(printf '%s\n' "$PASSWORD" | docker run --rm -i --entrypoint agentbox-gate "$GATE_IMAGE" hash-password)"
 
@@ -838,7 +838,7 @@ EOF
         else
             fail "through the Cloudflare stand-in: visitor A [$a], visitor B [$b]"
         fi
-        if docker logs "$GATE" 2>&1 | grep -q "sign-in failed from 198.51.100.7"; then
+        if docker logs "$GATE" 2>&1 | grep >/dev/null "sign-in failed from 198.51.100.7"; then
             pass "the gate saw the visitor's address, not Cloudflare's or Traefik's"
         else
             fail "the gate did not see the visitor's address: $(docker logs "$GATE" 2>&1 | tail -3)"
@@ -986,8 +986,8 @@ EOF
         else
             fail "through the passthrough: client A [$a], client B [$b]"
         fi
-        if docker logs "$GATE" 2>&1 | grep -q "sign-in failed from $CLIENT_A" \
-            && ! docker logs "$GATE" 2>&1 | grep -q "from 198\.51\.100\."; then
+        if docker logs "$GATE" 2>&1 | grep >/dev/null "sign-in failed from $CLIENT_A" \
+            && ! docker logs "$GATE" 2>&1 | grep >/dev/null "from 198\.51\.100\."; then
             pass "the gate saw the client's address from the PROXY header, not a forged one or Traefik's"
         else
             fail "the gate's view: $(docker logs "$GATE" 2>&1 | grep 'sign-in' | tail -3)"
@@ -1008,7 +1008,7 @@ EOF
         # header that is refused, not the peer.)
         plain="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$DOMAIN_T:$CPORT:127.0.0.1" \
             "https://$DOMAIN_T:$CPORT/login" || true)"
-        if [ "$plain" = 200 ] && ! docker logs "$GATE" 2>&1 | grep -q "from 198\.51\.100\.20" \
+        if [ "$plain" = 200 ] && ! docker logs "$GATE" 2>&1 | grep >/dev/null "from 198\.51\.100\.20" \
             && [ "$codes" = " 401 401 401 401 401 429" ]; then
             pass "a PROXY header from anyone but Traefik is ignored: the peer is keyed on its own address"
         else
