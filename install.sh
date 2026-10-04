@@ -722,6 +722,7 @@ case "$MODE" in
         printf '  Listening %s\n' "$BIND"
         printf '            Point your existing reverse proxy at that address.\n' ;;
 esac
+printf '  Version   %s\n' "$VERSION"
 printf '  Username  %s\n' "$USERNAME"
 if [ "$GENERATED" = "true" ]; then
     printf '  Password  %s\n\n' "$PASSWORD"
@@ -731,7 +732,6 @@ elif [ "$KEPT" = "true" ]; then
 else
     printf '  Password  (the one you passed with --password)\n'
 fi
-printf '  Version   %s\n' "$VERSION"
 printf '  Agents    %s\n' "$AGENTS"
 printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
 [ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
