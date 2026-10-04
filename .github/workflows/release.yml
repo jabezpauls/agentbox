@@ -1,60 +1,139 @@
 name: release
 
-# Pushing a tag vX.Y.Z (scripts/release.sh makes one) publishes that release:
+# Every push to main that changes more than the docs is a release, and so is a
+# manual run (Actions → release → Run workflow, or `gh workflow run release.yml
+# -f bump=minor`), which picks the bump:
 #
-#   1. the whole of ci.yml runs against the tag;
-#   2. both images are built natively for linux/amd64 and linux/arm64 and
-#      pushed to ghcr.io/<owner>/agentbox-{workspace,gate} as vX.Y.Z, X.Y and
-#      latest (a pre-release, vX.Y.Z-rc.1, gets only its own tag);
-#   3. the bundle install.sh downloads, install.sh itself and SHA256SUMS are
-#      attached to a new GitHub release;
-#   4. the CLI is published to npm as @jabezpauls/agentbox, with provenance.
+#   1. version: scripts/next-version.sh names it vX.Y.Z, the bump of the
+#      highest release tag or of npm's latest, whichever is higher. Nothing is
+#      committed: the version is stamped into what is built, and the tag is
+#      made on this commit once the images are out;
+#   2. the whole of ci.yml runs against the commit;
+#   3. both images are built natively for linux/amd64 and linux/arm64 and
+#      pushed to ghcr.io/<owner>/agentbox-{workspace,gate} as vX.Y.Z, X.Y,
+#      latest and sha-<commit>;
+#   4. the commit is tagged vX.Y.Z, and the bundle install.sh downloads,
+#      install.sh itself and SHA256SUMS are attached to a new GitHub release,
+#      marked latest;
+#   5. the CLI is published to npm as @jabezpauls/agentbox X.Y.Z, through
+#      npm's trusted publishing (OIDC; provenance comes with it).
 #
 # Images come before the release, so no published install.sh ever points at
-# images that are not there yet. See RELEASING.md for the one-time setup.
+# images that are not there yet. A re-run finishes what a failed run started:
+# whatever already exists (images for this commit, the tag, the release, the
+# npm version) is left as it is. See RELEASING.md for the one-time setup.
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: read
 
+# One release at a time, in order. A push that arrives while one runs waits;
+# of several waiting, only the newest runs, and releases them all.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
+
+env:
+  PACKAGE: "@jabezpauls/agentbox"
 
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
+      release: ${{ steps.v.outputs.release }}
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
-      prerelease: ${{ steps.v.outputs.prerelease }}
+      minor: ${{ steps.v.outputs.minor }}
+      short: ${{ steps.v.outputs.short }}
       prefix: ${{ steps.v.outputs.prefix }}
+      newest: ${{ steps.v.outputs.newest }}
+      have-images: ${{ steps.images.outputs.have }}
     steps:
       - uses: actions/checkout@v4
-      - name: The tag is a release, and the packages say the same version
+        with:
+          fetch-depth: 0 # every tag, for the next version
+      - name: The version this commit is released as
         id: v
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          # A push, or a re-run, finishes the release this commit already has
+          # (if any); a new manual run always makes a new one.
+          REUSE: ${{ github.event_name == 'push' || github.run_attempt != '1' }}
         run: |
-          tag="$GITHUB_REF_NAME"
-          echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
-            || { echo "::error::$tag is not a release tag (vX.Y.Z)"; exit 1; }
+          [ "$GITHUB_REF" = refs/heads/main ] \
+            || { echo "::error::releases are made from main, not $GITHUB_REF"; exit 1; }
+          args=(--bump "$BUMP")
+          [ "$REUSE" = true ] && args+=(--reuse)
+          tag="$(scripts/next-version.sh "${args[@]}")"
+          # A commit main has already moved past, not yet released, is
+          # released with the newer one: its version would otherwise be
+          # higher than the commits after it.
+          if ! git tag --points-at HEAD | grep -qx "$tag" \
+             && [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "::notice::main has moved on from ${GITHUB_SHA::7}; the run for the newer commit releases it"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           version="${tag#v}"
-          for p in web/cli/package.json web/gate/package.json; do
-            got="$(jq -r .version "$p")"
-            [ "$got" = "$version" ] || { echo "::error::$p says $got, the tag $tag (run scripts/release.sh)"; exit 1; }
-          done
-          case "$tag" in *-*) pre=true ;; *) pre=false ;; esac
+          # A re-run of an older release does not take "latest" back.
+          highest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          newest=true
+          [ "$(printf '%s\n' "$highest" "$tag" | sort -V | tail -n1)" = "$tag" ] || newest=false
           {
+            echo "release=true"
             echo "tag=$tag"
             echo "version=$version"
-            echo "prerelease=$pre"
+            echo "minor=${version%.*}"
+            echo "short=${GITHUB_SHA::7}"
             echo "prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/agentbox"
+            echo "newest=$newest"
           } >> "$GITHUB_OUTPUT"
+          echo "::notice::releasing ${GITHUB_SHA::7} as $tag"
+      - uses: docker/login-action@v3
+        if: steps.v.outputs.release == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Are this commit's images already pushed as this version?
+        id: images
+        if: steps.v.outputs.release == 'true'
+        env:
+          PREFIX: ${{ steps.v.outputs.prefix }}
+          TAG: ${{ steps.v.outputs.tag }}
+          SHORT: ${{ steps.v.outputs.short }}
+        run: |
+          # Only if vX.Y.Z and sha-<this commit> are the same image: a tag
+          # left by a run of another commit is built over.
+          digest() { docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}' 2>/dev/null || true; }
+          have=true
+          for image in workspace gate; do
+            a="$(digest "$PREFIX-$image:$TAG")"
+            b="$(digest "$PREFIX-$image:sha-$SHORT")"
+            if [ -z "$a" ] || [ "$a" != "$b" ]; then have=false; fi
+          done
+          echo "have=$have" >> "$GITHUB_OUTPUT"
+          [ "$have" = false ] || echo "::notice::the images for $TAG are already pushed; not building them again"
 
   test:
     needs: version
+    if: needs.version.outputs.release == 'true'
     uses: ./.github/workflows/ci.yml
 
   images:
@@ -73,16 +152,22 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      BUILD: ${{ needs.version.outputs.have-images != 'true' }}
     steps:
       - uses: actions/checkout@v4
+        if: env.BUILD == 'true'
       - uses: docker/setup-buildx-action@v3
+        if: env.BUILD == 'true'
       - uses: docker/login-action@v3
+        if: env.BUILD == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push linux/${{ matrix.arch }} by digest
         id: build
+        if: env.BUILD == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,11 +187,14 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
       - name: Keep the digest for the manifest
+        if: env.BUILD == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
       - uses: actions/upload-artifact@v4
+        if: env.BUILD == 'true'
         with:
           name: digests-${{ matrix.image }}-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -122,37 +210,42 @@ jobs:
     strategy:
       matrix:
         image: [workspace, gate]
+    env:
+      BUILD: ${{ needs.version.outputs.have-images != 'true' }}
     steps:
       - uses: actions/download-artifact@v4
+        if: env.BUILD == 'true'
         with:
           path: /tmp/digests
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
       - uses: docker/setup-buildx-action@v3
+        if: env.BUILD == 'true'
       - uses: docker/login-action@v3
+        if: env.BUILD == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: One tag for both platforms
+        if: env.BUILD == 'true'
         working-directory: /tmp/digests
         env:
           IMAGE: ${{ needs.version.outputs.prefix }}-${{ matrix.image }}
           TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          MINOR: ${{ needs.version.outputs.minor }}
+          SHORT: ${{ needs.version.outputs.short }}
         run: |
-          tags=(-t "$IMAGE:$TAG")
-          if [ "$PRERELEASE" != true ]; then
-            minor="$(echo "$VERSION" | cut -d. -f1-2)"
-            tags+=(-t "$IMAGE:$minor" -t "$IMAGE:latest")
-          fi
+          # vX.Y.Z and sha-<commit> naming one image is how a re-run knows
+          # this commit's images are complete (the version job).
+          tags=(-t "$IMAGE:$TAG" -t "$IMAGE:$MINOR" -t "$IMAGE:latest" -t "$IMAGE:sha-$SHORT")
           # shellcheck disable=SC2046  # one digest per file name
           docker buildx imagetools create "${tags[@]}" $(printf "$IMAGE@sha256:%s " *)
           docker buildx imagetools inspect "$IMAGE:$TAG"
 
   bundle:
     needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -170,22 +263,36 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      NEWEST: ${{ needs.version.outputs.newest }}
     steps:
+      - name: Tag the commit
+        # Through the API, with GITHUB_TOKEN: nothing is committed, and a tag
+        # made this way starts no workflow.
+        run: |
+          if at="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null)"; then
+            [ "$at" = "$GITHUB_SHA" ] || { echo "::error::$TAG already tags $at, not $GITHUB_SHA"; exit 1; }
+            echo "$TAG already tags $GITHUB_SHA"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+            echo "tagged $GITHUB_SHA $TAG"
+          fi
       - uses: actions/download-artifact@v4
         with:
           name: release-files
           path: dist/release
       - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.version.outputs.tag }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        working-directory: dist/release
         run: |
-          cd dist/release
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::the GitHub release $TAG already exists; leaving it"
+            exit 0
+          fi
           sha256sum -c SHA256SUMS
-          flags=(--verify-tag --title "agentbox $TAG" --generate-notes)
-          [ "$PRERELEASE" = true ] && flags+=(--prerelease)
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" \
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest="$NEWEST" \
+            --title "agentbox $TAG" --generate-notes \
             agentbox.tar.gz "agentbox-$TAG.tar.gz" install.sh SHA256SUMS
 
   npm:
@@ -193,26 +300,39 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # npm trusted publishing
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: npm 11.5 or later, for trusted publishing
+        run: npm install -g npm@latest && npm --version
       - run: npm ci
         working-directory: web
       - name: Publish @jabezpauls/agentbox
         working-directory: web
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
           # prepack builds the bundle; this stamps it with the release, so the
           # CLI says the same version as the box it talks to.
           AGENTBOX_VERSION: ${{ needs.version.outputs.tag }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          # Only a fallback: npm signs in through OIDC when the trusted
+          # publisher is set up, and then ignores this. Unset, it is empty.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          flags=(--provenance --access public)
-          [ "$PRERELEASE" = true ] && flags+=(--tag next)
+          if [ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "::notice::$PACKAGE@$VERSION is already on npm"
+            exit 0
+          fi
+          npm pkg set version="$VERSION" -w cli
+          flags=(--access public)
+          # A re-run of an older release never takes `latest` back.
+          latest="$(npm view "$PACKAGE" dist-tags.latest 2>/dev/null || true)"
+          if [ -n "$latest" ] && [ "$(printf '%s\n' "$latest" "$VERSION" | sort -V | tail -n1)" != "$VERSION" ]; then
+            flags+=(--tag previous)
+          fi
           npm publish -w cli "${flags[@]}"

@@ -1,11 +1,11 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
-  # The release workflow runs all of this before it publishes anything.
+  # A push to main is a release: release.yml runs all of this first, and
+  # publishes nothing unless it passes.
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
-            scripts/isolate-host.sh scripts/build-release.sh scripts/release.sh \
+            scripts/isolate-host.sh scripts/build-release.sh scripts/next-version.sh \
             images/workspace/entrypoint.sh \
             images/workspace/agentbox-workbench \
             images/gate/agentbox-gate web/cli/install.sh \
@@ -66,6 +66,10 @@ jobs:
         # real install.sh and moved between with `agentbox update`, against a
         # stand-in docker.
         run: tests/install/release.sh
+
+      - name: The version a release gets
+        # scripts/next-version.sh against throwaway repositories, npm stood in.
+        run: tests/install/next-version.sh
 
       - name: Who can reach whom, in each mode
         # The proxy shares a network with the gate alone (the sandbox cannot
