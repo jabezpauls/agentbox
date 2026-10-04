@@ -20,16 +20,28 @@ first visit. The installer prints a generated password once; sign in with it at
 
 What it does: installs Docker if it is missing, downloads the release bundle
 (`agentbox.tar.gz`: the compose files, the proxy configuration, the scripts and
-the image sources) to `~/agentbox`, checks it against the release's
-`SHA256SUMS`, pulls the prebuilt images from
+the image sources) to `/opt/agentbox`, checks it against the release's
+`SHA256SUMS` before unpacking anything, pulls the prebuilt images from
 `ghcr.io/jabezpauls/agentbox-workspace` and `-gate` (amd64 and arm64), writes
 `.env` and starts the stack. Nothing is cloned and nothing is compiled. The
 release is pinned in `.env` as `AGENTBOX_TAG`, so the box only moves to a new
-version when you run `./scripts/agentbox update`.
+version when you run `sudo ./scripts/agentbox update`. The installer ends by
+printing the folder and the exact commands to use in it.
 
-`~` is the home of whoever runs the script, so under `sudo` it is
-`/root/agentbox`. Pass `--dir /opt/agentbox` to put it elsewhere. A user in the
-`docker` group can run it without `sudo`.
+**Where it goes.** As root, or under `sudo`, the install goes to
+`/opt/agentbox`, and its `.env` (which holds the password hash and API keys)
+is readable by root alone, so the day-to-day commands below take `sudo`. A
+normal user in the `docker` group can run the installer without `sudo`; the
+install then goes to `~/agentbox` and its commands need no `sudo`. `--dir`
+puts it anywhere else. An existing install stays where it is: a box installed
+earlier in root's home (`/root/agentbox`) is found and updated there, and
+`update` never moves one. Every example below assumes `/opt/agentbox`.
+
+**Checksums.** A release whose `SHA256SUMS` cannot be downloaded, or does not
+match, is refused by both `install.sh` and `update`, and nothing is unpacked.
+A mirror that publishes no checksums (see `AGENTBOX_RELEASE_URL` under
+[updating](#updating)) needs `AGENTBOX_INSECURE_SKIP_VERIFY=1` in the
+environment of that one command; it then warns and goes ahead unchecked.
 
 ## Options
 
@@ -57,13 +69,13 @@ prints the resolved command before it runs anything.
 | `--isolate-host` | off | Firewall the sandbox off the host and other private networks — see below. |
 | `--cpus` / `--memory` | `2` / `4g` | Sandbox ceilings per service. |
 | `--proxy-cpus` / `--proxy-memory` | `1` / `256m` | Proxy container ceilings. |
-| `--dir <path>` | `~/agentbox` | Where to install. Run from inside a clone, the clone itself. |
+| `--dir <path>` | `/opt/agentbox` as root or under sudo, else `~/agentbox` | Where to install. Run from inside a clone, the clone itself. An existing install is kept where it is. |
 | `--yes` | — | Do not prompt. |
 
 Re-running the installer keeps every setting you already have — mode, domain,
 caps, API keys, anything you added to `.env` by hand, and the release — and
 changes only the ones you pass. Run it again from the install folder
-(`sudo bash ~/agentbox/install.sh --isolate-host`, say), or download it again. `install.sh --isolate-host` on an existing traefik box adds the
+(`sudo bash /opt/agentbox/install.sh --isolate-host`, say), or download it again. `install.sh --isolate-host` on an existing traefik box adds the
 firewall and leaves it a traefik box. The password is kept unless you pass
 `--password`. `--preview-domain` is still accepted, and ignored with a warning:
 per-port preview hostnames were removed.
@@ -140,7 +152,7 @@ Requirements on the shared Traefik, none of which you change:
 
 Cutover from edge mode, in order:
 
-1. Deploy: `./scripts/agentbox update --tls passthrough` (or re-run
+1. Deploy: `sudo ./scripts/agentbox update --tls passthrough` (or re-run
    `install.sh --tls passthrough`). This sets `AGENTBOX_TLS=passthrough` and
    `AGENTBOX_CLOUDFLARE=off` and recreates the proxy with the TCP router.
    While the record is still proxied, Cloudflare cannot complete the TLS
@@ -148,11 +160,11 @@ Cutover from edge mode, in order:
 2. Set the DNS record to **DNS-only** (grey cloud), pointing at the host.
 3. Caddy asks for the certificate as it starts and retries with backoff (a
    minute, then two, then longer). Rather than wait,
-   `./scripts/agentbox restart` once the record resolves to the host; the
-   certificate arrives within seconds. `./scripts/agentbox logs proxy` shows
+   `sudo ./scripts/agentbox restart` once the record resolves to the host; the
+   certificate arrives within seconds. `sudo ./scripts/agentbox logs proxy` shows
    `certificate obtained successfully`.
 
-To go back: `./scripts/agentbox update --tls edge --cloudflare on`, and set the
+To go back: `sudo ./scripts/agentbox update --tls edge --cloudflare on`, and set the
 record back to proxied. The edge settings (`--cert-resolver`) were kept.
 
 ### Choosing coding agents
@@ -173,7 +185,7 @@ value.
 Each agent signs in once, inside the sandbox, the first time you run it; its
 login is kept on the home volume across restarts and updates. To skip that,
 set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env` and run
-`./scripts/agentbox restart`.
+`sudo ./scripts/agentbox restart`.
 
 ### Isolating the sandbox from the host
 
@@ -215,7 +227,7 @@ session ends after 12 hours unused. You land on **Home**; every surface is
 described in [the app](workbench.md). Settings → Account lists your sessions
 and ends any of them.
 
-**Changing the password.** `./scripts/agentbox passwd` prompts for a new one
+**Changing the password.** `sudo ./scripts/agentbox passwd` prompts for a new one
 (leave it blank to generate one) and signs every session out. The gate's store
 is what counts: `AGENTBOX_PASSWORD_HASH` in `.env` only seeds a store that does
 not exist yet, so editing it by hand changes nothing — `passwd` updates it too,
@@ -237,7 +249,7 @@ password. Turning two-factor on or off signs every other session out. Lost
 the phone and the codes? On the server:
 
 ```bash
-./scripts/agentbox totp reset     # two-factor off, every session signed out
+sudo ./scripts/agentbox totp reset     # two-factor off, every session signed out
 ```
 
 **Too many attempts.** Sign-in allows five password checks a minute from one
@@ -245,7 +257,7 @@ address, slows down after five failures in a row, and after ten locks that
 address out for 15 minutes. The page says how long to wait. To clear it early:
 
 ```bash
-./scripts/agentbox gate unlock
+sudo ./scripts/agentbox gate unlock
 ```
 
 **Devices.** The command-line client, installed on your own machine with
@@ -258,7 +270,7 @@ endpoint that publishes no port (see [SSH](cli.md#ssh-the-box-as-a-host)). To
 end every session and revoke every device token at once — a lost laptop, say:
 
 ```bash
-./scripts/agentbox gate revoke-all
+sudo ./scripts/agentbox gate revoke-all
 ```
 
 **Sharing apps.** Every app has its own address, `/a/<id>/`, open to you
@@ -337,31 +349,35 @@ to prefer behind-proxy mode there.
 
 ## Day to day
 
+In the install folder (for a `~/agentbox` install made without `sudo`, drop
+the `sudo`):
+
 ```bash
-./scripts/agentbox status
-./scripts/agentbox restart         # the whole stack, in order
-./scripts/agentbox logs code
-./scripts/agentbox workbench       # the Workbench bridge's log
-./scripts/agentbox logs gate       # sign-ins, lockouts, admin commands
-./scripts/agentbox passwd          # change the password (signs everyone out)
-./scripts/agentbox totp reset      # turn two-factor off
-./scripts/agentbox gate status     # what the gate has: two-factor, sessions, tokens
-./scripts/agentbox backup          # archive your work
-./scripts/agentbox update
+cd /opt/agentbox
+sudo ./scripts/agentbox status
+sudo ./scripts/agentbox restart         # the whole stack, in order
+sudo ./scripts/agentbox logs code
+sudo ./scripts/agentbox workbench       # the Workbench bridge's log
+sudo ./scripts/agentbox logs gate       # sign-ins, lockouts, admin commands
+sudo ./scripts/agentbox passwd          # change the password (signs everyone out)
+sudo ./scripts/agentbox totp reset      # turn two-factor off
+sudo ./scripts/agentbox gate status     # what the gate has: two-factor, sessions, tokens
+sudo ./scripts/agentbox backup          # archive your work
+sudo ./scripts/agentbox update
 ```
 
 The terminals, the shell, the SSH endpoint, the monitor and the Workbench
 share the editor container's network. If Docker restarts the `code` container
 on its own (after a crash, say), those five lose their network and the box
-answers 502 until they rejoin it; `./scripts/agentbox restart` brings them
+answers 502 until they rejoin it; `sudo ./scripts/agentbox restart` brings them
 back in the right order.
 
 ## Updating
 
 ```bash
-cd ~/agentbox
-./scripts/agentbox update                    # the latest release
-./scripts/agentbox update --version v1.2.0   # a particular one, older or newer
+cd /opt/agentbox
+sudo ./scripts/agentbox update                    # the latest release
+sudo ./scripts/agentbox update --version v1.2.0   # a particular one, older or newer
 ```
 
 `update` downloads the release bundle, checks it against the release's
@@ -370,7 +386,7 @@ new release, pulls its images and restarts. `.env` is kept as it is. Your
 workspace and home volumes are untouched, so files, agent logins and editor
 settings survive. A box that builds its own images (other `--agents`, or
 `--build`) rebuilds them from the new release's sources instead of pulling.
-`./scripts/agentbox apply` pulls (or builds) and restarts without changing the
+`sudo ./scripts/agentbox apply` pulls (or builds) and restarts without changing the
 release, for after you edit `.env` by hand.
 
 Releases are listed at
@@ -386,14 +402,17 @@ working as it did: `update` sees the `.git` folder, pulls and rebuilds. To move
 it onto releases, in place, keeping `.env` and every volume:
 
 ```bash
-cd ~/agentbox
+cd ~/agentbox                                 # wherever it was cloned; it stays there
 ./scripts/agentbox update                     # once more the old way, for the new scripts
 mv .git ../agentbox-git-backup                # no longer a clone
 ./scripts/agentbox update --version latest    # onto releases: pulls from now on
 ```
 
+(Those installs ran as the user who cloned them, so no `sudo`; if yours was
+installed as root, prefix each command with `sudo`.)
+
 A folder that is neither a release nor a clone, copied over by hand, is left
-alone by `update`, which says so. `./scripts/agentbox update --version latest`
+alone by `update`, which says so. `sudo ./scripts/agentbox update --version latest`
 moves it onto releases, keeping its `.env`. If such a box builds its own images
 under local names, keep `AGENTBOX_WORKSPACE_IMAGE=agentbox/workspace:latest`
 and `AGENTBOX_GATE_IMAGE=agentbox/gate:latest` (and `AGENTBOX_BUILD=on`) in its
@@ -458,7 +477,7 @@ and the proxy stops authenticating. What changes for you:
   reads the old key, so the first update, run by the script from before this
   change, starts cleanly with it still in `.env`; the next `agentbox update`
   tidies it away.
-- `./scripts/agentbox backup` now includes the gate's volume (the password
+- `sudo ./scripts/agentbox backup` now includes the gate's volume (the password
   hash, sessions, two-factor, device tokens). Keep the archive as private as
   `.env`.
 

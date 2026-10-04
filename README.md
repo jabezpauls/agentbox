@@ -36,13 +36,18 @@ sudo bash install.sh --domain code.example.com
 ```
 
 The script installs Docker if it is missing, downloads the latest release to
-`~/agentbox` (root's home, under sudo), pulls the prebuilt images, gets a TLS
-certificate and starts everything. Nothing is cloned or compiled. It prints a
-password once. Open `https://code.example.com`, sign in as `admin`, and start
-an agent in the Workbench. Turn on two-factor in Settings → Account.
+`/opt/agentbox`, pulls the prebuilt images, gets a TLS certificate and starts
+everything. Nothing is cloned or compiled. It prints a password once. Open
+`https://code.example.com`, sign in as `admin`, and start an agent in the
+Workbench. Turn on two-factor in Settings → Account.
 
-To update later, run `./scripts/agentbox update` in that folder. It moves to
-the newest release and keeps your settings and files.
+To update later:
+
+```bash
+cd /opt/agentbox && sudo ./scripts/agentbox update
+```
+
+It moves to the newest release and keeps your settings and files.
 
 Something already on ports 80 and 443? Use `--mode behind-proxy` or
 `--mode traefik`. Run the script with no options for a walk-through that asks
@@ -166,8 +171,8 @@ check the boundary yourself.
 
 ## Status and limits
 
-agentbox is young and changes quickly. There are no tagged releases yet;
-`./scripts/agentbox update` pulls the latest and rebuilds.
+agentbox is young and changes quickly. Releases are tagged, and
+`sudo ./scripts/agentbox update` moves a box to the newest one.
 
 - One user per box: one username and password, signed in from as many
   browsers and devices as you like.
@@ -181,14 +186,18 @@ agentbox is young and changes quickly. There are no tagged releases yet;
 
 ## Running it
 
+From the install folder, `/opt/agentbox`. If you installed as a normal user
+in the `docker` group, it is `~/agentbox` and you can leave out `sudo`.
+
 ```bash
-./scripts/agentbox status
-./scripts/agentbox logs code
-./scripts/agentbox shell            # a shell inside the sandbox
-./scripts/agentbox passwd           # change the password
-./scripts/agentbox totp reset       # turn two-factor off (lost phone)
-./scripts/agentbox backup           # archive workspace, home and the gate's store
-./scripts/agentbox update           # pull, rebuild, restart
+cd /opt/agentbox
+sudo ./scripts/agentbox status
+sudo ./scripts/agentbox logs code
+sudo ./scripts/agentbox shell            # a shell inside the sandbox
+sudo ./scripts/agentbox passwd           # change the password
+sudo ./scripts/agentbox totp reset       # turn two-factor off (lost phone)
+sudo ./scripts/agentbox backup           # archive workspace, home and the gate's store
+sudo ./scripts/agentbox update           # the newest release: fetch, pull, restart
 ```
 
 ## Docs
