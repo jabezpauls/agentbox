@@ -41,6 +41,15 @@ printf '%s\n' "$TAG" > "$STAGE/$NAME/VERSION"
 sed -i "s/^DEFAULT_RELEASE=\"\"/DEFAULT_RELEASE=\"$TAG\"/" "$STAGE/$NAME/install.sh"
 grep -q "^DEFAULT_RELEASE=\"$TAG\"" "$STAGE/$NAME/install.sh" \
     || { echo "could not stamp install.sh with $TAG" >&2; exit 1; }
+# The CLI and the gate say the release too, so what a box builds from these
+# sources (--agents, --build) reports it even without AGENTBOX_VERSION. The
+# repository's own versions are not release numbers: releases are stamped,
+# never committed (see RELEASING.md).
+for pkg in web/cli/package.json web/gate/package.json; do
+    sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"${TAG#v}\"/" "$STAGE/$NAME/$pkg"
+    grep -q "\"version\": \"${TAG#v}\"" "$STAGE/$NAME/$pkg" \
+        || { echo "could not stamp $pkg with $TAG" >&2; exit 1; }
+done
 
 # Reproducible: fixed order, owner and times, and no name or time in the gzip
 # header, so two builds of one commit are byte for byte the same.
