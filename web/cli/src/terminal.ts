@@ -391,14 +391,26 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       resolve(code);
     }
 
+    // Input that reaches a shell before its prompt can be thrown away when its
+    // line editor starts, so the first command, and then the keyboard, wait
+    // for the shell's first output.
+    let awaitingPrompt = false;
+    const startInput = (): void => {
+      if (opts.initialInput) session.input(Buffer.from(opts.initialInput, "utf8"));
+      stdin.on("data", onInput);
+    };
     session.on("open", () => {
       guard.enter();
-      stdin.on("data", onInput);
       stdout.on?.("resize", onResize);
       stdout.on?.("drain", onDrain);
-      if (opts.initialInput) session.input(Buffer.from(opts.initialInput, "utf8"));
+      if (opts.initialInput) awaitingPrompt = true;
+      else startInput();
     });
     session.on("output", (data) => {
+      if (awaitingPrompt) {
+        awaitingPrompt = false;
+        queueMicrotask(startInput);
+      }
       guard.observe(data);
       // Flow control: when the terminal cannot keep up, ttyd stops reading
       // the program's output until it has.
