@@ -13,6 +13,7 @@
   <a href="#whats-in-the-box">What's in the box</a> ·
   <a href="#from-your-own-terminal">CLI</a> ·
   <a href="#security">Security</a> ·
+  <a href="docs/how-i-use-it.md">How I use it</a> ·
   <a href="docs/install.md">Docs</a>
 </p>
 
@@ -232,6 +233,8 @@ sudo ./scripts/agentbox update           # the newest release: fetch, pull, rest
 - [The CLI](docs/cli.md): attach, ssh, files, mount, forward
 - [Security model](docs/security.md): the boundary and its residuals, stated
   plainly
+- [How I use it](docs/how-i-use-it.md): a day with agentbox, from handing out
+  work in the morning to reviewing it from a phone
 
 ## Where it comes from
 
