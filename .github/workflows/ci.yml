@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs all of this before it publishes anything.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   validate:
@@ -15,7 +20,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
-            scripts/isolate-host.sh \
+            scripts/isolate-host.sh scripts/build-release.sh scripts/release.sh \
             images/workspace/entrypoint.sh \
             images/workspace/agentbox-workbench \
             images/gate/agentbox-gate web/cli/install.sh \
@@ -39,6 +44,28 @@ jobs:
           for mode in standalone behind-proxy traefik traefik-passthrough; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" -f docker-compose.previews.yml config -q
           done
+          # The images: the release's from ghcr.io at AGENTBOX_TAG by default,
+          # a mirror's with AGENTBOX_IMAGE_PREFIX, and a box that builds its
+          # own (or was set up by hand) by the names it gives them.
+          images() { docker compose -f docker-compose.yml -f docker-compose.standalone.yml config --images | sort -u | tr '\n' ' '; }
+          test "$(images)" = "caddy:2-alpine ghcr.io/jabezpauls/agentbox-gate:latest ghcr.io/jabezpauls/agentbox-workspace:latest "
+          echo "AGENTBOX_TAG=v1.2.3" >> .env
+          test "$(images)" = "caddy:2-alpine ghcr.io/jabezpauls/agentbox-gate:v1.2.3 ghcr.io/jabezpauls/agentbox-workspace:v1.2.3 "
+          echo "AGENTBOX_IMAGE_PREFIX=registry.example.com/me/agentbox" >> .env
+          test "$(images)" = "caddy:2-alpine registry.example.com/me/agentbox-gate:v1.2.3 registry.example.com/me/agentbox-workspace:v1.2.3 "
+          printf 'AGENTBOX_WORKSPACE_IMAGE=agentbox/workspace:latest\nAGENTBOX_GATE_IMAGE=agentbox/gate:latest\n' >> .env
+          test "$(images)" = "agentbox/gate:latest agentbox/workspace:latest caddy:2-alpine "
+
+      - name: The image build definition parses, for both platforms
+        run: |
+          docker buildx bake -f docker-bake.hcl --print > /dev/null
+          test "$(TAG=v1.2.3 docker buildx bake -f docker-bake.hcl --print | jq -c '.target.workspace.platforms')" = '["linux/amd64","linux/arm64"]'
+
+      - name: Installing and updating from release bundles
+        # Two releases of this commit, served over file://, installed with the
+        # real install.sh and moved between with `agentbox update`, against a
+        # stand-in docker.
+        run: tests/install/release.sh
 
       - name: Who can reach whom, in each mode
         # The proxy shares a network with the gate alone (the sandbox cannot

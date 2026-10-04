@@ -98,7 +98,7 @@ wants_build() {
     # Unset means the default pair; set empty means none.
     local agents
     if grep -q '^AGENTBOX_AGENTS=' .env; then agents="$(env_get AGENTBOX_AGENTS)"; else agents="claude,codex"; fi
-    [ "$(printf '%s' "$agents" | tr ',' '\n' | tr -d '[:space:]' | grep -v '^$' | sort -u | paste -sd, -)" != "claude,codex" ]
+    [ "$(printf '%s' "$agents" | tr -d ' \t\r' | tr ',' '\n' | grep -v '^$' | sort -u | paste -sd, -)" != "claude,codex" ]
 }
 
 # release_url <tag|""> <file>: where a release's file is; "" is the latest.

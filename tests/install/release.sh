@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Installing and updating from release bundles, without Docker or the network.
+#
+# Builds two releases of this commit (v0.0.1 and v0.0.2) with
+# scripts/build-release.sh, serves them over file:// in GitHub's layout
+# (AGENTBOX_RELEASE_URL), and runs the real install.sh — piped into bash, as
+# the README has it — and `agentbox update` against a stand-in `docker` that
+# records what it is asked. Checks that a release install pulls rather than
+# builds and pins its tag, that --agents builds, that update moves between
+# releases keeping .env, that a bad checksum is refused, and that a copy made
+# by hand is not updated by accident.
+#
+# `check && pass … || fail …` throughout: pass always succeeds.
+# shellcheck disable=SC2015
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FAILED=0
+pass() { printf '  \033[32mok\033[0m   %s\n' "$*"; }
+fail() { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAILED=1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+REL="$WORK/releases"
+for tag in v0.0.1 v0.0.2; do
+    "$ROOT/scripts/build-release.sh" "$tag" "$REL/download/$tag" >/dev/null
+done
+mkdir -p "$REL/latest"
+cp -R "$REL/download/v0.0.2" "$REL/latest/download"
+export AGENTBOX_RELEASE_URL="file://$REL"
+
+# A docker that does nothing but say what it was asked, and hash a password.
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/docker" <<EOF
+#!/bin/sh
+echo "\$*" >> "$WORK/calls"
+case "\$*" in
+    *hash-password*) cat >/dev/null; echo '\$2a\$14\$abcdefghijklmnopqrstuuKO0DUaDUZ9L.Qq0OZ9nZ5tQmZ6q1pO' ;;
+    *"config --images"*) echo stand-in/image:tag ;;
+esac
+exit 0
+EOF
+chmod +x "$WORK/bin/docker"
+export PATH="$WORK/bin:$PATH"
+
+BOX="$WORK/box"
+get() { grep -m1 "^$1=" "$BOX/.env" | cut -d= -f2-; }
+expect() {
+    if [ "$(get "$1")" = "$2" ]; then pass "$3"; else fail "$3 ($1='$(get "$1")', wanted '$2')"; fi
+}
+called() { grep -q -- "$1" "$WORK/calls"; }
+
+echo "a new install, piped into bash, installs the release it came with"
+rm -f "$WORK/calls"
+if (cd "$WORK" && bash -s -- --mode behind-proxy --dir "$BOX" --yes --password abcdefgh1 \
+        < "$REL/download/v0.0.1/install.sh") >"$WORK/out" 2>&1; then
+    pass "install.sh ran"
+else
+    fail "install.sh failed: $(tail -5 "$WORK/out")"
+fi
+[ "$(cat "$BOX/VERSION" 2>/dev/null)" = v0.0.1 ] && pass "the v0.0.1 bundle is unpacked" || fail "VERSION is '$(cat "$BOX/VERSION" 2>/dev/null)'"
+[ -f "$BOX/docker-compose.yml" ] && [ -x "$BOX/scripts/agentbox" ] && [ -f "$BOX/proxy/Caddyfile.standalone" ] \
+    && pass "with its compose files, scripts and proxy configuration" || fail "the bundle is missing files"
+[ -f "$BOX/images/workspace/Dockerfile" ] && [ -f "$BOX/web/package-lock.json" ] \
+    && pass "and the image sources, for a box that builds its own" || fail "the bundle has no image sources"
+[ ! -e "$BOX/.git" ] && [ ! -e "$BOX/tests" ] && pass "and nothing a box does not need" || fail "the bundle carries .git or tests"
+expect AGENTBOX_TAG v0.0.1 "the tag is pinned in .env"
+expect AGENTBOX_VERSION v0.0.1 "and is the version the box reports"
+expect AGENTBOX_RELEASE_URL "file://$REL" "the release server is kept for updates"
+called "compose -f docker-compose.yml -f docker-compose.behind-proxy.yml pull" && pass "the images are pulled" || fail "no pull: $(cat "$WORK/calls")"
+called " build" && fail "a release install built images" || pass "and not built"
+called "up -d --no-build --remove-orphans" && pass "the stack is started without building" || fail "no up -d --no-build"
+grep -q '^AGENTBOX_WORKSPACE_IMAGE=' "$BOX/.env" && fail "a release install names a local image" || pass "the release's own images are used"
+sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=sk-ant-keepme/' "$BOX/.env"
+echo "MY_OWN_SETTING=keep me" >> "$BOX/.env"
+hash="$(get AGENTBOX_PASSWORD_HASH)"
+
+echo "a re-run keeps the release it has"
+rm -f "$WORK/calls"
+bash "$BOX/install.sh" --yes >/dev/null 2>&1 || fail "re-run failed"
+expect AGENTBOX_TAG v0.0.1 "still v0.0.1"
+expect AGENTBOX_MODE behind-proxy "settings kept"
+
+echo "agentbox update moves to the latest release"
+rm -f "$WORK/calls"
+if (cd / && "$BOX/scripts/agentbox" update) >"$WORK/out" 2>&1; then pass "update ran"; else fail "update failed: $(tail -5 "$WORK/out")"; fi
+[ "$(cat "$BOX/VERSION")" = v0.0.2 ] && pass "the v0.0.2 files are in place" || fail "VERSION is $(cat "$BOX/VERSION")"
+grep -q '^DEFAULT_RELEASE="v0.0.2"' "$BOX/install.sh" && pass "install.sh is the new release's" || fail "install.sh not replaced"
+expect AGENTBOX_TAG v0.0.2 "the tag moves to v0.0.2"
+expect AGENTBOX_VERSION v0.0.2 "and the version with it"
+expect ANTHROPIC_API_KEY sk-ant-keepme ".env keeps its API keys"
+expect MY_OWN_SETTING "keep me" "and keys added by hand"
+expect AGENTBOX_PASSWORD_HASH "$hash" "and the password"
+called "pull" && called "up -d --no-build --remove-orphans" && pass "then pulls and restarts" || fail "update did not pull and restart"
+
+echo "update --version pins a release, and says when it is already there"
+(cd / && "$BOX/scripts/agentbox" update --version 0.0.1) >/dev/null 2>&1 || fail "update --version failed"
+expect AGENTBOX_TAG v0.0.1 "--version 0.0.1 goes back to v0.0.1"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1) >"$WORK/out" 2>&1 || true
+grep -q "Already on agentbox v0.0.1" "$WORK/out" && pass "and a second time says it is already there" || fail "no 'already' note: $(cat "$WORK/out")"
+if (cd / && "$BOX/scripts/agentbox" update --version v9.9.9) >/dev/null 2>&1; then fail "update to a missing release succeeded"; else pass "a release that does not exist is refused"; fi
+expect AGENTBOX_TAG v0.0.1 "leaving the tag as it was"
+
+echo "--agents other than the prebuilt pair builds the image here"
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --agents claude) >/dev/null 2>&1 || fail "update --agents claude failed"
+called "build --pull" && pass "it builds" || fail "no build: $(cat "$WORK/calls")"
+expect AGENTBOX_WORKSPACE_IMAGE agentbox/workspace:latest "under a local name, never the registry's"
+expect AGENTBOX_GATE_IMAGE agentbox/gate:latest "the gate too"
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --agents codex,claude) >/dev/null 2>&1 || fail "update back to the pair failed"
+called " build" && fail "the default pair (in any order) still builds" || pass "the default pair, in any order, pulls again"
+grep -q '^AGENTBOX_WORKSPACE_IMAGE=' "$BOX/.env" && fail "the local name stayed" || pass "and the local names go"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --build) >/dev/null 2>&1 || true
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" apply) >/dev/null 2>&1 || true
+called "build --pull" && pass "--build makes even the default pair build" || fail "--build did not stick"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --no-build) >/dev/null 2>&1 || true
+expect AGENTBOX_BUILD off "--no-build turns it off"
+
+echo "a download that does not match its checksums is refused"
+"$ROOT/scripts/build-release.sh" v0.0.3 "$REL/download/v0.0.3" >/dev/null
+sed -i 's/^[0-9a-f]\{64\}  agentbox.tar.gz$/0000000000000000000000000000000000000000000000000000000000000000  agentbox.tar.gz/' "$REL/download/v0.0.3/SHA256SUMS"
+if (cd / && "$BOX/scripts/agentbox" update --version v0.0.3) >"$WORK/out" 2>&1; then
+    fail "a corrupt release was installed"
+else
+    grep -q "SHA256SUMS" "$WORK/out" && pass "update refuses it" || fail "refused, but not for the checksum: $(cat "$WORK/out")"
+fi
+[ "$(cat "$BOX/VERSION")" = v0.0.1 ] && pass "and changes no file" || fail "files changed: VERSION $(cat "$BOX/VERSION")"
+expect AGENTBOX_TAG v0.0.1 "nor the tag"
+
+echo "a copy made by hand is not updated by accident"
+COPY="$WORK/copy"
+mkdir -p "$COPY/scripts"
+cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$COPY/scripts/"
+touch "$COPY/docker-compose.yml"
+printf 'AGENTBOX_MODE=traefik\nAGENTBOX_TLS=passthrough\n' > "$COPY/.env"
+if (cd / && "$COPY/scripts/agentbox" update) >"$WORK/out" 2>&1; then
+    fail "update ran on a copy made by hand"
+else
+    grep -q -- "--version latest" "$WORK/out" && pass "update refuses, and says how to move it onto releases" || fail "refused without a way forward: $(cat "$WORK/out")"
+fi
+[ ! -e "$COPY/VERSION" ] && pass "and changes nothing" || fail "the copy was changed"
+
+[ "$FAILED" -eq 0 ] || { echo "release check FAILED" >&2; exit 1; }
+echo "release check passed"

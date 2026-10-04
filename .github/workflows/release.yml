@@ -1,0 +1,218 @@
+name: release
+
+# Pushing a tag vX.Y.Z (scripts/release.sh makes one) publishes that release:
+#
+#   1. the whole of ci.yml runs against the tag;
+#   2. both images are built natively for linux/amd64 and linux/arm64 and
+#      pushed to ghcr.io/<owner>/agentbox-{workspace,gate} as vX.Y.Z, X.Y and
+#      latest (a pre-release, vX.Y.Z-rc.1, gets only its own tag);
+#   3. the bundle install.sh downloads, install.sh itself and SHA256SUMS are
+#      attached to a new GitHub release;
+#   4. the CLI is published to npm as @jabezpauls/agentbox, with provenance.
+#
+# Images come before the release, so no published install.sh ever points at
+# images that are not there yet. See RELEASING.md for the one-time setup.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      prefix: ${{ steps.v.outputs.prefix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is a release, and the packages say the same version
+        id: v
+        run: |
+          tag="$GITHUB_REF_NAME"
+          echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "::error::$tag is not a release tag (vX.Y.Z)"; exit 1; }
+          version="${tag#v}"
+          for p in web/cli/package.json web/gate/package.json; do
+            got="$(jq -r .version "$p")"
+            [ "$got" = "$version" ] || { echo "::error::$p says $got, the tag $tag (run scripts/release.sh)"; exit 1; }
+          done
+          case "$tag" in *-*) pre=true ;; *) pre=false ;; esac
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$pre"
+            echo "prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/agentbox"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    needs: [version, test]
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [workspace, gate]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push linux/${{ matrix.arch }} by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/${{ matrix.image }}/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          # The same arguments as docker-bake.hcl. The prebuilt sandbox carries
+          # both agents; any other --agents is built on the box.
+          build-args: |
+            AGENTBOX_VERSION=${{ needs.version.outputs.tag }}
+            ${{ matrix.image == 'workspace' && 'AGENTS=claude,codex' || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          outputs: type=image,name=${{ needs.version.outputs.prefix }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+      - name: Keep the digest for the manifest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifests:
+    needs: [version, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [workspace, gate]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: One tag for both platforms
+        working-directory: /tmp/digests
+        env:
+          IMAGE: ${{ needs.version.outputs.prefix }}-${{ matrix.image }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          tags=(-t "$IMAGE:$TAG")
+          if [ "$PRERELEASE" != true ]; then
+            minor="$(echo "$VERSION" | cut -d. -f1-2)"
+            tags+=(-t "$IMAGE:$minor" -t "$IMAGE:latest")
+          fi
+          # shellcheck disable=SC2046  # one digest per file name
+          docker buildx imagetools create "${tags[@]}" $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE:$TAG"
+
+  bundle:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the release files
+        run: scripts/build-release.sh "${{ needs.version.outputs.tag }}" dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  github-release:
+    needs: [version, manifests, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist/release
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          cd dist/release
+          sha256sum -c SHA256SUMS
+          flags=(--verify-tag --title "agentbox $TAG" --generate-notes)
+          [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" \
+            agentbox.tar.gz "agentbox-$TAG.tar.gz" install.sh SHA256SUMS
+
+  npm:
+    needs: [version, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Publish @jabezpauls/agentbox
+        working-directory: web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # prepack builds the bundle; this stamps it with the release, so the
+          # CLI says the same version as the box it talks to.
+          AGENTBOX_VERSION: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          flags=(--provenance --access public)
+          [ "$PRERELEASE" = true ] && flags+=(--tag next)
+          npm publish -w cli "${flags[@]}"
