@@ -26,6 +26,8 @@ chmod +x "$WORK/bin/docker"
 calls() { rm -f "$WORK/calls"; PATH="$WORK/bin:$PATH" "$WORK/box/scripts/agentbox" restart "$@"; tr '\n' ';' < "$WORK/calls"; }
 
 for args in "" "code" "workbench code"; do
+    # Split on purpose: each word is a service name.
+    # shellcheck disable=SC2086
     got="$(calls $args)"
     if [ "$got" = "stop;up -d;" ]; then pass "restart ${args:-(everything)} stops and starts in order"; else fail "restart ${args:-(everything)} ran: $got"; fi
 done

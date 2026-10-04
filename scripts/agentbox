@@ -171,8 +171,10 @@ fetch_release() {
 apply() {
     local ws
     if wants_build; then
-        [ -f images/workspace/Dockerfile ] && [ -d web ] \
-            || { echo "this directory has no sources to build the images from (images/, web/)" >&2; exit 1; }
+        if [ ! -f images/workspace/Dockerfile ] || [ ! -d web ]; then
+            echo "this directory has no sources to build the images from (images/, web/)" >&2
+            exit 1
+        fi
         # A local build gets a local name, never the registry's: a later pull
         # must not replace it, nor it pass for the published image. Names set by
         # hand are kept.

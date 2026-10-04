@@ -391,8 +391,11 @@ done
 if fresh --bind 10.0.0.5:8443 --bind-public && grep -q 'warning' "$DIR/err"; then
     pass "--bind-public allows it, with a warning"
     expect AGENTBOX_BIND_PUBLIC on "and .env remembers it"
-    AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes >/dev/null 2>&1 \
-        && pass "so a re-run keeps working" || fail "a re-run of a --bind-public install was refused"
+    if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes >/dev/null 2>&1; then
+        pass "so a re-run keeps working"
+    else
+        fail "a re-run of a --bind-public install was refused"
+    fi
 else
     fail "--bind-public: $(cat "$DIR/err")"
 fi

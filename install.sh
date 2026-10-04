@@ -510,8 +510,10 @@ fetch_release() {
     # reads a byte of it.
     if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$want" SHA256SUMS)"; then
         sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
-        [ -n "$sums" ] && [ "$sums" = "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ] \
-            || { rm -rf "$tmp"; die "agentbox.tar.gz does not match the release's SHA256SUMS; not installing it"; }
+        if [ -z "$sums" ] || [ "$sums" != "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ]; then
+            rm -rf "$tmp"
+            die "agentbox.tar.gz does not match the release's SHA256SUMS; not installing it"
+        fi
     elif [ "${AGENTBOX_INSECURE_SKIP_VERIFY:-}" = 1 ]; then
         warn "no SHA256SUMS at $(release_url "$want" SHA256SUMS); installing unchecked (AGENTBOX_INSECURE_SKIP_VERIFY=1)"
     else
