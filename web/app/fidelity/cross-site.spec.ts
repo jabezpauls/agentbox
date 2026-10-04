@@ -99,8 +99,12 @@ test("another site gets nothing once the owner has signed out", async ({ browser
   expect((await api(page, "POST", "/_gate/logout")).status).toBe(204);
   // The open app sees its session end and goes to /login by itself, which
   // would race the next page load: the other site opens in a tab of its own.
+  // That tab is opened before this one closes: this is the only page in the
+  // browser, and Chromium's headless shell can refuse to open a page
+  // ("Target.createTarget: Not supported") just after its last one closed.
+  const other = await ctx.newPage();
   await page.close();
-  nothing(await fromEvil(await ctx.newPage(), appId));
+  nothing(await fromEvil(other, appId));
   await ctx.close();
 });
 
