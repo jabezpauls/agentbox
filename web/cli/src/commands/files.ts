@@ -476,7 +476,12 @@ const CMD_SAFE = /^[A-Za-z0-9 _.:\\()~-]+$/;
 /**
  * How to start the person's editor on `file`. On Unix, as git does: `$EDITOR`
  * may carry arguments ("code --wait"), so it goes through `sh -c` with the
- * file as a separate argument, never pasted into the command. On Windows
+ * file as a separate argument, never pasted into the command. That shell
+ * catches Ctrl-C and Ctrl-\ and does nothing with them: they are the
+ * editor's, which still gets them as usual (a caught signal is reset in a
+ * child, an ignored one would not be). Without that, a shell that forks
+ * rather than execs its last command, as dash does, dies of the Ctrl-C the
+ * editor shrugged off, and the edit is reported failed. On Windows
  * there is no such shell: the command is split into words and started
  * directly — except a `.cmd` or `.bat` (VS Code's `code`), which Windows
  * runs only through cmd.exe, and then only with a file path in which cmd.exe
@@ -488,7 +493,7 @@ export function editorCommand(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv = process.env,
 ): { command: string; args: string[]; shell: boolean } {
-  if (platform !== "win32") return { command: "/bin/sh", args: ["-c", `${editor} "$@"`, "sh", file], shell: false };
+  if (platform !== "win32") return { command: "/bin/sh", args: ["-c", `trap : INT QUIT; ${editor} "$@"`, "sh", file], shell: false };
   const [first = "notepad", ...rest] = splitCommand(editor);
   const resolved = /[\\/]/.test(first) ? first : (findOnPath(first, env, "win32") ?? first);
   if (!/\.(cmd|bat)$/i.test(resolved)) return { command: resolved, args: [...rest, file], shell: false };

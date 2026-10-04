@@ -350,7 +350,7 @@ describe("the editor, on Windows", () => {
     expect(code.command).toBe(`"${path.join(bin, "code.cmd")}" "--wait" "C:\\Temp\\agentbox-edit-x\\conf.txt"`);
     expect(() => editorCommand("code --wait", "C:\\T&calc\\conf.txt", "win32", env)).toThrow(/cmd.exe would act on/);
     // Elsewhere: sh -c with the file as its own argument, never in the command.
-    expect(editorCommand("code --wait", "/tmp/a'b", "linux")).toEqual({ command: "/bin/sh", args: ["-c", 'code --wait "$@"', "sh", "/tmp/a'b"], shell: false });
+    expect(editorCommand("code --wait", "/tmp/a'b", "linux")).toEqual({ command: "/bin/sh", args: ["-c", 'trap : INT QUIT; code --wait "$@"', "sh", "/tmp/a'b"], shell: false });
   });
 
   it("quotes a path for pasting into either shell", () => {
