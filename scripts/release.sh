@@ -33,7 +33,8 @@ done
 (cd web && npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null)
 
 git add web/cli/package.json web/gate/package.json web/package-lock.json
-git commit -q -m "Release $TAG"
+# The packages may already say this version (the first release, 0.1.0).
+git diff --cached --quiet || git commit -q -m "Release $TAG"
 git tag -a "$TAG" -m "agentbox $TAG"
 
 echo "Tagged $TAG. Check it, then publish it with:"
