@@ -21,7 +21,10 @@ them to a VPS. You install it once, and from then on your agents keep working
 around the clock while you check in from a browser, your phone, or your own
 terminal.
 
-It is one app at your own domain. Run Claude Code or Codex in live terminals,
+It is one app at your own domain, and an orchestration layer for your agents.
+Start as many as you like across your projects, see at a glance which are
+working and which are waiting on you, and step into any of them. Run Claude
+Code or Codex in live terminals,
 watch the web app an agent is building open beside it, edit in VS Code, move
 files around, and send someone a link to what got built. All of it runs in
 unprivileged containers, behind a sign-in the agents cannot touch.
@@ -61,7 +64,9 @@ keep installing things that need them.
 
 ### Workbench
 
-Every agent in every workspace, each in a live terminal, all on one screen.
+This is where you run a team of agents. Every agent in every workspace, each
+in a live terminal, all on one screen. Give one a feature, another the tests,
+a third the docs, and move between them as they work.
 The Workbench is a browser client for [herdr](https://github.com/herdrdev/herdr),
 which owns the sessions. Closing the tab, losing Wi-Fi or switching to your
 phone only detaches. Nothing stops.
@@ -94,15 +99,29 @@ the sentence you mean and write a comment on it. The agent's command was
 waiting the whole time, and returns with your comments attached to what they
 point at.
 
+### Editor
+
+VS Code in the browser, on the same files your agents are working on, with
+Claude Code's extension ready beside your code. It stays loaded while you move
+around the app, so unsaved edits stay where you left them.
+
+<img src="docs/media/editor.jpg" alt="VS Code in agentbox, with the habit tracker's App.jsx open and Claude Code's panel beside it" width="860">
+
+### Files
+
+The workspace as a file manager. Drop whole folders to upload, download a
+folder as a zip, look inside a file without opening it, and rename, move or
+copy things around. Deleting goes to a trash, so nothing disappears by
+accident. From your laptop, `agentbox files` and `agentbox mount` do the same.
+
+<img src="docs/media/files.jpg" alt="The Files surface: the workspace's projects in a tree and a list, with upload and new-folder buttons" width="860">
+
 ### And the rest
 
 <img src="docs/media/home.png" alt="Home: every project with its agents, terminals and apps, and the box's CPU, memory and disk" width="860">
 
-- **Editor.** VS Code in the browser. It stays loaded while you move around
-  the app, so unsaved edits stay where you left them.
-- **Files.** The workspace as a file manager. Drop whole folders to upload,
-  download a folder as a zip, look inside files without opening them. Deleting
-  goes to a trash.
+- **Home.** Every project with its agents, terminals and apps, and what needs
+  you right now.
 - **Apps.** Every dev server in the box, whether it is up, and who can open it.
 - **System.** CPU, memory, disks and processes, for the sandbox and the host.
   btop when you want more.
