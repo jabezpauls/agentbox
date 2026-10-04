@@ -51,7 +51,10 @@ if [[ "$out" == *REPLACED* ]]; then pass "rules for a new subnet apply over the 
 if [ "$(val OLD)" = 0 ]; then pass "the old subnet's rules are gone"; else fail "old subnet still present: $(val OLD)"; fi
 if [ "$(val NEW)" = 1 ]; then pass "the new subnet's rules are in place"; else fail "new subnet rules: $(val NEW)"; fi
 
-docker network create --ipv6 --subnet 10.231.7.0/24 --subnet fd00:c1:7::/64 "$NET" >/dev/null
+# The gateways named: some Docker releases leave a chosen subnet's gateway out
+# of the network's IPAM config, as a network compose creates never does.
+docker network create --ipv6 --subnet 10.231.7.0/24 --gateway 10.231.7.1 \
+    --subnet fd00:c1:7::/64 --gateway fd00:c1:7::1 "$NET" >/dev/null
 # Read as the script reads them; an empty answer is a failure to report, not
 # a reason for set -e to end the check without a word.
 subnet="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Subnet || true)"
@@ -59,7 +62,7 @@ gw="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Gateway || true)"
 if [ "$subnet" = 10.231.7.0/24 ]; then pass "dual-stack network: IPv4 subnet chosen ($subnet)"; else
     fail "subnet parsed as '$subnet' from $(docker network inspect "$NET" --format '{{json .IPAM.Config}}')"
 fi
-if [[ "$gw" =~ ^10\.231\.7\.[0-9]+$ ]]; then pass "dual-stack network: IPv4 gateway chosen ($gw)"; else fail "gateway parsed as '$gw'"; fi
+if [ "$gw" = 10.231.7.1 ]; then pass "dual-stack network: IPv4 gateway chosen ($gw)"; else fail "gateway parsed as '$gw'"; fi
 _ih_render_rules "$subnet" > "$WORK/c.nft"
 if docker run --rm --cap-add NET_ADMIN -v "$WORK:/r:ro" debian:bookworm-slim sh -c \
     'apt-get update -qq >/dev/null && apt-get install -y -qq nftables >/dev/null 2>&1 && nft -c -f /r/c.nft' 2>/dev/null; then
