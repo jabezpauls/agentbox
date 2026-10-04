@@ -455,16 +455,22 @@ for CADDYFILE in $CADDYFILES; do
     # What `agentbox mount` sends: a device token, and names with ; or a
     # backslash. Under /api/dav/ the gate judges only the prefix, so each path
     # — including ones that try to climb out — must arrive at the bridge
-    # exactly as sent, and at no other upstream. (Caddy writes a percent
-    # escape's hex in capitals on the way through, which names the same bytes;
-    # the gate itself forwards the path untouched, as its unit tests show.)
+    # exactly as sent, and at no other upstream: there the WebDAV handler
+    # decodes each name and refuses `.`, `..` and an encoded slash (the
+    # bridge's dav tests), so a climb stops at the workspace. Some Caddy
+    # releases write a percent escape's hex in capitals on the way through,
+    # others keep it as sent; both name the same bytes, so the two are
+    # compared with the hex in one case. (The gate itself forwards the path
+    # untouched, as its unit tests show.)
     if [ -n "$TOKEN" ]; then
         ok=1
+        upper_hex() { sed -E 's/%([0-9a-fA-F]{2})/%\U\1/g'; }
         for p in "/api/dav/a;b.txt" "/api/dav/a%3Bb%5Cc" "/api/dav/dir%20x/50%25.txt" "/api/dav/..%2f..%2fvscode/" \
             "/api/dav/%2e%2e/%2e%2e/terminal/" "/api/dav/../../vscode/" "/api/dav/..%5c..%5cshell/"; do
-            want="$(printf '%s' "$p" | sed -E 's/%([0-9a-fA-F]{2})/%\U\1/g')"
+            want="$(printf '%s' "$p" | upper_hex)"
             req PROPFIND "$p" -H "Authorization: Bearer $TOKEN" -H 'Depth: 0'
-            if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"port":7800,'* ]] && [[ "$BODY" == *"\"url\":\"$want\""* ]]; then :; else
+            got="$(printf '%s' "$BODY" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p' | upper_hex)"
+            if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"echo":"bridge","port":7800,'* ]] && [ "$got" = "$want" ]; then :; else
                 fail "WebDAV $p -> $STATUS $BODY"; ok=0
             fi
             case "$BODY" in *'"authorization"'*) fail "the token reached the sandbox via $p"; ok=0 ;; esac

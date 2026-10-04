@@ -148,6 +148,12 @@ describe("the WebDAV protocol, as Finder and gio use it", () => {
     for (const p of ["/..%2f..%2fetc", "/%2e%2e/", "/%2E%2e/%2e%2e/api/rpc", "/../api/rpc", "/a%2fb", "/x%00y"]) {
       expect(await rawStatus("PROPFIND", `/api/dav${p}`), p).toBe(400);
     }
+    // A backslash is no separator here: `..\..\shell` is one name, and it can
+    // only ever be a file of that name in the workspace itself.
+    expect(await rawStatus("PROPFIND", "/api/dav/..%5c..%5cshell/")).toBe(404);
+    expect((await dav("PUT", "/..%5c..%5cx", { body: "in" })).status).toBe(201);
+    expect(fs.readFileSync(path.join(ws(), "..\\..\\x"), "utf8")).toBe("in");
+    expect(fs.existsSync(path.join(ws(), "..", "..", "x"))).toBe(false);
   });
 
   it("handles names with semicolons, backslashes, newlines and stray bytes", async () => {
