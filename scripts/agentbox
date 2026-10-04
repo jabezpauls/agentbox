@@ -78,6 +78,15 @@ real_ip_header_problem() {
 
 env_get() { grep -m1 "^$1=" .env | cut -d= -f2- || true; }
 
+# Twenty random lowercase letters and digits (see install.sh: a fixed read,
+# so nothing in the pipeline is cut off and pipefail stays quiet).
+random_password() {
+    local p
+    p="$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | cut -c1-20)"
+    [ "${#p}" -eq 20 ] || { echo "could not generate a password" >&2; exit 1; }
+    printf '%s' "$p"
+}
+
 # The names a box that builds its own images gives them: the names every
 # install used before releases, so a box updated from then keeps its images.
 LOCAL_WORKSPACE_IMAGE="agentbox/workspace:latest"
@@ -409,7 +418,7 @@ case "${1:-help}" in
             NEW=""
         fi
         if [ -z "$NEW" ]; then
-            NEW="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
+            NEW="$(random_password)"
             GENERATED="true"
         fi
         case "$NEW" in

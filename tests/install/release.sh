@@ -74,6 +74,16 @@ sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=sk-ant-keepme/' "$BOX/.env"
 echo "MY_OWN_SETTING=keep me" >> "$BOX/.env"
 hash="$(get AGENTBOX_PASSWORD_HASH)"
 
+echo "a new install without --password generates one, and prints it once"
+if (cd "$WORK" && bash -s -- --mode behind-proxy --dir "$WORK/box2" --yes \
+        < "$REL/download/v0.0.1/install.sh") >"$WORK/out" 2>&1 \
+    && grep -Eq '^  Password  [a-z0-9]{20}$' "$WORK/out"; then
+    pass "a 20-character password is generated"
+else
+    fail "no generated password: $(tail -5 "$WORK/out")"
+fi
+rm -rf "$WORK/box2"
+
 echo "a re-run keeps the release it has"
 rm -f "$WORK/calls"
 bash "$BOX/install.sh" --yes >/dev/null 2>&1 || fail "re-run failed"

@@ -61,6 +61,15 @@ EXPLICIT=" "
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+# Twenty random lowercase letters and digits. `tr` is cut off by `head` once
+# it has enough (SIGPIPE), which pipefail would count as a failure: read a
+# fixed amount first, and check the length instead.
+random_password() {
+    local p
+    p="$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | cut -c1-20)"
+    [ "${#p}" -eq 20 ] || die "could not generate a password"
+    printf '%s' "$p"
+}
 
 usage() {
     cat <<'USAGE'
@@ -564,7 +573,7 @@ if [ -z "$PASSWORD" ] && [ -f .env ] && grep -q '^AGENTBOX_PASSWORD_HASH=.\+' .e
     HASH="$(grep -m1 '^AGENTBOX_PASSWORD_HASH=' .env | cut -d= -f2- | sed 's/[$][$]/$/g')"
 else
     if [ -z "$PASSWORD" ]; then
-        PASSWORD="$(tr -dc 'a-z0-9' </dev/urandom | head -c 20)"
+        PASSWORD="$(random_password)"
         GENERATED="true"
     fi
     log "Hashing the password"
