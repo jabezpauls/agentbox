@@ -379,6 +379,7 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
     function finish(ended: Ended, code = exitCodeFor(ended)): void {
       if (done) return;
       done = true;
+      if (fallback) clearTimeout(fallback);
       session.dispose();
       stdin.off?.("data", onInput);
       stdout.off?.("resize", onResize);
@@ -394,8 +395,16 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
     // Input that reaches a shell before its prompt can be thrown away when its
     // line editor starts, so the first command, and then the keyboard, wait
     // for the shell's first output.
-    let awaitingPrompt = false;
+    // The prompt can arrive before "open" does, and a shell that prints
+    // nothing must not leave the keyboard dead, hence the fallback.
+    let opened = false;
+    let prompted = !opts.initialInput;
+    let started = false;
+    let fallback: ReturnType<typeof setTimeout> | undefined;
     const startInput = (): void => {
+      if (started || done || !opened || !prompted) return;
+      started = true;
+      if (fallback) clearTimeout(fallback);
       if (opts.initialInput) session.input(Buffer.from(opts.initialInput, "utf8"));
       stdin.on("data", onInput);
     };
@@ -403,12 +412,19 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       guard.enter();
       stdout.on?.("resize", onResize);
       stdout.on?.("drain", onDrain);
-      if (opts.initialInput) awaitingPrompt = true;
-      else startInput();
+      opened = true;
+      if (!prompted) {
+        fallback = setTimeout(() => {
+          prompted = true;
+          startInput();
+        }, 3000);
+        fallback.unref?.();
+      }
+      startInput();
     });
     session.on("output", (data) => {
-      if (awaitingPrompt) {
-        awaitingPrompt = false;
+      if (!prompted) {
+        prompted = true;
         queueMicrotask(startInput);
       }
       guard.observe(data);
