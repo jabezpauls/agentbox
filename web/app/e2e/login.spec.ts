@@ -106,10 +106,15 @@ test("signing out ends the session, and the open app goes back to sign in", asyn
   expect((await gateApi(page, "POST", "/_gate/logout")).status).toBe(204);
 
   // The app's next request is refused, and it sends the page to sign in,
-  // remembering where it was.
-  await page.evaluate(() => {
-    void fetch("api/health");
-  });
+  // remembering where it was. Its own polling may get there first and take
+  // the page away under this nudge, which is the same outcome.
+  await page
+    .evaluate(() => {
+      void fetch("api/health");
+    })
+    .catch((err: Error) => {
+      if (!/context was destroyed|navigat/i.test(err.message)) throw err;
+    });
   await expect(page).toHaveURL(`${GATE}/login?next=${encodeURIComponent("/")}`);
 
   // Coming back needs the password again.
