@@ -184,6 +184,10 @@ agentbox is young and changes quickly. Releases are tagged, and
 - Dictation uses the browser's own speech recognition. Chrome and Edge have
   it; Firefox does not.
 
+Coming next: collaborative coding. Today a box belongs to one person; next it
+becomes a place a team shares, with everyone's agents in one Workbench and
+the people who started them working side by side.
+
 ## Running it
 
 From the install folder, `/opt/agentbox`. If you installed as a normal user
@@ -209,6 +213,12 @@ sudo ./scripts/agentbox update           # the newest release: fetch, pull, rest
 - [The CLI](docs/cli.md): attach, ssh, files, mount, forward
 - [Security model](docs/security.md): the boundary and its residuals, stated
   plainly
+
+## Where it comes from
+
+We built agentbox as the agent sandbox for [Rubl](https://rubl.in), the
+operating system we're making for small companies. This is that sandbox on
+its own, open source, for anyone who wants their agents on their own server.
 
 ## Licence
 
