@@ -354,6 +354,9 @@ trap 'rm -rf "$DIR" "$UP"' EXIT
 mkdir -p "$UP/src/scripts" "$UP/bin"
 cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$UP/src/scripts/"
 touch "$UP/src/docker-compose.yml"
+# A checkout builds its images, so it has their sources.
+mkdir -p "$UP/src/images/workspace" "$UP/src/web"
+touch "$UP/src/images/workspace/Dockerfile" "$UP/src/web/package.json"
 printf '.env\n' > "$UP/src/.gitignore"
 git -C "$UP/src" -c init.defaultBranch=main init -q
 git -C "$UP/src" add -A

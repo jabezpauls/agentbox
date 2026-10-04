@@ -1,16 +1,33 @@
 #!/usr/bin/env bash
 # agentbox installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/jabezpauls/agentbox/main/install.sh \
-#     | bash -s -- --domain code.example.com
+#   curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/install.sh -o install.sh
+#   sudo bash install.sh --domain code.example.com
 #
-# Installs Docker if missing, generates a password, writes .env, and brings the
-# stack up. Run with no options for an interactive walk-through. Safe to re-run:
-# existing settings are preserved unless overridden.
+# Installs Docker if missing, downloads a release (its compose files, proxy
+# configuration and scripts; the images are pulled from ghcr.io), generates a
+# password, writes .env, and brings the stack up. Run with no options for an
+# interactive walk-through. Safe to re-run: existing settings are preserved
+# unless overridden. Run from inside a clone of the repository, it uses that
+# clone and builds the images from it.
 set -euo pipefail
 
 REPO_URL="${AGENTBOX_REPO:-https://github.com/jabezpauls/agentbox.git}"
-INSTALL_DIR="${AGENTBOX_DIR:-$HOME/agentbox}"
+# Where releases are downloaded from: <url>/latest/download/<file> and
+# <url>/download/<tag>/<file>, GitHub's layout. Overridable for a mirror, or
+# for testing a release before it is published.
+RELEASE_URL="${AGENTBOX_RELEASE_URL:-}"
+INSTALL_DIR="${AGENTBOX_DIR:-}"
+# The release to install (--version): empty means the one already installed,
+# or for a new install the one this script came with.
+RELEASE=""
+# The release this copy of the script was published with; scripts/
+# build-release.sh fills it in. Empty in the repository: the latest.
+DEFAULT_RELEASE=""
+# on: build the images here; off: pull the prebuilt ones; empty: decide (see
+# scripts/agentbox, `apply`).
+BUILD=""
+FROM_GIT="false"
 DOMAIN=""
 MODE="standalone"
 BIND="127.0.0.1:8443"
@@ -79,13 +96,22 @@ Run with no options for an interactive walk-through.
                         client's address and overwrites on every request (e.g.
                         X-Real-IP); read before X-Forwarded-For. Not for
                         Cloudflare (use --cloudflare on); default none
-  --agents <list>       Coding agents to build in, comma-separated (default claude,codex)
+  --agents <list>       Coding agents in the sandbox, comma-separated (default
+                        claude,codex, the prebuilt image; any other list builds
+                        the image here)
+  --version <tag>       Release to install, e.g. v1.2.0 (default: the latest,
+                        or on an existing install the one it has)
+  --build               Build the images on this server instead of pulling them
+  --no-build            Pull the prebuilt images again (after --build)
+  --from-git            Clone the repository into --dir and build from it, as
+                        installs before releases did
   --isolate-host        Firewall the sandbox off the host and private networks
   --cpus <n>            Sandbox CPU ceiling per service (default 2)
   --memory <size>       Sandbox memory ceiling per service (default 4g)
   --proxy-cpus <n>      Proxy CPU ceiling (default 1)
   --proxy-memory <size> Proxy memory ceiling (default 256m)
-  --dir <path>          Install directory (default ~/agentbox)
+  --dir <path>          Install directory (default ~/agentbox, or the clone
+                        this script sits in)
   --yes                 Do not prompt
   -h, --help            Show this help
 USAGE
@@ -137,12 +163,47 @@ while [ $# -gt 0 ]; do
         --memory)        flag MEMORY "${2:-}"; shift 2 ;;
         --proxy-cpus)    flag PROXY_CPUS "${2:-}"; shift 2 ;;
         --proxy-memory)  flag PROXY_MEMORY "${2:-}"; shift 2 ;;
-        --dir)           INSTALL_DIR="${2:-}"; shift 2 ;;
+        --version)       RELEASE="${2:-}"; shift 2 ;;
+        --build)         flag BUILD on; shift ;;
+        --no-build)      flag BUILD off; shift ;;
+        --from-git)      FROM_GIT="true"; shift ;;
+        --dir)           INSTALL_DIR="${2:-}"; [ -n "$INSTALL_DIR" ] || die "--dir needs a path"; shift 2 ;;
         --yes|-y)        ASSUME_YES="true"; shift ;;
         -h|--help)       usage; exit 0 ;;
         *)               die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+# --- Where ------------------------------------------------------------------
+# Run as a file from inside a clone (or an unpacked release), this script
+# installs that directory, unless --dir says otherwise. Piped into bash, or
+# downloaded on its own, it installs to ~/agentbox.
+SELF_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+if [ -z "$INSTALL_DIR" ]; then
+    if [ "$FROM_GIT" != "true" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/docker-compose.yml" ] && [ -f "$SELF_DIR/scripts/agentbox" ]; then
+        INSTALL_DIR="$SELF_DIR"
+    else
+        INSTALL_DIR="$HOME/agentbox"
+    fi
+fi
+# A release is a tag: v1.2.3, with an optional -suffix. `1.2.3` means v1.2.3.
+case "$RELEASE" in
+    [0-9]*) RELEASE="v$RELEASE" ;;
+esac
+if [ -n "$RELEASE" ] && [ "$RELEASE" != latest ] && ! printf '%s' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+    die "--version takes a release tag such as v1.2.0, or latest"
+fi
+# What to download for a new install: the release asked for, else the one
+# this script was published with, else the latest ("" below).
+case "$RELEASE" in
+    latest) WANT="" ;;
+    "") WANT="$DEFAULT_RELEASE" ;;
+    *) WANT="$RELEASE" ;;
+esac
+[ "$FROM_GIT" = "true" ] && [ -n "$RELEASE" ] && die "--from-git builds the repository's default branch; it does not take --version"
 
 # --- Existing settings ------------------------------------------------------
 # Re-running the installer — to add --isolate-host, say — must not quietly
@@ -157,7 +218,7 @@ AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER AGENTBOX
 AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
-AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY"
+AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY AGENTBOX_BUILD:BUILD"
 if [ -f "$ENV_FILE" ]; then
     for pair in $MANAGED; do
         key="${pair%%:*}"; var="${pair#*:}"
@@ -189,6 +250,11 @@ esac
 # with AGENTBOX_CLIENT_IP_HEADER (CF-Connecting-IP meant yes; anything else,
 # empty included, no); failing that, the mode's default — traefik installs have
 # always assumed Cloudflare.
+# The release server an existing install was set up with, unless the
+# environment names another.
+if [ -z "$RELEASE_URL" ] && [ -f "$ENV_FILE" ] && grep -q '^AGENTBOX_RELEASE_URL=.' "$ENV_FILE"; then
+    RELEASE_URL="$(grep -m1 '^AGENTBOX_RELEASE_URL=' "$ENV_FILE" | cut -d= -f2-)"
+fi
 CF_FROM_MODE="false"
 if [ -z "$CLOUDFLARE" ]; then
     if [ -f "$ENV_FILE" ] && grep -q '^AGENTBOX_CLIENT_IP_HEADER=' "$ENV_FILE"; then
@@ -252,7 +318,7 @@ if [ "$INTERACTIVE" = "true" ]; then
         [ "$TLS" = passthrough ] || ask "Traefik cert resolver" "$CERT_RESOLVER" CERT_RESOLVER
     fi
     ask "Login username" "$USERNAME" USERNAME
-    ask "Coding agents to build in (comma-separated: claude,codex)" "$AGENTS" AGENTS
+    ask "Coding agents (claude,codex is prebuilt; any other list builds the image here)" "$AGENTS" AGENTS
     # The mode may have just changed; so may its default.
     if [ "$CF_FROM_MODE" = "true" ]; then
         if [ "$MODE" = "traefik" ] && [ "$TLS" != passthrough ]; then CLOUDFLARE="on"; else CLOUDFLARE="off"; fi
@@ -362,6 +428,10 @@ fi
 case "$AGENTS" in
     *[!a-z0-9,_-]*) die "--agents takes a comma-separated list of agent names (e.g. claude,codex)" ;;
 esac
+case "$BUILD" in
+    ""|on|off) ;;
+    *) die "AGENTBOX_BUILD must be on, off or empty" ;;
+esac
 
 # AGENTBOX_INSTALL_ENV_ONLY=1 writes .env and stops, without touching Docker or
 # the checkout. It exists so tests/install/ can check what a re-run preserves.
@@ -384,29 +454,103 @@ if [ -z "$ENV_ONLY" ]; then
 fi
 
 # --- Source -----------------------------------------------------------------
+# Three kinds of install directory:
+#   a release  — a VERSION file, unpacked from agentbox.tar.gz; images pulled
+#   a checkout — a .git; images built from it (and from a clone, the old way)
+#   a copy     — neither, put there by hand; used as it is, images built
+# A new install is a release, unless --from-git.
+
+# release_url <tag|""> <file>: where a release's file is; "" is the latest.
+release_url() {
+    local base="${RELEASE_URL:-https://github.com/jabezpauls/agentbox/releases}"
+    base="${base%/}"
+    if [ -z "$1" ]; then printf '%s/latest/download/%s' "$base" "$2"; else printf '%s/download/%s/%s' "$base" "$1" "$2"; fi
+}
+# fetch_release <tag|""> <dir>: download a release's bundle, check it against
+# the release's SHA256SUMS, and unpack it over <dir>, keeping .env and anything
+# else the bundle does not carry. Sets RELEASE_TAG to the release unpacked.
+# (scripts/agentbox has the same function, for `agentbox update`.)
+fetch_release() {
+    local want="$1" dest="$2" tmp sums
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    tmp="$(mktemp -d)"
+    log "Downloading agentbox ${want:-(latest release)}"
+    curl -fsSL -o "$tmp/agentbox.tar.gz" "$(release_url "$want" agentbox.tar.gz)" \
+        || { rm -rf "$tmp"; die "could not download $(release_url "$want" agentbox.tar.gz)"; }
+    mkdir "$tmp/x"
+    tar -xzf "$tmp/agentbox.tar.gz" -C "$tmp/x" --strip-components=1 \
+        || { rm -rf "$tmp"; die "the downloaded release is not a valid archive"; }
+    RELEASE_TAG="$(head -n1 "$tmp/x/VERSION" 2>/dev/null || true)"
+    printf '%s' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+        || { rm -rf "$tmp"; die "the downloaded release does not say which version it is"; }
+    if [ -n "$want" ] && [ "$want" != "$RELEASE_TAG" ]; then
+        rm -rf "$tmp"; die "asked for $want, but the download is $RELEASE_TAG"
+    fi
+    # Checked against the checksums published with that very release.
+    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$RELEASE_TAG" SHA256SUMS)"; then
+        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
+        [ -n "$sums" ] && [ "$sums" = "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ] \
+            || { rm -rf "$tmp"; die "agentbox.tar.gz does not match the SHA256SUMS of $RELEASE_TAG"; }
+    else
+        warn "no SHA256SUMS for $RELEASE_TAG; the download is not checked"
+    fi
+    mkdir -p "$dest"
+    # A fresh inode for every file (--remove-destination), so a script that is
+    # running while it is replaced keeps reading its own copy.
+    cp -R --remove-destination "$tmp/x/." "$dest/" 2>/dev/null || cp -R "$tmp/x/." "$dest/"
+    rm -rf "$tmp"
+}
+
+SOURCE="copy"
 if [ -n "$ENV_ONLY" ]; then
-    :
-elif [ -d "$INSTALL_DIR/.git" ]; then
-    log "Updating existing install at $INSTALL_DIR"
-    # A local checkout may have no upstream, or a pinned one. Failing to update
-    # must not abort an otherwise valid install.
-    git -C "$INSTALL_DIR" pull --ff-only \
-        || warn "could not update the checkout; continuing with what is on disk"
-elif [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    if [ -e "$INSTALL_DIR/.git" ]; then SOURCE="checkout"; elif [ -f "$INSTALL_DIR/VERSION" ]; then SOURCE="release"; fi
+elif [ "$FROM_GIT" = "true" ] && [ ! -e "$INSTALL_DIR/.git" ]; then
+    [ -f "$INSTALL_DIR/docker-compose.yml" ] && die "$INSTALL_DIR already holds an install; --from-git clones into a new directory (--dir)"
+    log "Cloning into $INSTALL_DIR"
+    command -v git >/dev/null 2>&1 || die "git is required for --from-git"
+    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    SOURCE="checkout"
+elif [ -e "$INSTALL_DIR/.git" ]; then
+    SOURCE="checkout"
+    [ -n "$RELEASE" ] && die "$INSTALL_DIR is a git checkout; check out the tag you want there instead of --version"
+    if [ "$INSTALL_DIR" = "$SELF_DIR" ]; then
+        log "Using the checkout at $INSTALL_DIR"
+    else
+        log "Updating existing install at $INSTALL_DIR"
+        # A local checkout may have no upstream, or a pinned one. Failing to
+        # update must not abort an otherwise valid install.
+        git -C "$INSTALL_DIR" pull --ff-only \
+            || warn "could not update the checkout; continuing with what is on disk"
+    fi
+elif [ -f "$INSTALL_DIR/VERSION" ] && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    SOURCE="release"
+    # A re-run keeps the release it has; moving to another is explicit
+    # (--version here, or ./scripts/agentbox update).
+    if [ -n "$RELEASE" ] && [ "$RELEASE" != "$(head -n1 "$INSTALL_DIR/VERSION")" ]; then
+        fetch_release "$WANT" "$INSTALL_DIR"
+    else
+        log "Using agentbox $(head -n1 "$INSTALL_DIR/VERSION") at $INSTALL_DIR"
+    fi
+elif [ -f "$INSTALL_DIR/docker-compose.yml" ] && [ -z "$RELEASE" ]; then
     log "Using existing directory $INSTALL_DIR"
 else
-    log "Cloning into $INSTALL_DIR"
-    command -v git >/dev/null 2>&1 || die "git is required"
-    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    # A new install (or a copy being moved onto releases with --version).
+    SOURCE="release"
+    fetch_release "$WANT" "$INSTALL_DIR"
 fi
 cd "$INSTALL_DIR"
 
 # Which agentbox this is: baked into both images and reported by the System
-# surface and the gate. Only this directory's own checkout counts, never one
-# it happens to sit inside; a copy without one is "dev".
+# surface and the gate. A release says so in its VERSION file, and its images
+# are pulled at that tag. Only this directory's own checkout counts, never one
+# it happens to sit inside; a copy without either is "dev".
 VERSION="dev"
-if [ -e .git ] && command -v git >/dev/null 2>&1; then
+TAG=""
+if [ "$SOURCE" = "checkout" ] && command -v git >/dev/null 2>&1; then
     VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+elif [ "$SOURCE" = "release" ]; then
+    TAG="$(head -n1 VERSION)"
+    VERSION="$TAG"
 fi
 
 # --- Credentials ------------------------------------------------------------
@@ -446,6 +590,12 @@ if [ -f .env ]; then
     # AGENTBOX_CLIENT_IP_HEADER and AGENTBOX_PREVIEW_MODE are older keys, carried over above.
     managed_re="^(AGENTBOX_PASSWORD_HASH|AGENTBOX_VERSION|AGENTBOX_CLIENT_IP_HEADER|AGENTBOX_PREVIEW_MODE"
     for pair in $MANAGED; do managed_re="$managed_re|${pair%%:*}"; done
+    # The release is this directory's (a checkout has none); a copy keeps
+    # whatever its .env says.
+    if [ -n "$TAG" ] || [ "$SOURCE" = checkout ]; then managed_re="$managed_re|AGENTBOX_TAG"; fi
+    # Given in the environment, these replace what .env has.
+    [ -n "${AGENTBOX_IMAGE_PREFIX:-}" ] && managed_re="$managed_re|AGENTBOX_IMAGE_PREFIX"
+    [ -n "$RELEASE_URL" ] && managed_re="$managed_re|AGENTBOX_RELEASE_URL"
     managed_re="$managed_re)="
     grep -Ev "$managed_re" .env > "$NEW_ENV" || true
 else
@@ -475,7 +625,18 @@ AGENTBOX_MEMORY=$MEMORY
 AGENTBOX_PROXY_CPUS=$PROXY_CPUS
 AGENTBOX_PROXY_MEMORY=$PROXY_MEMORY
 AGENTBOX_VERSION=$VERSION
+AGENTBOX_BUILD=$BUILD
 ENVFILE
+# The release whose images to pull, pinned: moving to another is an explicit
+# `./scripts/agentbox update`.
+[ -n "$TAG" ] && printf 'AGENTBOX_TAG=%s\n' "$TAG" >> "$NEW_ENV"
+# A registry mirror, or a release server other than GitHub, given in the
+# environment: kept, so `agentbox update` uses the same.
+case "${AGENTBOX_IMAGE_PREFIX:-}$RELEASE_URL" in
+    *$'\n'*|*$'\r'*) die "AGENTBOX_IMAGE_PREFIX and AGENTBOX_RELEASE_URL may not contain a newline" ;;
+esac
+[ -n "${AGENTBOX_IMAGE_PREFIX:-}" ] && printf 'AGENTBOX_IMAGE_PREFIX=%s\n' "$AGENTBOX_IMAGE_PREFIX" >> "$NEW_ENV"
+[ -n "$RELEASE_URL" ] && printf 'AGENTBOX_RELEASE_URL=%s\n' "$RELEASE_URL" >> "$NEW_ENV"
 chmod 600 "$NEW_ENV"
 mv "$NEW_ENV" .env
 [ -n "$ENV_ONLY" ] && { log "Wrote .env (env-only run; nothing else done)"; exit 0; }
@@ -486,12 +647,10 @@ OVERLAY="$MODE"
 [ "$MODE" = traefik ] && [ "$TLS" = passthrough ] && OVERLAY="traefik-passthrough"
 COMPOSE=(-f docker-compose.yml -f "docker-compose.$OVERLAY.yml")
 
-log "Building the sandbox and gate images (first run takes a few minutes)"
-docker compose "${COMPOSE[@]}" build
-log "Starting"
-# --remove-orphans: a re-run over an older install stops services this
-# version no longer has.
-docker compose "${COMPOSE[@]}" up -d --remove-orphans
+# Pull the release's images (or build them here: a checkout, --build, or
+# --agents other than the prebuilt pair) and start, removing any service this
+# version no longer has. The same step `agentbox update` ends with.
+"$INSTALL_DIR/scripts/agentbox" apply
 
 # The gate's store, not .env, holds the password: .env's hash only seeds a
 # store that does not exist yet. So a password chosen now — given with
@@ -563,6 +722,7 @@ elif [ "$KEPT" = "true" ]; then
 else
     printf '  Password  (the one you passed with --password)\n'
 fi
+printf '  Version   %s\n' "$VERSION"
 printf '  Agents    %s\n' "$AGENTS"
 printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
 [ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
@@ -571,4 +731,6 @@ printf '  Change the password with ./scripts/agentbox passwd; two-factor is opti
 # The box serves its own CLI; this is the line to run on a laptop (docs/cli.md).
 printf '\n  The agentbox CLI, on your own machine (Node 20+):\n'
 printf '    curl -fsSL %s/cli/install | sh\n' "${PUBLIC_URL:-https://<this box>}"
+printf '    or: npm i -g @jabezpauls/agentbox && agentbox login %s\n' "${PUBLIC_URL:-https://<this box>}"
+printf '\n  Update later with: cd %s && ./scripts/agentbox update\n' "$INSTALL_DIR"
 printf '\n'

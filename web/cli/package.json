@@ -1,11 +1,17 @@
 {
-  "name": "@workbench/cli", "private": true, "type": "module", "version": "0.1.0",
+  "name": "@jabezpauls/agentbox", "type": "module", "version": "0.1.0",
   "description": "agentbox from your own machine: sign in, attach, move files, mount the workspace.",
+  "license": "MIT",
+  "homepage": "https://github.com/jabezpauls/agentbox/blob/main/docs/cli.md",
+  "repository": { "type": "git", "url": "git+https://github.com/jabezpauls/agentbox.git", "directory": "web/cli" },
+  "bugs": { "url": "https://github.com/jabezpauls/agentbox/issues" },
+  "keywords": ["agentbox", "coding-agents", "claude-code", "codex", "remote-development", "cli"],
   "engines": { "node": ">=20" },
   "bin": { "agentbox": "dist/agentbox.mjs" },
   "files": ["dist/agentbox.mjs"],
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "node scripts/build.mjs", "e2e": "node e2e/run.mjs",
+    "build": "node scripts/build.mjs", "e2e": "node e2e/run.mjs", "prepack": "node scripts/build.mjs",
     "test": "vitest run", "typecheck": "tsc -p tsconfig.json", "lint": "eslint src test e2e scripts"
   },
   "devDependencies": { "esbuild": "^0.28", "ws": "^8", "@types/ws": "^8", "typescript": "^5.6", "vitest": "^2", "@types/node": "^22", "eslint": "^9", "typescript-eslint": "^8" }

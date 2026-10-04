@@ -25,9 +25,15 @@ x-sandbox: &sandbox
       AGENTS: ${AGENTBOX_AGENTS-claude,codex}
       # Which agentbox this is, as the System surface and the gate's
       # /_gate/version report it. install.sh and `agentbox update` write the
-      # checkout's description here; a bare `docker compose build` says dev.
+      # release (or a checkout's description) here; a bare `docker compose
+      # build` says dev. A pulled image carries its own release's.
       AGENTBOX_VERSION: ${AGENTBOX_VERSION:-dev}
-  image: agentbox/workspace:latest
+  # Prebuilt and pulled by default (ghcr.io/jabezpauls/agentbox-workspace, at
+  # the release AGENTBOX_TAG names, which install.sh pins). `build:` above
+  # stays for contributors and for a box with its own --agents, which builds
+  # it here; install.sh then names the local build in AGENTBOX_WORKSPACE_IMAGE.
+  # A box that pulls from a mirror sets AGENTBOX_IMAGE_PREFIX instead.
+  image: ${AGENTBOX_WORKSPACE_IMAGE:-${AGENTBOX_IMAGE_PREFIX:-ghcr.io/jabezpauls/agentbox}-workspace:${AGENTBOX_TAG:-latest}}
   restart: unless-stopped
   # UID/GID 1000 inside the image. Never root.
   user: "1000:1000"
@@ -174,7 +180,8 @@ services:
       dockerfile: images/gate/Dockerfile
       args:
         AGENTBOX_VERSION: ${AGENTBOX_VERSION:-dev}
-    image: agentbox/gate:latest
+    # Pulled, or built here, exactly as the sandbox image above.
+    image: ${AGENTBOX_GATE_IMAGE:-${AGENTBOX_IMAGE_PREFIX:-ghcr.io/jabezpauls/agentbox}-gate:${AGENTBOX_TAG:-latest}}
     restart: unless-stopped
     read_only: true
     tmpfs:

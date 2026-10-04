@@ -20,12 +20,16 @@ export function bundleVersion(bundle: Buffer | string): string | null {
   return m ? (m[1] as string) : null;
 }
 
+/** The package this CLI is published as on npm. */
+export const NPM_PACKAGE = "@jabezpauls/agentbox";
+
 /**
  * The file this CLI runs from, and whether replacing it is this command's
  * business: a copy installed by the install script is; a build inside a
- * checkout (`npm i -g ./web/cli` links to it) is updated with git instead.
+ * checkout (`npm i -g ./web/cli` links to it) is updated with git instead, and
+ * one installed from npm with npm.
  */
-export function selfInstall(argv1: string | undefined): { file: string; checkout: boolean } | null {
+export function selfInstall(argv1: string | undefined): { file: string; checkout: boolean; npm?: true } | null {
   if (!argv1) return null;
   let file: string;
   try {
@@ -34,13 +38,25 @@ export function selfInstall(argv1: string | undefined): { file: string; checkout
     return null;
   }
   let checkout = false;
+  let npm = false;
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(file), "..", "package.json"), "utf8")) as { name?: string };
-    checkout = pkg.name === "@workbench/cli";
+    const root = path.join(path.dirname(file), "..");
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { name?: string };
+    if (pkg.name === NPM_PACKAGE) {
+      // The published package carries the bundle alone; a checkout has the sources.
+      if (fs.existsSync(path.join(root, "src", "cli.ts"))) checkout = true;
+      else npm = true;
+    }
   } catch {
     // No package beside it: an installed copy.
   }
-  return { file, checkout };
+  return npm ? { file, checkout, npm: true } : { file, checkout };
+}
+
+/** The npm version for a box's version: v1.2.0 is 1.2.0; anything else, the latest. */
+export function npmVersionFor(boxVersion: string | null): string {
+  const m = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$/.exec(boxVersion ?? "");
+  return m ? (m[1] as string) : "latest";
 }
 
 export const update = command({
@@ -91,6 +107,17 @@ export const update = command({
     const version = bundleVersion(bundle);
     if (!version) throw new CliError(`${box.url}/cli/agentbox.mjs is not an agentbox CLI build`);
 
+    // Installed with npm: npm owns that file, and puts the same version back.
+    if (self.npm) {
+      if (version === VERSION) {
+        ctx.out(`Already up to date: agentbox ${VERSION}, the version ${name} runs.\n`);
+      } else {
+        ctx.out(
+          `${name} runs agentbox ${safeText(version)}; this is ${VERSION}, installed with npm. Update it with:\n  npm i -g ${NPM_PACKAGE}@${npmVersionFor(version)}\n`,
+        );
+      }
+      return;
+    }
     const current = fs.readFileSync(self.file);
     if (bundle.equals(current)) {
       ctx.out(`Already up to date: agentbox ${VERSION}, the same build ${name} serves.\n`);

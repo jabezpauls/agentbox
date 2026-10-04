@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { bundleVersion, MAX_BUNDLE, selfInstall } from "../src/commands/update.js";
+import { bundleVersion, MAX_BUNDLE, NPM_PACKAGE, npmVersionFor, selfInstall } from "../src/commands/update.js";
 import { ConfigStore } from "../src/config.js";
 import { EXIT } from "../src/errors.js";
 import { filesStub, put, read } from "./files-stub.js";
@@ -65,6 +65,29 @@ describe("update", () => {
     fs.copyFileSync(bundle, copy);
     expect(selfInstall(copy)).toEqual({ file: fs.realpathSync(copy), checkout: false });
     expect(selfInstall(path.join(tmpDir(), "missing"))).toBeNull();
+  });
+
+  it("knows a copy installed from npm, which npm updates", () => {
+    // The published package's layout: package.json and dist/agentbox.mjs.
+    const root = path.join(tmpDir(), "node_modules", "@jabezpauls", "agentbox");
+    fs.mkdirSync(path.join(root, "dist"), { recursive: true });
+    fs.copyFileSync(path.join(pkgDir, "package.json"), path.join(root, "package.json"));
+    fs.copyFileSync(bundle, path.join(root, "dist", "agentbox.mjs"));
+    const self = selfInstall(path.join(root, "dist", "agentbox.mjs"));
+    expect(self).toEqual({ file: fs.realpathSync(path.join(root, "dist", "agentbox.mjs")), checkout: false, npm: true });
+    expect(npmVersionFor("v1.4.0")).toBe("1.4.0");
+    expect(npmVersionFor("1.4.0-rc.1")).toBe("1.4.0-rc.1");
+    expect(npmVersionFor("v1.4.0-3-gabc1234-dirty")).toBe("latest");
+    expect(npmVersionFor(null)).toBe("latest");
+  });
+
+  it("is published as the package npm installs", () => {
+    const p = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")) as Record<string, unknown>;
+    expect(p.name).toBe(NPM_PACKAGE);
+    expect(p.private).toBeUndefined();
+    expect(p.bin).toEqual({ agentbox: "dist/agentbox.mjs" });
+    expect(p.files).toEqual(["dist/agentbox.mjs"]);
+    expect(p.publishConfig).toEqual({ access: "public" });
   });
 
   it("replaces an installed copy with the box's build, atomically, only if it runs", async () => {

@@ -76,6 +76,111 @@ real_ip_header_problem() {
     return 0
 }
 
+env_get() { grep -m1 "^$1=" .env | cut -d= -f2- || true; }
+
+# The names a box that builds its own images gives them: the names every
+# install used before releases, so a box updated from then keeps its images.
+LOCAL_WORKSPACE_IMAGE="agentbox/workspace:latest"
+LOCAL_GATE_IMAGE="agentbox/gate:latest"
+TAG_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+
+# Whether this box builds its images (on) or pulls the release's (off).
+# AGENTBOX_BUILD decides when set. Otherwise a checkout, or a directory that is
+# not a release, builds (there is no published image for it), and so does a
+# release with coding agents other than the pair its image carries.
+wants_build() {
+    case "$(env_get AGENTBOX_BUILD)" in
+        on) return 0 ;;
+        off) return 1 ;;
+    esac
+    [ -e .git ] && return 0
+    [ -n "$(env_get AGENTBOX_TAG)" ] || return 0
+    # Unset means the default pair; set empty means none.
+    local agents
+    if grep -q '^AGENTBOX_AGENTS=' .env; then agents="$(env_get AGENTBOX_AGENTS)"; else agents="claude,codex"; fi
+    [ "$(printf '%s' "$agents" | tr ',' '\n' | tr -d '[:space:]' | grep -v '^$' | sort -u | paste -sd, -)" != "claude,codex" ]
+}
+
+# release_url <tag|""> <file>: where a release's file is; "" is the latest.
+# The same layout as GitHub's releases, which is the default.
+release_url() {
+    local base="${AGENTBOX_RELEASE_URL:-$(env_get AGENTBOX_RELEASE_URL)}"
+    base="${base:-https://github.com/jabezpauls/agentbox/releases}"
+    base="${base%/}"
+    if [ -z "$1" ]; then printf '%s/latest/download/%s' "$base" "$2"; else printf '%s/download/%s/%s' "$base" "$1" "$2"; fi
+}
+
+# fetch_release <tag|"">: download a release, check it against its
+# SHA256SUMS, and unpack it over this directory, keeping .env and anything
+# else the release does not carry. Sets RELEASE_TAG. (install.sh has the same
+# function, for a first install.)
+fetch_release() {
+    local want="$1" tmp sums
+    tmp="$(mktemp -d)"
+    echo "==> Downloading agentbox ${want:-(latest release)}"
+    if ! curl -fsSL -o "$tmp/agentbox.tar.gz" "$(release_url "$want" agentbox.tar.gz)"; then
+        rm -rf "$tmp"; echo "could not download $(release_url "$want" agentbox.tar.gz)" >&2; return 1
+    fi
+    mkdir "$tmp/x"
+    if ! tar -xzf "$tmp/agentbox.tar.gz" -C "$tmp/x" --strip-components=1; then
+        rm -rf "$tmp"; echo "the downloaded release is not a valid archive" >&2; return 1
+    fi
+    RELEASE_TAG="$(head -n1 "$tmp/x/VERSION" 2>/dev/null || true)"
+    if ! printf '%s' "$RELEASE_TAG" | grep -Eq "$TAG_RE"; then
+        rm -rf "$tmp"; echo "the downloaded release does not say which version it is" >&2; return 1
+    fi
+    if [ -n "$want" ] && [ "$want" != "$RELEASE_TAG" ]; then
+        rm -rf "$tmp"; echo "asked for $want, but the download is $RELEASE_TAG" >&2; return 1
+    fi
+    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$RELEASE_TAG" SHA256SUMS)"; then
+        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
+        if [ -z "$sums" ] || [ "$sums" != "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ]; then
+            rm -rf "$tmp"; echo "agentbox.tar.gz does not match the SHA256SUMS of $RELEASE_TAG" >&2; return 1
+        fi
+    else
+        echo "warning: no SHA256SUMS for $RELEASE_TAG; the download is not checked" >&2
+    fi
+    # A fresh inode for every file, this script included, so the copy that is
+    # running keeps reading its own lines.
+    cp -R --remove-destination "$tmp/x/." ./ 2>/dev/null || cp -R "$tmp/x/." ./
+    rm -rf "$tmp"
+}
+
+# Pull the release's images, or build them here, then start the stack and
+# remove any service this version no longer has. install.sh ends with this, and
+# so does `update`, run from the new version's copy of this script.
+apply() {
+    local ws
+    if wants_build; then
+        [ -f images/workspace/Dockerfile ] && [ -d web ] \
+            || { echo "this directory has no sources to build the images from (images/, web/)" >&2; exit 1; }
+        # A local build gets a local name, never the registry's: a later pull
+        # must not replace it, nor it pass for the published image. Names set by
+        # hand are kept.
+        [ -n "$(env_get AGENTBOX_WORKSPACE_IMAGE)" ] || set_env AGENTBOX_WORKSPACE_IMAGE "$LOCAL_WORKSPACE_IMAGE"
+        [ -n "$(env_get AGENTBOX_GATE_IMAGE)" ] || set_env AGENTBOX_GATE_IMAGE "$LOCAL_GATE_IMAGE"
+        echo "==> Building the sandbox and gate images here (the first build takes a few minutes)"
+        # --pull refreshes the base images, so a rebuild picks up their fixes.
+        "${DC[@]}" build --pull
+    else
+        # Back from a local build: the names it set go, so the release's
+        # images are used again. Names set by hand stay.
+        [ "$(env_get AGENTBOX_WORKSPACE_IMAGE)" = "$LOCAL_WORKSPACE_IMAGE" ] && unset_env AGENTBOX_WORKSPACE_IMAGE
+        [ "$(env_get AGENTBOX_GATE_IMAGE)" = "$LOCAL_GATE_IMAGE" ] && unset_env AGENTBOX_GATE_IMAGE
+        echo "==> Pulling the agentbox $(env_get AGENTBOX_TAG) images"
+        "${DC[@]}" pull --quiet
+        # Compose lets a pull of a buildable service fail quietly; a box must
+        # not then start (or build) something other than the release.
+        for ws in $("${DC[@]}" config --images | sort -u); do
+            if ! docker image inspect "$ws" >/dev/null 2>&1; then
+                echo "could not pull $ws. Is the release published, and can this server reach the registry? To build the images here instead: ./scripts/agentbox update --build" >&2
+                exit 1
+            fi
+        done
+    fi
+    "${DC[@]}" up -d --no-build --remove-orphans
+}
+
 case "${1:-help}" in
     start)   shift; "${DC[@]}" up -d "$@" ;;
     stop)    shift; "${DC[@]}" stop "$@" ;;
@@ -106,6 +211,8 @@ case "${1:-help}" in
         # take effect on the rebuild; --mode swaps the overlay in place.
         shift
         ISOLATE="false"
+        WANT=""
+        WANT_GIVEN="false"
         # Validate every flag before writing any, so a bad value late in the
         # list cannot leave the earlier ones half-applied.
         PENDING=()
@@ -167,9 +274,25 @@ case "${1:-help}" in
                 --proxy-cpus)     PENDING+=("AGENTBOX_PROXY_CPUS=$val"); shift 2 ;;
                 --proxy-memory)   PENDING+=("AGENTBOX_PROXY_MEMORY=$val"); shift 2 ;;
                 --isolate-host)   ISOLATE="true"; shift ;;
+                --build)          PENDING+=("AGENTBOX_BUILD=on"); shift ;;
+                --no-build)       PENDING+=("AGENTBOX_BUILD=off"); shift ;;
+                --version)
+                    WANT_GIVEN="true"
+                    case "$val" in
+                        latest) WANT="" ;;
+                        [0-9]*) WANT="v$val" ;;
+                        *) WANT="$val" ;;
+                    esac
+                    if [ -n "$WANT" ] && ! printf '%s' "$WANT" | grep -Eq "$TAG_RE"; then
+                        echo "--version takes a release tag such as v1.2.0, or latest" >&2; exit 1
+                    fi
+                    shift 2 ;;
                 *) echo "unknown update option: $1" >&2; exit 1 ;;
             esac
         done
+        if [ "$WANT_GIVEN" = "true" ] && [ -e .git ]; then
+            echo "this install is a git checkout: check out the tag you want, then run update without --version" >&2; exit 1
+        fi
         for kv in "${PENDING[@]}"; do set_env "${kv%%=*}" "${kv#*=}"; done
         # An .env from before AGENTBOX_CLOUDFLARE said it with
         # AGENTBOX_CLIENT_IP_HEADER; carry that over, as install.sh does, rather
@@ -229,22 +352,45 @@ case "${1:-help}" in
         fi
         # A header set by hand is checked before anything restarts.
         real_ip_header_problem "$(grep -m1 '^AGENTBOX_REAL_IP_HEADER=' .env | cut -d= -f2- || true)" && exit 1
-        git pull --ff-only
-        # The version the rebuilt images will report (see install.sh).
-        set_env AGENTBOX_VERSION "$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
-        # Recompute the overlay in case --mode just changed.
-        OVERLAYS=(-f docker-compose.yml -f "docker-compose.$(overlay).yml")
-        # Builds the gate as well as the sandbox. On a box updating from before
-        # the gate existed, the gate's store is seeded from the password hash
-        # already in .env, so the same password signs in on the new page.
-        docker compose "${OVERLAYS[@]}" build --pull
-        # --remove-orphans: a service an update removes (lavish, previews)
-        # must not keep running, unmanaged, from the old compose file.
-        docker compose "${OVERLAYS[@]}" up -d --remove-orphans
+        if [ -e .git ]; then
+            # A checkout (every install before releases): pull, and build.
+            git pull --ff-only
+            # The version the rebuilt images will report (see install.sh).
+            set_env AGENTBOX_VERSION "$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+        elif [ -n "$(env_get AGENTBOX_TAG)" ] || [ -f VERSION ] || [ "$WANT_GIVEN" = "true" ]; then
+            # A release: the latest, or the one --version names. Its files
+            # replace these; .env and the volumes stay as they are.
+            current="$(env_get AGENTBOX_TAG)"
+            fetch_release "$WANT" || exit 1
+            if [ "$RELEASE_TAG" = "$current" ]; then
+                echo "==> Already on agentbox $current"
+            else
+                echo "==> agentbox ${current:-(no release)} -> $RELEASE_TAG"
+            fi
+            set_env AGENTBOX_TAG "$RELEASE_TAG"
+            set_env AGENTBOX_VERSION "$RELEASE_TAG"
+        else
+            echo "this directory is neither a release nor a checkout, so there is nothing to update it from. To move it onto releases (its .env and volumes are kept): ./scripts/agentbox update --version latest" >&2
+            exit 1
+        fi
+        # The new version's copy of this script pulls or builds its images and
+        # starts it. On a box updating from before the gate existed, the
+        # gate's store is seeded from the password hash already in .env, so
+        # the same password signs in on the new page. A service an update
+        # removes (lavish, previews) stops: apply passes --remove-orphans.
         if [ "$ISOLATE" = "true" ]; then
+            exec "$SCRIPT_DIR/agentbox" apply --isolate-host
+        fi
+        exec "$SCRIPT_DIR/agentbox" apply
+        ;;
+    apply)
+        # Pull (or build) this version's images and (re)start: what install.sh
+        # and update end with, and what to run after editing .env by hand.
+        apply
+        if [ "${2:-}" = "--isolate-host" ]; then
             # shellcheck source=scripts/isolate-host.sh
             . "$SCRIPT_DIR/isolate-host.sh"
-            agentbox_isolate_host "${OVERLAYS[@]}"
+            agentbox_isolate_host -f docker-compose.yml -f "docker-compose.$(overlay).yml"
         fi
         ;;
     passwd|password)
@@ -342,10 +488,14 @@ agentbox <command>
   start | stop | restart | status | logs [service]
   shell                 a shell inside the sandbox
   workbench             follow the Workbench bridge's logs
-  update [flags]        pull, rebuild, restart; accepts the install flags
-                        (--agents, --sharing, --cloudflare, --real-ip-header, --mode,
-                        --cert-resolver, --tls, --edge-network, --cpus, --memory, --proxy-cpus,
-                        --proxy-memory, --isolate-host)
+  update [flags]        move to the latest release (or --version vX.Y.Z): fetch its
+                        files, pull its images, restart; .env and your data stay.
+                        Accepts the install flags (--agents, --sharing, --cloudflare,
+                        --real-ip-header, --mode, --cert-resolver, --tls, --edge-network,
+                        --cpus, --memory, --proxy-cpus, --proxy-memory, --isolate-host,
+                        --build, --no-build). A git checkout pulls and rebuilds instead.
+  apply                 pull (or build) this version's images and restart, e.g.
+                        after editing .env by hand
   passwd [new]          set the sign-in password (prompted, or generated);
                         signs every session out
   totp reset            turn two-factor off, for a lost phone

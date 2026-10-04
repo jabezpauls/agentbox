@@ -15,9 +15,15 @@ for f in install.sh scripts/agentbox; do
         esac
     done < <(grep -E '^[[:space:]]*docker compose .* up -d' "$ROOT/$f" || true)
 done
-# The update path in particular (install.sh's first run has nothing to remove).
-grep -A3 'build --pull' "$ROOT/scripts/agentbox" | grep -q 'up -d --remove-orphans' \
-    || { echo "FAIL agentbox update does not remove orphans"; FAILED=1; }
+# The update path in particular (install.sh's first run has nothing to remove):
+# install.sh and update both end in `agentbox apply`, which starts the stack
+# with --remove-orphans.
+sed -n '/^apply() {/,/^}/p' "$ROOT/scripts/agentbox" | grep -q 'up -d --no-build --remove-orphans' \
+    || { echo "FAIL agentbox apply does not remove orphans"; FAILED=1; }
+grep -q 'exec .*/agentbox" apply' "$ROOT/scripts/agentbox" \
+    || { echo "FAIL agentbox update does not end in apply"; FAILED=1; }
+grep -q 'scripts/agentbox" apply' "$ROOT/install.sh" \
+    || { echo "FAIL install.sh does not end in apply"; FAILED=1; }
 
 WORK="$(mktemp -d)"
 PROJECT="abx-orphans-$$"
