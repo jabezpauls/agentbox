@@ -163,7 +163,7 @@ git clone -q "$WORK/upstream" "$CLONE"
 grep -v '^AGENTBOX_\(TAG\|BUILD\|RELEASE_URL\|WORKSPACE_IMAGE\|GATE_IMAGE\)=' "$BOX/.env" > "$CLONE/.env"
 sed -i 's/^AGENTBOX_VERSION=.*/AGENTBOX_VERSION=abc1234/' "$CLONE/.env"
 rm -f "$WORK/calls"
-(cd / && AGENTBOX_RELEASE_URL= "$CLONE/scripts/agentbox" update) >"$WORK/out" 2>&1 || fail "update in a clone failed: $(tail -3 "$WORK/out")"
+(cd / && AGENTBOX_RELEASE_URL='' "$CLONE/scripts/agentbox" update) >"$WORK/out" 2>&1 || fail "update in a clone failed: $(tail -3 "$WORK/out")"
 called "build --pull" && pass "update in a clone pulls the code and builds" || fail "no build in a clone"
 cget() { grep -m1 "^$1=" "$CLONE/.env" | cut -d= -f2-; }
 [ "$(cget AGENTBOX_WORKSPACE_IMAGE)" = agentbox/workspace:latest ] && pass "under the names it always had" || fail "clone image: '$(cget AGENTBOX_WORKSPACE_IMAGE)'"
