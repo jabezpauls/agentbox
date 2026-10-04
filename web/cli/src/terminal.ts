@@ -360,9 +360,16 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       opts.onCrash ?? defaultCrash(stderr),
     );
 
+    // Keys that arrive before the first command has gone out wait here, in
+    // order, rather than overtaking it.
+    const held: Buffer[] = [];
+    const send = (data: Buffer): void => {
+      if (started) session.input(data);
+      else held.push(data);
+    };
     const onInput = (chunk: Buffer | string): void => {
       const { forward, detach } = filter.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-      if (forward.length) session.input(forward);
+      if (forward.length) send(forward);
       if (detach) session.detach();
     };
     const onResize = (): void => {
@@ -406,9 +413,12 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       started = true;
       if (fallback) clearTimeout(fallback);
       if (opts.initialInput) session.input(Buffer.from(opts.initialInput, "utf8"));
-      stdin.on("data", onInput);
+      for (const data of held.splice(0)) session.input(data);
     };
     session.on("open", () => {
+      // Listening before the guard resumes stdin: a flowing stream drops what
+      // nobody is listening for.
+      stdin.on("data", onInput);
       guard.enter();
       stdout.on?.("resize", onResize);
       stdout.on?.("drain", onDrain);
