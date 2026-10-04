@@ -52,9 +52,13 @@ if [ "$(val OLD)" = 0 ]; then pass "the old subnet's rules are gone"; else fail 
 if [ "$(val NEW)" = 1 ]; then pass "the new subnet's rules are in place"; else fail "new subnet rules: $(val NEW)"; fi
 
 docker network create --ipv6 --subnet 10.231.7.0/24 --subnet fd00:c1:7::/64 "$NET" >/dev/null
-subnet="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Subnet)"
-gw="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Gateway)"
-if [ "$subnet" = 10.231.7.0/24 ]; then pass "dual-stack network: IPv4 subnet chosen ($subnet)"; else fail "subnet parsed as '$subnet'"; fi
+# Read as the script reads them; an empty answer is a failure to report, not
+# a reason for set -e to end the check without a word.
+subnet="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Subnet || true)"
+gw="$(AGENTBOX_NETWORK="$NET" _ih_ipv4 Gateway || true)"
+if [ "$subnet" = 10.231.7.0/24 ]; then pass "dual-stack network: IPv4 subnet chosen ($subnet)"; else
+    fail "subnet parsed as '$subnet' from $(docker network inspect "$NET" --format '{{json .IPAM.Config}}')"
+fi
 if [[ "$gw" =~ ^10\.231\.7\.[0-9]+$ ]]; then pass "dual-stack network: IPv4 gateway chosen ($gw)"; else fail "gateway parsed as '$gw'"; fi
 _ih_render_rules "$subnet" > "$WORK/c.nft"
 if docker run --rm --cap-add NET_ADMIN -v "$WORK:/r:ro" debian:bookworm-slim sh -c \
