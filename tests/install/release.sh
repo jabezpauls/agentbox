@@ -138,6 +138,62 @@ fi
 [ "$(cat "$BOX/VERSION")" = v0.0.1 ] && pass "and changes no file" || fail "files changed: VERSION $(cat "$BOX/VERSION")"
 expect AGENTBOX_TAG v0.0.1 "nor the tag"
 
+echo "a tampered bundle is refused before it is unpacked"
+"$ROOT/scripts/build-release.sh" v0.0.4 "$REL/download/v0.0.4" >/dev/null
+printf 'not a tarball\n' > "$REL/download/v0.0.4/agentbox.tar.gz"
+if (cd / && "$BOX/scripts/agentbox" update --version v0.0.4) >"$WORK/out" 2>&1; then
+    fail "a tampered bundle was installed"
+else
+    grep -q "does not match the release's SHA256SUMS" "$WORK/out" && ! grep -q "valid archive" "$WORK/out" \
+        && pass "the checksum stops it, before tar reads it" || fail "not stopped by the checksum: $(cat "$WORK/out")"
+fi
+
+echo "a release without SHA256SUMS is refused, unless verification is skipped in so many words"
+"$ROOT/scripts/build-release.sh" v0.0.5 "$REL/download/v0.0.5" >/dev/null
+rm "$REL/download/v0.0.5/SHA256SUMS"
+if (cd / && "$BOX/scripts/agentbox" update --version v0.0.5) >"$WORK/out" 2>&1; then
+    fail "update installed a release it could not check"
+else
+    grep -q "AGENTBOX_INSECURE_SKIP_VERIFY=1" "$WORK/out" && pass "update refuses it, and names the opt-out" || fail "refused oddly: $(cat "$WORK/out")"
+fi
+expect AGENTBOX_TAG v0.0.1 "leaving the box on v0.0.1"
+if (cd "$WORK" && bash -s -- --mode behind-proxy --dir "$WORK/box5" --yes --password abcdefgh1 --version v0.0.5 \
+        < "$REL/download/v0.0.1/install.sh") >"$WORK/out" 2>&1; then
+    fail "install.sh installed a release it could not check"
+else
+    [ ! -e "$WORK/box5/VERSION" ] && pass "install.sh refuses it too, unpacking nothing" || fail "install.sh unpacked it"
+fi
+(cd / && AGENTBOX_INSECURE_SKIP_VERIFY=1 "$BOX/scripts/agentbox" update --version v0.0.5) >"$WORK/out" 2>&1 || true
+expect AGENTBOX_TAG v0.0.5 "AGENTBOX_INSECURE_SKIP_VERIFY=1 lets a mirror without checksums through"
+grep -q "unchecked" "$WORK/out" && pass "with a warning" || fail "no warning: $(cat "$WORK/out")"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1) >/dev/null 2>&1 || fail "back to v0.0.1 failed"
+rm -rf "$WORK/box5"
+
+echo "where a new install goes, and an existing one stays"
+# where <uid> <home>: the directory install.sh's own function picks for that
+# user, with no --dir (the function alone, with `id -u` answering <uid>).
+where() {
+    # shellcheck disable=SC2016  # the inner script's $0 and $(…) are its own
+    env -u SUDO_USER HOME="$2" UID_SAYS="$1" bash -c \
+        'eval "$(sed -n "/^default_install_dir() {/,/^}/p" "$0")"; id() { echo "$UID_SAYS"; }; default_install_dir' "$ROOT/install.sh"
+}
+H="$WORK/home"; mkdir -p "$H/root" "$H/alice"
+if [ ! -e /opt/agentbox/docker-compose.yml ]; then
+    [ "$(where 0 "$H/root")" = /opt/agentbox ] && pass "as root (or under sudo), /opt/agentbox" || fail "root default: $(where 0 "$H/root")"
+    mkdir -p "$H/root/agentbox" && touch "$H/root/agentbox/docker-compose.yml"
+    [ "$(where 0 "$H/root")" = "$H/root/agentbox" ] && pass "an install already in root's home stays there" || fail "root's existing install: $(where 0 "$H/root")"
+fi
+[ "$(where 1000 "$H/alice")" = "$H/alice/agentbox" ] && pass "as a user with Docker access, ~/agentbox" || fail "user default: $(where 1000 "$H/alice")"
+
+echo "a root install's commands, run without sudo, say to use sudo"
+chmod 000 "$BOX/.env"
+if [ "$(id -u)" != 0 ]; then
+    if (cd / && "$BOX/scripts/agentbox" status) >"$WORK/out" 2>&1; then fail "ran with an unreadable .env"; else
+        grep -q "run: sudo" "$WORK/out" && pass "it says to run it with sudo" || fail "no pointer to sudo: $(cat "$WORK/out")"
+    fi
+fi
+chmod 600 "$BOX/.env"
+
 echo "a copy made by hand is not updated by accident"
 COPY="$WORK/copy"
 mkdir -p "$COPY/scripts"

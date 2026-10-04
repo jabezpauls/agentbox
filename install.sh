@@ -119,8 +119,9 @@ Run with no options for an interactive walk-through.
   --memory <size>       Sandbox memory ceiling per service (default 4g)
   --proxy-cpus <n>      Proxy CPU ceiling (default 1)
   --proxy-memory <size> Proxy memory ceiling (default 256m)
-  --dir <path>          Install directory (default ~/agentbox, or the clone
-                        this script sits in)
+  --dir <path>          Install directory (default /opt/agentbox as root or under
+                        sudo, ~/agentbox otherwise, or the clone this script
+                        sits in; an existing install is kept where it is)
   --yes                 Do not prompt
   -h, --help            Show this help
 USAGE
@@ -186,16 +187,32 @@ done
 # --- Where ------------------------------------------------------------------
 # Run as a file from inside a clone (or an unpacked release), this script
 # installs that directory, unless --dir says otherwise. Piped into bash, or
-# downloaded on its own, it installs to ~/agentbox.
+# downloaded on its own, it installs to /opt/agentbox as root (sudo included),
+# and to ~/agentbox as a user with Docker access. An existing install stays
+# where it is: a re-run as root finds one in root's or the sudo user's home.
 SELF_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
+default_install_dir() {
+    local sudo_home=""
+    if [ "$(id -u)" != 0 ]; then
+        printf '%s' "$HOME/agentbox"
+        return
+    fi
+    [ -f /opt/agentbox/docker-compose.yml ] && { printf '/opt/agentbox'; return; }
+    [ -f "$HOME/agentbox/docker-compose.yml" ] && { printf '%s' "$HOME/agentbox"; return; }
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+        sudo_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+        [ -n "$sudo_home" ] && [ -f "$sudo_home/agentbox/docker-compose.yml" ] && { printf '%s' "$sudo_home/agentbox"; return; }
+    fi
+    printf '/opt/agentbox'
+}
 if [ -z "$INSTALL_DIR" ]; then
     if [ "$FROM_GIT" != "true" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/docker-compose.yml" ] && [ -f "$SELF_DIR/scripts/agentbox" ]; then
         INSTALL_DIR="$SELF_DIR"
     else
-        INSTALL_DIR="$HOME/agentbox"
+        INSTALL_DIR="$(default_install_dir)"
     fi
 fi
 # A release is a tag: v1.2.3, with an optional -suffix. `1.2.3` means v1.2.3.
@@ -475,17 +492,32 @@ release_url() {
     base="${base%/}"
     if [ -z "$1" ]; then printf '%s/latest/download/%s' "$base" "$2"; else printf '%s/download/%s/%s' "$base" "$1" "$2"; fi
 }
-# fetch_release <tag|""> <dir>: download a release's bundle, check it against
-# the release's SHA256SUMS, and unpack it over <dir>, keeping .env and anything
-# else the bundle does not carry. Sets RELEASE_TAG to the release unpacked.
+# fetch_release <tag|""> <dir>: download a release's bundle and its
+# SHA256SUMS, refuse it unless they match (before anything is unpacked), and
+# unpack it over <dir>, keeping .env and anything else the bundle does not
+# carry. Sets RELEASE_TAG to the release unpacked. A mirror that publishes no
+# checksums needs AGENTBOX_INSECURE_SKIP_VERIFY=1, said in so many words.
 # (scripts/agentbox has the same function, for `agentbox update`.)
 fetch_release() {
     local want="$1" dest="$2" tmp sums
     command -v curl >/dev/null 2>&1 || die "curl is required"
+    command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required to check the download"
     tmp="$(mktemp -d)"
     log "Downloading agentbox ${want:-(latest release)}"
     curl -fsSL -o "$tmp/agentbox.tar.gz" "$(release_url "$want" agentbox.tar.gz)" \
         || { rm -rf "$tmp"; die "could not download $(release_url "$want" agentbox.tar.gz)"; }
+    # The checksums from the same place as the bundle, checked before tar
+    # reads a byte of it.
+    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$want" SHA256SUMS)"; then
+        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
+        [ -n "$sums" ] && [ "$sums" = "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ] \
+            || { rm -rf "$tmp"; die "agentbox.tar.gz does not match the release's SHA256SUMS; not installing it"; }
+    elif [ "${AGENTBOX_INSECURE_SKIP_VERIFY:-}" = 1 ]; then
+        warn "no SHA256SUMS at $(release_url "$want" SHA256SUMS); installing unchecked (AGENTBOX_INSECURE_SKIP_VERIFY=1)"
+    else
+        rm -rf "$tmp"
+        die "could not download $(release_url "$want" SHA256SUMS), so the release cannot be checked; not installing it. (For a mirror without checksums: AGENTBOX_INSECURE_SKIP_VERIFY=1.)"
+    fi
     mkdir "$tmp/x"
     tar -xzf "$tmp/agentbox.tar.gz" -C "$tmp/x" --strip-components=1 \
         || { rm -rf "$tmp"; die "the downloaded release is not a valid archive"; }
@@ -494,14 +526,6 @@ fetch_release() {
         || { rm -rf "$tmp"; die "the downloaded release does not say which version it is"; }
     if [ -n "$want" ] && [ "$want" != "$RELEASE_TAG" ]; then
         rm -rf "$tmp"; die "asked for $want, but the download is $RELEASE_TAG"
-    fi
-    # Checked against the checksums published with that very release.
-    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$RELEASE_TAG" SHA256SUMS)"; then
-        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
-        [ -n "$sums" ] && [ "$sums" = "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ] \
-            || { rm -rf "$tmp"; die "agentbox.tar.gz does not match the SHA256SUMS of $RELEASE_TAG"; }
-    else
-        warn "no SHA256SUMS for $RELEASE_TAG; the download is not checked"
     fi
     mkdir -p "$dest"
     # A fresh inode for every file (--remove-destination), so a script that is
@@ -736,10 +760,18 @@ printf '  Agents    %s\n' "$AGENTS"
 printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
 [ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
 printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'
-printf '  Change the password with ./scripts/agentbox passwd; two-factor is optional (see docs/install.md).\n'
+# Day-two commands as they must be typed: an install made as root has a
+# root-only .env, so its commands need sudo.
+AS=""
+[ "$(id -u)" = 0 ] && AS="sudo "
+printf '  Two-factor is optional (Settings -> Account; see docs/install.md).\n'
 # The box serves its own CLI; this is the line to run on a laptop (docs/cli.md).
 printf '\n  The agentbox CLI, on your own machine (Node 20+):\n'
 printf '    curl -fsSL %s/cli/install | sh\n' "${PUBLIC_URL:-https://<this box>}"
 printf '    or: npm i -g @jabezpauls/agentbox && agentbox login %s\n' "${PUBLIC_URL:-https://<this box>}"
-printf '\n  Update later with: cd %s && ./scripts/agentbox update\n' "$INSTALL_DIR"
+printf '\n  Installed in %s. Day to day, on this server:\n' "$INSTALL_DIR"
+printf '    cd %s\n' "$INSTALL_DIR"
+printf '    %s./scripts/agentbox status\n' "$AS"
+printf '    %s./scripts/agentbox passwd      # change the password\n' "$AS"
+printf '    %s./scripts/agentbox update      # move to the latest release\n' "$AS"
 printf '\n'

@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 [ -f .env ] || { echo "no .env here; run install.sh first" >&2; exit 1; }
+# An install made as root (sudo bash install.sh) keeps a root-only .env.
+[ -r .env ] || { echo "cannot read $PWD/.env: this install belongs to $(stat -c %U .env 2>/dev/null || echo another user); run: sudo $0 $*" >&2; exit 1; }
 # The mode's overlay; traefik with TLS passed through to Caddy has its own.
 overlay() {
     local mode tls
@@ -119,16 +121,32 @@ release_url() {
     if [ -z "$1" ]; then printf '%s/latest/download/%s' "$base" "$2"; else printf '%s/download/%s/%s' "$base" "$1" "$2"; fi
 }
 
-# fetch_release <tag|"">: download a release, check it against its
-# SHA256SUMS, and unpack it over this directory, keeping .env and anything
-# else the release does not carry. Sets RELEASE_TAG. (install.sh has the same
-# function, for a first install.)
+# fetch_release <tag|"">: download a release and its SHA256SUMS, refuse it
+# unless they match (before anything is unpacked), and unpack it over this
+# directory, keeping .env and anything else the release does not carry. Sets
+# RELEASE_TAG. A mirror without checksums needs AGENTBOX_INSECURE_SKIP_VERIFY=1.
+# (install.sh has the same function, for a first install.)
 fetch_release() {
     local want="$1" tmp sums
+    command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required to check the download" >&2; return 1; }
     tmp="$(mktemp -d)"
     echo "==> Downloading agentbox ${want:-(latest release)}"
     if ! curl -fsSL -o "$tmp/agentbox.tar.gz" "$(release_url "$want" agentbox.tar.gz)"; then
         rm -rf "$tmp"; echo "could not download $(release_url "$want" agentbox.tar.gz)" >&2; return 1
+    fi
+    # The checksums from the same place as the bundle, checked before tar
+    # reads a byte of it.
+    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$want" SHA256SUMS)"; then
+        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
+        if [ -z "$sums" ] || [ "$sums" != "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ]; then
+            rm -rf "$tmp"; echo "agentbox.tar.gz does not match the release's SHA256SUMS; not installing it" >&2; return 1
+        fi
+    elif [ "${AGENTBOX_INSECURE_SKIP_VERIFY:-}" = 1 ]; then
+        echo "warning: no SHA256SUMS at $(release_url "$want" SHA256SUMS); updating unchecked (AGENTBOX_INSECURE_SKIP_VERIFY=1)" >&2
+    else
+        rm -rf "$tmp"
+        echo "could not download $(release_url "$want" SHA256SUMS), so the release cannot be checked; not installing it. (For a mirror without checksums: AGENTBOX_INSECURE_SKIP_VERIFY=1.)" >&2
+        return 1
     fi
     mkdir "$tmp/x"
     if ! tar -xzf "$tmp/agentbox.tar.gz" -C "$tmp/x" --strip-components=1; then
@@ -140,14 +158,6 @@ fetch_release() {
     fi
     if [ -n "$want" ] && [ "$want" != "$RELEASE_TAG" ]; then
         rm -rf "$tmp"; echo "asked for $want, but the download is $RELEASE_TAG" >&2; return 1
-    fi
-    if curl -fsSL -o "$tmp/SHA256SUMS" "$(release_url "$RELEASE_TAG" SHA256SUMS)"; then
-        sums="$(grep -E ' \*?agentbox\.tar\.gz$' "$tmp/SHA256SUMS" | head -n1 | cut -d' ' -f1)"
-        if [ -z "$sums" ] || [ "$sums" != "$(sha256sum "$tmp/agentbox.tar.gz" | cut -d' ' -f1)" ]; then
-            rm -rf "$tmp"; echo "agentbox.tar.gz does not match the SHA256SUMS of $RELEASE_TAG" >&2; return 1
-        fi
-    else
-        echo "warning: no SHA256SUMS for $RELEASE_TAG; the download is not checked" >&2
     fi
     # A fresh inode for every file, this script included, so the copy that is
     # running keeps reading its own lines.
