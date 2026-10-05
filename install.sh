@@ -473,6 +473,15 @@ elif ! command -v docker >/dev/null 2>&1; then
         case "$reply" in [yY]*) ;; *) die "Docker is required" ;; esac
     }
     curl -fsSL https://get.docker.com | sh
+    # The daemon can take a moment to come up after a fresh install, and on
+    # some hosts it is installed but not started.
+    if ! docker info >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+        systemctl enable --now docker >/dev/null 2>&1 || true
+    fi
+    for _ in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && break
+        sleep 1
+    done
 fi
 if [ -z "$ENV_ONLY" ]; then
     docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required (docker compose)"
