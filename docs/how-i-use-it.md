@@ -8,6 +8,27 @@ The short version: I hand work to agents in the morning, check on them from
 wherever I am during the day, and sit down with them properly when I'm back at
 a desk. The work never stops because I closed a laptop.
 
+## Once: set it up
+
+On a fresh VPS, with a DNS name pointed at it, it's two commands (the
+[README](../README.md#install) has the details):
+
+```bash
+curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/install.sh -o install.sh
+sudo bash install.sh --domain code.example.com
+```
+
+Then, on my laptop, the CLI, signed in to the box through the browser:
+
+```bash
+npm i -g @jabezpauls/agentbox
+agentbox login https://code.example.com
+```
+
+And once, inside the box, I sign the agents in and give them GitHub: I run
+`claude` (or `codex`) in a Workbench terminal and follow its sign-in, and
+`gh auth login` so they can clone, push and open pull requests.
+
 ## Morning: give the crew its work
 
 I start on my laptop. A new project gets cloned straight into the box, from a
@@ -58,9 +79,9 @@ When I open the laptop again I don't reconnect to a web page and squint. I run:
 agentbox attach
 ```
 
-and my agents are in my own terminal, drawn by the herdr installed on my laptop,
-as if they had been running on this machine all along. Keyboard, mouse, scrolling, copy and paste
-all work the way they do locally. I pick up exactly where the morning left off.
+and my agents are in my own terminal, drawn by the herdr installed on my
+laptop, as if they had been running on this machine all along. Keyboard,
+mouse, scrolling, copy and paste all work the way they do locally. I pick up exactly where the morning left off.
 
 ## Seeing what got built
 

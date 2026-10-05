@@ -39,7 +39,8 @@ curl -fsSL https://github.com/jabezpauls/agentbox/releases/latest/download/insta
 sudo bash install.sh --domain code.example.com
 ```
 
-The script installs Docker if it is missing, downloads the latest release to
+The script offers to install Docker if it is missing, shows you the DNS record
+to add and waits for it, downloads the latest release to
 `/opt/agentbox`, pulls the prebuilt images, gets a TLS certificate and starts
 everything. Nothing is cloned or compiled. It prints a password once. Open
 `https://code.example.com`, sign in as `admin`, and start an agent in the
@@ -57,8 +58,8 @@ Something already on ports 80 and 443? Use `--mode behind-proxy` or
 `--mode traefik`. Run the script with no options for a walk-through that asks
 the same questions. Every option is in [docs/install.md](docs/install.md).
 
-You need a Linux server (x86_64 or arm64) with 2 GB of RAM and about 5 GB of
-disk. The image carries VS Code, Node, Python and a compiler, because agents
+You need a Linux server (x86_64 or arm64) with 2 GB of RAM and 10 GB of free
+disk, more for your projects. The image carries VS Code, Node, Python and a compiler, because agents
 keep installing things that need them.
 
 ## What's in the box
@@ -133,23 +134,19 @@ It works on a phone, and `⌘K` searches everything. The full tour is in
 
 ## From your own terminal
 
-Your box serves its own command-line client. On a machine with Node.js 20 or
-newer:
-
-```bash
-curl -fsSL https://code.example.com/cli/install | sh
-```
-
-That installs `agentbox` and signs it in through your browser with a device
-code. It is also on npm:
+The CLI is on npm. On a machine with Node.js 20 or newer:
 
 ```bash
 npm i -g @jabezpauls/agentbox
 agentbox login https://code.example.com
 ```
 
-Either way, the sign-in is the same. Your password never goes near the terminal, and the laptop gets a token
-you can revoke. It also sets up SSH, so the box is a normal host:
+Your box also serves the same CLI, matched to its version:
+`curl -fsSL https://code.example.com/cli/install | sh`.
+
+`login` signs in through your browser with a device code. Your password never
+goes near the terminal, and the laptop gets a token you can revoke. It also
+sets up SSH, so the box is a normal host:
 
 ```bash
 agentbox attach                 # your agents in this terminal
