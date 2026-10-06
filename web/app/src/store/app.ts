@@ -204,6 +204,8 @@ export interface AppState {
   openPort(port: number, path?: string): Promise<void>;
   pushToast(toast: Toast, opts?: ToastOpts): void;
   reportRpcError(method: string, err: unknown, retry?: () => void): void;
+  /** Replace the mirrored session with a fresh snapshot from herdr. */
+  resyncSession(): void;
   focusPane(id: string): void;
   focusTab(id: string): void;
   focusWorkspace(id: string): void;
@@ -252,6 +254,15 @@ const wideViewport = typeof window === "undefined" || window.innerWidth >= 900;
 
 // The inspector auto-opens on the first non-system port of a session, once.
 let previewAutoOpened = false;
+
+// When the last pane of a tab exits (its shell ends, or is hung up), herdr
+// removes the tab, and the workspace with its last tab, but says only
+// `pane_exited`: no `tab_closed`, no `workspace_closed`. The mirror would keep
+// showing them, empty, and every action on them would fail. So an exit is
+// followed by a fresh snapshot; herdr has finished removing them within
+// milliseconds, and a burst of exits shares one.
+const EXIT_RESYNC_MS = 150;
+let exitResync: ReturnType<typeof setTimeout> | null = null;
 
 function narrowViewport(): boolean {
   return typeof matchMedia === "function" && matchMedia("(max-width: 700px)").matches;
@@ -302,6 +313,13 @@ export const useApp = create<AppState>((set, get) => ({
           systemNotify(fresh, (id) => get().focusPane(id));
         }
         syncTitle(next);
+        if (m.event === "pane_exited") {
+          if (exitResync) clearTimeout(exitResync);
+          exitResync = setTimeout(() => {
+            exitResync = null;
+            get().resyncSession();
+          }, EXIT_RESYNC_MS);
+        }
         break;
       }
       case "ports": {
@@ -337,13 +355,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
       case "reset": {
         // herdr reconnected: take a fresh snapshot rather than trust our mirror.
-        getSession()
-          .then((snap) => {
-            const session = fromSnapshot(snap);
-            set({ session });
-            syncTitle(session);
-          })
-          .catch((err) => get().reportRpcError("session", err));
+        get().resyncSession();
         break;
       }
     }
@@ -429,7 +441,24 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({ toasts: mergeToast(s.toasts, stored) }));
   },
 
+  resyncSession() {
+    getSession()
+      .then((snap) => {
+        const session = fromSnapshot(snap);
+        set({ session });
+        syncTitle(session);
+      })
+      .catch((err) => get().reportRpcError("session", err));
+  },
+
   reportRpcError(method, err, retry) {
+    // The tab, pane or workspace is gone from herdr and the mirror had not
+    // caught up. Catching up is the answer: it disappears here too, and there
+    // is nothing to retry.
+    if (err instanceof RpcError && err.code?.endsWith("_not_found")) {
+      get().resyncSession();
+      return;
+    }
     const detail = err instanceof RpcError ? err.message : err instanceof Error ? err.message : String(err);
     // Keyed by the method, not by the sentence: two different calls that fail
     // the same way are two facts, and collapsing them would hide one.

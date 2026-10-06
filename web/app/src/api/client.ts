@@ -13,9 +13,12 @@ import { apiUrl } from "./base.ts";
 
 export class RpcError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** herdr's reason, when it refused the call: `tab_not_found` and the like. */
+  code: string | undefined;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
     this.name = "RpcError";
   }
 }
@@ -68,8 +71,13 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ method, params }),
   });
-  const body = (await res.json().catch(() => ({}))) as { result?: T; error?: string };
-  if (!res.ok) throw new RpcError(res.status, body.error ?? `${method} → ${res.status}`);
+  // The bridge's own refusals are a sentence; herdr's arrive as {code, message}.
+  const body = (await res.json().catch(() => ({}))) as { result?: T; error?: string | { code?: string; message?: string } };
+  if (!res.ok) {
+    const e = body.error;
+    if (e && typeof e === "object") throw new RpcError(res.status, e.message ?? `${method} → ${res.status}`, e.code);
+    throw new RpcError(res.status, e ?? `${method} → ${res.status}`);
+  }
   return body.result as T;
 }
 
