@@ -60,6 +60,7 @@ const ASSETS: Record<string, string> = {
   "login.js": "text/javascript; charset=utf-8",
   "tokens.css": "text/css; charset=utf-8",
   "inter.woff2": "font/woff2",
+  "favicon.svg": "image/svg+xml",
 };
 
 function str(v: unknown): string {
