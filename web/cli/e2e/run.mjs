@@ -591,7 +591,16 @@ try {
         fs.writeFileSync(path.join(data, "a.txt"), "alpha");
         fs.writeFileSync(path.join(data, "sub", "b.bin"), randomBytes(200_000));
         // rclone takes a password only obscured, which rclone itself does.
-        const obscured = spawnSync("docker", ["run", "--rm", "rclone/rclone:latest", "obscure", password], { encoding: "utf8" }).stdout.trim();
+        // Its first run also pulls the image, which a flaky network can fail:
+        // try again, and never go on with an empty password.
+        let obscured = "";
+        let why = "";
+        for (let i = 0; i < 3 && !obscured; i++) {
+          const res = spawnSync("docker", ["run", "--rm", "rclone/rclone:latest", "obscure", password], { encoding: "utf8", timeout: 180_000 });
+          obscured = (res.stdout ?? "").trim();
+          why = res.stderr || res.error?.message || `exit ${res.status}`;
+        }
+        assert(obscured, `rclone obscure gave nothing: ${why}`);
         const remote = `:webdav,url='${url}',vendor=other,user=${user},pass='${obscured}':`;
         const rc = (...args) => {
           const res = spawnSync("docker", ["run", "--rm", "--network", "host", "-v", `${data}:/data:ro`, "rclone/rclone:latest", ...args], { encoding: "utf8", timeout: 120_000 });
