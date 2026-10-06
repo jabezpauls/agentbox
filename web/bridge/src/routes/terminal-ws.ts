@@ -5,7 +5,9 @@ import type { Attachment, TerminalStreams, Viewer } from "../herdr/terminal.js";
 import { wsOriginGuard } from "../ws-origin.js";
 import { heartbeat } from "../ws-heartbeat.js";
 
-const PANE_RE = /^w\d+:p\d+$/;
+// herdr numbers in base 36: w9 is followed by wA, wZ by w10, and panes the
+// same. Digits alone would refuse the tenth workspace's every pane.
+const PANE_RE = /^w[0-9A-Za-z]{1,12}:p[0-9A-Za-z]{1,12}$/;
 
 /**
  * Above this many bytes still queued in a viewer's socket send buffer, we stop

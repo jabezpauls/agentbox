@@ -152,6 +152,35 @@ describe("terminal ws route", () => {
     await new Promise<void>((resolve) => ws.once("close", () => resolve()));
   });
 
+  it("attaches to the panes of a tenth workspace and beyond, whose ids have letters", async () => {
+    // herdr counts in base 36, so past w9 come wA, wB…
+    let pane = "";
+    for (let i = 0; i < 12 && !/^w[0-9]*[A-Za-z]/.test(pane); i++) pane = await newPane(`ws-many-${i}`);
+    expect(pane).toMatch(/^w[0-9]*[A-Za-z]/);
+    const ws = open(pane);
+    const out: Buffer[] = [];
+    ws.on("message", (raw, isBinary) => {
+      if (isBinary) out.push(raw as Buffer);
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    ws.send(JSON.stringify({ type: "input", text: "echo LETTERS_$((6*7))\n" }));
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no echo from ${pane}`)), 5_000);
+      const check = setInterval(() => {
+        if (Buffer.concat(out).toString("utf8").includes("LETTERS_42")) {
+          clearInterval(check);
+          clearTimeout(timer);
+          resolve();
+        }
+      }, 25);
+    });
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", () => resolve()));
+  });
+
   it("rejects an invalid pane id with close code 1008", async () => {
     const ws = new WebSocket(`ws://${baseUrl}/ws/terminal?pane=not-a-pane&cols=80&rows=24`, {
       origin: `http://${baseUrl}`,
