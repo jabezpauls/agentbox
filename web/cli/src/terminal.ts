@@ -144,6 +144,13 @@ export class DetachFilter {
   }
 }
 
+/**
+ * After a first command (`shell --cwd`'s `cd`), how long the shell's output
+ * must stay quiet before typed keys follow it, and how long they wait at most.
+ */
+const SETTLE_MS = 250;
+const SETTLE_CAP_MS = 3000;
+
 const ALT_SCREENS = [1049, 1047, 47];
 /**
  * Modes a program switches on and a shell expects off: mouse reporting (X10
@@ -360,8 +367,8 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       opts.onCrash ?? defaultCrash(stderr),
     );
 
-    // Keys that arrive before the first command has gone out wait here, in
-    // order, rather than overtaking it.
+    // Keys that arrive before the first command has gone out and finished
+    // wait here, in order, rather than overtaking it.
     const held: Buffer[] = [];
     const send = (data: Buffer): void => {
       if (started) session.input(data);
@@ -387,6 +394,8 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       if (done) return;
       done = true;
       if (fallback) clearTimeout(fallback);
+      if (settle) clearTimeout(settle);
+      if (settleCap) clearTimeout(settleCap);
       session.dispose();
       stdin.off?.("data", onInput);
       stdout.off?.("resize", onResize);
@@ -400,20 +409,40 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
     }
 
     // Input that reaches a shell before its prompt can be thrown away when its
-    // line editor starts, so the first command, and then the keyboard, wait
-    // for the shell's first output.
-    // The prompt can arrive before "open" does, and a shell that prints
-    // nothing must not leave the keyboard dead, hence the fallback.
+    // line editor starts, so the first command waits for the shell's first
+    // output. The keyboard then waits for that command to finish: keys typed
+    // while it runs are read, and mangled, by it (a `clear` wipes their echo),
+    // and finished is when the shell's output has gone quiet, the prompt
+    // drawn. The prompt can arrive before "open" does, and a shell that prints
+    // nothing must not leave the keyboard dead, hence the fallbacks.
     let opened = false;
     let prompted = !opts.initialInput;
+    let sent = false;
     let started = false;
     let fallback: ReturnType<typeof setTimeout> | undefined;
-    const startInput = (): void => {
-      if (started || done || !opened || !prompted) return;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    let settleCap: ReturnType<typeof setTimeout> | undefined;
+    const startKeys = (): void => {
+      if (started || done) return;
       started = true;
-      if (fallback) clearTimeout(fallback);
-      if (opts.initialInput) session.input(Buffer.from(opts.initialInput, "utf8"));
+      if (settle) clearTimeout(settle);
+      if (settleCap) clearTimeout(settleCap);
       for (const data of held.splice(0)) session.input(data);
+    };
+    const quietThenKeys = (): void => {
+      if (settle) clearTimeout(settle);
+      settle = setTimeout(startKeys, SETTLE_MS);
+      settle.unref?.();
+    };
+    const startInput = (): void => {
+      if (sent || done || !opened || !prompted) return;
+      sent = true;
+      if (fallback) clearTimeout(fallback);
+      if (!opts.initialInput) return startKeys();
+      session.input(Buffer.from(opts.initialInput, "utf8"));
+      quietThenKeys();
+      settleCap = setTimeout(startKeys, SETTLE_CAP_MS);
+      settleCap.unref?.();
     };
     session.on("open", () => {
       // Listening before the guard resumes stdin: a flowing stream drops what
@@ -436,6 +465,8 @@ export function runTerminal(opts: RunTerminalOptions): Promise<number> {
       if (!prompted) {
         prompted = true;
         queueMicrotask(startInput);
+      } else if (sent && !started) {
+        quietThenKeys();
       }
       guard.observe(data);
       // Flow control: when the terminal cannot keep up, ttyd stops reading
