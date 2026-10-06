@@ -58,6 +58,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# A browser, so an agent can look at what it builds: Debian's Chromium, for
+# amd64 and arm64 alike, with fonts so pages render as they would for a person.
+# Playwright's MCP server (the browser tool Claude Code and Codex plugins use)
+# reads where it is from the PLAYWRIGHT_MCP_* variables below, whatever version
+# of it an agent fetches; it would otherwise look for Google Chrome, which has
+# no arm64 build. Headless, as nothing here has a display. Chromium's own
+# sandbox needs namespaces this container is not allowed to make, and the
+# container is the boundary, as for everything else an agent runs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+ENV PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium \
+    PLAYWRIGHT_MCP_HEADLESS=true \
+    PLAYWRIGHT_MCP_SANDBOX=false
+
 # GitHub CLI, from its own apt repository (Debian does not package it).
 RUN mkdir -p -m 0755 /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -102,7 +117,10 @@ RUN useradd --uid 1000 --create-home --home-dir /home/coder --shell /bin/bash co
     && chown -R 1000:1000 /workspace /home/coder
 
 # code-server installs to /usr/lib and symlinks into /usr/local/bin.
-RUN curl -fsSL https://code-server.dev/install.sh | sh
+# Its installer leaves the downloaded package in ~/.cache, which would otherwise
+# ship in every fresh home volume.
+RUN curl -fsSL https://code-server.dev/install.sh | sh \
+    && rm -rf /home/coder/.cache/code-server
 
 # Coding agents, installed system-wide as root from the AGENTS list.
 #

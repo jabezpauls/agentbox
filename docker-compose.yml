@@ -55,10 +55,41 @@ x-sandbox: &sandbox
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
 services:
+  # Before the sandbox starts, every time: gives the sandbox user back anything
+  # in its home that it does not own. A home volume seeded by an older image
+  # has ~/.cache, ~/.npm and ~/.codex owned by root, and what writes there
+  # (Playwright's browser profile, npx, Codex) then fails with EACCES. The
+  # sandbox cannot fix that itself, having no capability to change owners.
+  # This can and has nothing else: root with CHOWN (and DAC_READ_SEARCH, to
+  # walk private directories), no network, only the home volume. -h and -xdev:
+  # it changes links, never what they point at, and stays on the volume. It
+  # never holds up the box: whatever it could not change, the sandbox starts.
+  home-init:
+    image: ${AGENTBOX_WORKSPACE_IMAGE:-${AGENTBOX_IMAGE_PREFIX:-ghcr.io/jabezpauls/agentbox}-workspace:${AGENTBOX_TAG:-latest}}
+    user: "0:0"
+    entrypoint:
+      - sh
+      - -c
+      - find /home/coder -xdev \( ! -user 1000 -o ! -group 1000 \) -exec chown -h 1000:1000 {} + ; exit 0
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+    volumes:
+      - home:/home/coder
+    restart: "no"
+
   # VS Code in the browser: files, editor, integrated terminal, and the coding
   # agents installed in the image.
   code:
     <<: *sandbox
+    depends_on:
+      home-init:
+        condition: service_completed_successfully
     command:
       - code-server
       - --bind-addr=0.0.0.0:8080

@@ -28,8 +28,9 @@ agents=/usr/local/share/agentbox/agents.md
 mkdir -p /home/coder/.codex 2>/dev/null || true
 if [ -f "$agents" ] && [ ! -w /home/coder/.codex ]; then
     # A home volume seeded by an older image, which left ~/.codex owned by root.
-    echo "note: ~/.codex is not writable, so Codex is not told how the box works; fix it once on the host with:" >&2
-    echo "  docker compose exec -u 0 code chown -R 1000:1000 /home/coder/.codex" >&2
+    # home-init (docker-compose.yml) hands it back on the next start.
+    echo "note: ~/.codex is not writable, so Codex is not told how the box works; restart the box to fix it:" >&2
+    echo "  sudo ./scripts/agentbox restart" >&2
 elif [ -f "$agents" ]; then
     target=/home/coder/.codex/AGENTS.md
     begin='<!-- agentbox:begin (managed by agentbox; edits inside are replaced on restart) -->'

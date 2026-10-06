@@ -61,4 +61,14 @@ check(proxy.get("read_only") is True, "the proxy's filesystem is read-only")
 check(proxy.get("cap_drop") == ["ALL"] and proxy.get("cap_add", []) == ["NET_BIND_SERVICE"],
       "the proxy holds no capability but binding low ports (has %s)" % proxy.get("cap_add"))
 check("no-new-privileges:true" in (proxy.get("security_opt") or []), "the proxy cannot gain privileges")
+# The one container that runs as root in the sandbox's image: before the
+# sandbox, to hand its home back to it. Nothing but that.
+init = svc["home-init"]
+check(init.get("network_mode") == "none", "home-init has no network")
+check(sorted(init.get("cap_add") or []) == ["CHOWN", "DAC_READ_SEARCH"] and init.get("cap_drop") == ["ALL"],
+      "home-init holds only CHOWN and DAC_READ_SEARCH (has %s)" % init.get("cap_add"))
+check([v.get("target") for v in init.get("volumes") or []] == ["/home/coder"], "home-init mounts the home volume only")
+check("chown -h" in " ".join(init.get("entrypoint") or []), "home-init changes links, not their targets")
+check((svc["code"].get("depends_on") or {}).get("home-init", {}).get("condition") == "service_completed_successfully",
+      "the sandbox starts after home-init")
 sys.exit(1 if failed else 0)

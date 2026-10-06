@@ -13,6 +13,11 @@ their browser, in the agentbox app: your terminal, the files, an editor, and a
   `127.0.0.1` or `0.0.0.0`; Vite is handled for you. For a folder of static
   files, `agentbox-preview static <dir>`. `agentbox-preview --help` has the
   rest; the `preview` skill has framework notes.
+- **To see a page yourself**, there is a headless Chromium at
+  `/usr/bin/chromium`. Browser tools such as the Playwright MCP find it on
+  their own; in a Playwright script, pass `executablePath: "/usr/bin/chromium"`.
+  Open the app at its local address (`http://127.0.0.1:<port>`): the box's
+  public address needs the person's sign-in.
 - **Never make an app public.** Apps are private; only the person can share
   one, from the Preview panel. Do not use claude.ai Artifacts, external
   hosting, tunnels (ngrok, cloudflared, localtunnel) or similar to show a web
