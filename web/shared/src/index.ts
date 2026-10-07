@@ -57,11 +57,70 @@ export interface ListeningPort {
   /** The owning process's working directory, when /proc tells. */
   cwd?: string | null;
 }
+/**
+ * Usage: the agents' plan limits and context, as their harnesses report them
+ * (Claude Code's status line; Codex's session log), with the bridge's forecast.
+ * The 5-hour and 7-day windows belong to the account, not to a session.
+ */
+export type UsageSeverity = "ok" | "warn" | "hot";
+export type UsageProvider = "claude" | "codex";
+export interface UsageWindow {
+  /** 0–100, as the harness reported it (whole numbers for Claude). */
+  usedPct: number;
+  /** When the window resets: epoch seconds. */
+  resetsAt: number;
+  /** Where the window is headed by its reset (the `→NN%`); null while too early to tell. */
+  projectedPct: number | null;
+  /**
+   * Seconds to 100% at this window's average pace, computed at `UsageSnapshot.computedAt`;
+   * set only when the cap is near (projected to hit 100% within the hour).
+   */
+  etaSeconds: number | null;
+  /** By the projection when there is one (warn ≥70, hot ≥85), else by usedPct (warn ≥30, hot ≥70). */
+  severity: UsageSeverity;
+}
+export interface ProviderUsage {
+  provider: UsageProvider;
+  /** The 5-hour window (Codex: its primary window). */
+  fiveHour: UsageWindow | null;
+  /** The 7-day window (Codex: its secondary, weekly window). */
+  sevenDay: UsageWindow | null;
+  /** Epoch seconds of the freshest live reading behind these numbers; null if none yet. */
+  observedAt: number | null;
+  /** No live session has refreshed these for a while: shown, but marked as old. */
+  stale: boolean;
+  /** A window is at 100%: the provider is refusing work until it resets. */
+  limited: boolean;
+}
+export interface AgentUsage {
+  /** The herdr pane the agent runs in, when known. */
+  paneId: string | null;
+  sessionId: string;
+  provider: UsageProvider;
+  /** As the harness names it, e.g. "Opus 5.5". */
+  model: string | null;
+  /** Context window used, 0–100, and its size in tokens. */
+  contextPct: number | null;
+  contextSize: number | null;
+  /** Context severity: warn ≥70, hot ≥85. */
+  contextSeverity: UsageSeverity;
+  /** Epoch seconds of this session's last report. */
+  observedAt: number;
+}
+export interface UsageSnapshot {
+  providers: ProviderUsage[];
+  /** Sessions reported in the last hour, newest first. */
+  agents: AgentUsage[];
+  /** Epoch seconds when the bridge computed this; countdowns run from it. */
+  computedAt: number;
+}
+
 export type EventsMessage =
   | { kind: "snapshot"; snapshot: SessionSnapshot }
   | { kind: "event"; event: HerdrEventName; data: unknown }
   | { kind: "ports"; ports: ListeningPort[]; readable?: boolean }
   | { kind: "reset"; reason: string }
+  | { kind: "usage"; usage: UsageSnapshot }
   | ProjectCloneEvent
   | AppOpenEvent
   | AppsChangedEvent;
