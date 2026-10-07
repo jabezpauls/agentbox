@@ -133,7 +133,8 @@ describe("usage alerts", () => {
     const out = usageAlerts(limited, memory, NOW);
     expect(out).toHaveLength(1);
     expect(out[0]!.toast.kind).toBe("limit");
-    expect(out[0]!.toast.title).toMatch(/^Claude's 5-hour limit is reached; agents will wait until \S+/);
+    expect(out[0]!.toast.title).toBe("Claude's 5-hour limit is reached");
+    expect(out[0]!.toast.detail).toMatch(/^Agents will wait until .+, 3h07m from now\.$/);
     expect(usageAlerts(limited, memory, NOW + 60)).toEqual([]);
   });
 

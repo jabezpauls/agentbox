@@ -3,7 +3,7 @@
   "providers": [
     {
       "provider": "claude",
-      "fiveHour": { "usedPct": 21, "resetsAt": 1791411420, "projectedPct": 72, "etaSeconds": null, "severity": "warn" },
+      "fiveHour": { "usedPct": 21, "resetsAt": 1791411240, "projectedPct": 72, "etaSeconds": null, "severity": "warn" },
       "sevenDay": { "usedPct": 9, "resetsAt": 1791763200, "projectedPct": 31, "etaSeconds": null, "severity": "ok" },
       "observedAt": 1791399988,
       "stale": false,

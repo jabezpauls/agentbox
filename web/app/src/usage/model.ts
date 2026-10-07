@@ -181,8 +181,9 @@ export function usageAlerts(u: UsageSnapshot, memory: AlertMemory, now: number):
           toast: {
             kind: "limit",
             paneId: "",
-            title: `${name}'s ${windowLong(limited)} limit is reached; agents will wait until ${resetClock(w.resetsAt, now)}`,
-            detail: `Resets in ${formatCountdown(untilReset(w, now))}.`,
+            // The title is one line in the toast: the wait goes on the second.
+            title: `${name}'s ${windowLong(limited)} limit is reached`,
+            detail: `Agents will wait until ${resetClock(w.resetsAt, now)}, ${formatCountdown(untilReset(w, now))} from now.`,
           },
         });
       }
