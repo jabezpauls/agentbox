@@ -4,18 +4,22 @@ import { useApp } from "../store/app.ts";
 import { tabsOf } from "../store/session.ts";
 import { WorkspaceRow } from "./WorkspaceRow.tsx";
 import { AgentList } from "./AgentList.tsx";
+import { UsageMeters } from "./UsageMeters.tsx";
+import { shownProviders } from "../usage/model.ts";
 
 interface Props {
   onCollapse(): void;
 }
 
 /**
- * The Workbench's own column: workspaces with their tabs, and every agent.
+ * The Workbench's own column: workspaces with their tabs, every agent, and
+ * at its foot the plan usage those agents run against.
  * The app's rail carries the brand, the theme and the connection light now,
  * so this column is only the herdr session.
  */
 export function Sidebar({ onCollapse }: Props) {
   const session = useApp((s) => s.session);
+  const usage = useApp((s) => s.usage);
   const setUi = useApp((s) => s.setUi);
   const focusWorkspace = useApp((s) => s.focusWorkspace);
   const focusTab = useApp((s) => s.focusTab);
@@ -102,9 +106,15 @@ export function Sidebar({ onCollapse }: Props) {
           <div className="sb-heading">
             <h2 className="section-label">Agents</h2>
           </div>
-          <AgentList session={session} onFocusPane={focusPane} />
+          <AgentList session={session} usage={usage} onFocusPane={focusPane} />
         </section>
       </nav>
+
+      {shownProviders(usage).length > 0 && (
+        <footer className="sidebar-usage">
+          <UsageMeters />
+        </footer>
+      )}
 
       <div
         className={`sidebar-resize${resizing ? " is-dragging" : ""}`}

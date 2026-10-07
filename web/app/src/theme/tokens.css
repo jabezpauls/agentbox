@@ -62,6 +62,15 @@
   --st-unknown: var(--text-disabled);
   --st-unknown-soft: var(--surface-2);
 
+  /* plan usage: ok / warn / hot, each a fill over the soft track it runs in.
+     Aliases of the tones above, so both themes follow without restating. */
+  --usage-ok: var(--accent);
+  --usage-ok-soft: var(--accent-tint);
+  --usage-warn: var(--warning);
+  --usage-warn-soft: var(--warning-soft);
+  --usage-hot: var(--danger);
+  --usage-hot-soft: var(--danger-soft);
+
   /* The ground behind an iframe of arbitrary web content: the browser's own
      default page colour in both themes, so a preview of a page that sets no
      background looks the way it would in a normal tab. */

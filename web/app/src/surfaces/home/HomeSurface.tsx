@@ -9,6 +9,8 @@ import { useSystem } from "../../system/model.ts";
 import { formatBytes, formatCores, formatDuration, formatMemory, greeting, plural } from "../../lib/format.ts";
 import { Empty, PageHeader, Section } from "../../components/ui/Page.tsx";
 import { Meter } from "../../components/ui/Meter.tsx";
+import { UsageMeters } from "../../components/UsageMeters.tsx";
+import { anyLimited, shownProviders } from "../../usage/model.ts";
 import { usePolling, useWhenHidden } from "../../shell/activity.tsx";
 import { useNeeds } from "../../shell/attention.ts";
 import { navigate } from "../../shell/router.ts";
@@ -63,6 +65,7 @@ function AppRow({ app }: { app: AppView }) {
 export function HomeSurface() {
   const needs = useNeeds();
   const session = useApp((s) => s.session);
+  const usage = useApp((s) => s.usage);
   const user = useGateSession((s) => s.session?.user ?? null);
   const projects = useProjects((s) => s.projects);
   const projectsError = useProjects((s) => s.error);
@@ -103,6 +106,16 @@ export function HomeSurface() {
         .join(" · ");
 
   const cloneList = Object.values(clones);
+  // Plan usage sits with the box's own numbers, unless a limit is reached or
+  // under the hour away: then it is what stops the agents, and it goes up
+  // with what needs you.
+  const usageSection =
+    shownProviders(usage).length > 0 ? (
+      <Section title="Plan usage" id="usage">
+        <UsageMeters variant="large" />
+      </Section>
+    ) : null;
+  const usageFirst = anyLimited(usage) || shownProviders(usage).some((p) => p.fiveHour?.etaSeconds != null || p.sevenDay?.etaSeconds != null);
   const workspaceDisk = system?.disks.find((d) => d.label === "workspace");
 
   return (
@@ -159,6 +172,7 @@ export function HomeSurface() {
           </div>
         </section>
         {needs.length > 0 && <NeedsYou needs={needs} />}
+        {usageFirst && usageSection}
 
         <Section
           title="Projects"
@@ -241,6 +255,8 @@ export function HomeSurface() {
             </ul>
           )}
         </Section>
+
+        {!usageFirst && usageSection}
 
         <Section
           title="System"
