@@ -189,6 +189,9 @@ apply() {
         echo "==> Building the sandbox and gate images here (the first build takes a few minutes)"
         # --pull refreshes the base images, so a rebuild picks up their fixes.
         "${DC[@]}" build --pull
+        # Docker's engine is never built here: its image is pulled, refreshed
+        # within the major version AGENTBOX_DOCKER_VERSION names.
+        if [ "$(env_get AGENTBOX_DOCKER)" = on ]; then "${DC[@]}" pull --quiet docker; fi
     else
         # Back from a local build: the names it set go, so the release's
         # images are used again. Names set by hand stay.
@@ -235,7 +238,8 @@ case "${1:-help}" in
     update)
         # Adopt any of the install flags on an existing box: update .env, then
         # rebuild and restart with the resolved overlays. --agents and --sharing
-        # take effect on the rebuild; --mode swaps the overlay in place.
+        # take effect on the rebuild; --mode swaps the overlay in place, and
+        # --docker adds or drops Docker's.
         shift
         ISOLATE="false"
         WANT=""
@@ -268,6 +272,16 @@ case "${1:-help}" in
                         *) echo "--preview must be off or path (or use --sharing on|off)" >&2; exit 1 ;;
                     esac
                     shift 2 ;;
+                --docker)
+                    # Docker inside the sandbox: composes (or, off, drops)
+                    # docker-compose.docker.yml; the apply below starts or
+                    # removes its container, and its images stay on their
+                    # volume either way.
+                    case "$val" in
+                        on|off) ;;
+                        *) echo "--docker must be on or off" >&2; exit 1 ;;
+                    esac
+                    PENDING+=("AGENTBOX_DOCKER=$val"); shift 2 ;;
                 --cloudflare)
                     case "$val" in
                         on|off) ;;
@@ -517,10 +531,11 @@ agentbox <command>
   workbench             follow the Workbench bridge's logs
   update [flags]        move to the latest release (or --version vX.Y.Z): fetch its
                         files, pull its images, restart; .env and your data stay.
-                        Accepts the install flags (--agents, --sharing, --cloudflare,
-                        --real-ip-header, --mode, --cert-resolver, --tls, --edge-network,
-                        --cpus, --memory, --proxy-cpus, --proxy-memory, --isolate-host,
-                        --build, --no-build). A git checkout pulls and rebuilds instead.
+                        Accepts the install flags (--agents, --sharing, --docker,
+                        --cloudflare, --real-ip-header, --mode, --cert-resolver, --tls,
+                        --edge-network, --cpus, --memory, --proxy-cpus, --proxy-memory,
+                        --isolate-host, --build, --no-build). A git checkout pulls and
+                        rebuilds instead.
   apply                 pull (or build) this version's images and restart, e.g.
                         after editing .env by hand
   passwd [new]          set the sign-in password (prompted, or generated);
