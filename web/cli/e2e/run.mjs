@@ -436,9 +436,16 @@ try {
   });
 
   await step("shell", "bash in the box, started with --cwd", async () => {
-    const r = await cli(["shell", "--cwd", "demo"], { input: "echo MARK-$((6*7)) $PWD\rexit\r", env: { COLUMNS: "200", LINES: "40" } });
-    assert(r.code === 0, `shell exited ${r.code}: ${r.stderr}`);
-    assert(r.stdout.includes(`MARK-42 ${path.join(stack.workspace, "demo")}`), `output: ${r.stdout.slice(-800)}`);
+    // As a person does: wait for the prompt in demo, then type. Keys typed
+    // before it can land while `cd && clear` is still running, and on a slow
+    // runner that window is long enough to lose them.
+    const p = start(["shell", "--cwd", "demo"], { env: { COLUMNS: "200", LINES: "40" } });
+    // After the clear, a prompt in demo: `…/demo$ ` (Debian's) or `[… demo]$ `.
+    await p.waitFor(/\x1b\[2J[\s\S]*demo\]?\$ $/);
+    p.child.stdin.end("echo MARK-$((6*7)) $PWD\rexit\r");
+    const code = await p.exit();
+    assert(code === 0, `shell exited ${code}: ${p.text("stderr")}`);
+    assert(p.text().includes(`MARK-42 ${path.join(stack.workspace, "demo")}`), `output: ${p.text().slice(-800)}`);
   });
 
   // --- files ---------------------------------------------------------------------
