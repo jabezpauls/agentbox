@@ -36,8 +36,10 @@ export function useNowSeconds(): number {
   return now;
 }
 
-const pct = (n: number) => `${Math.round(n)}%`;
 const clamp = (n: number) => Math.min(100, Math.max(0, n));
+// A window can't end past its cap: the bridge projects at most 100%, and a
+// figure from anywhere else is held to it too.
+const pct = (n: number) => `${Math.round(clamp(n))}%`;
 
 interface RowProps {
   provider: string;

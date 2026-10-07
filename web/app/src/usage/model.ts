@@ -215,7 +215,7 @@ export function usageAlerts(u: UsageSnapshot, memory: AlertMemory, now: number):
           toast: {
             kind: "usage",
             paneId: "",
-            title: `${name}'s ${windowLong(key)} window is on pace for ${Math.round(w.projectedPct)}%`,
+            title: `${name}'s ${windowLong(key)} window is on pace for ${Math.round(Math.min(100, w.projectedPct))}%`,
             detail: `${w.usedPct}% used so far; it resets at ${resetClock(w.resetsAt, now)}.`,
           },
         });
