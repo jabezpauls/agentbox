@@ -15,7 +15,13 @@ overlay() {
     tls="$(grep -m1 '^AGENTBOX_TLS=' .env | cut -d= -f2- || true)"
     if [ "$mode" = traefik ] && [ "$tls" = passthrough ]; then echo traefik-passthrough; else echo "$mode"; fi
 }
-DC=(docker compose -f docker-compose.yml -f "docker-compose.$(overlay).yml")
+# Docker inside the sandbox is an overlay of its own, on when .env says so.
+compose_files() {
+    printf '%s\n' -f docker-compose.yml -f "docker-compose.$(overlay).yml"
+    if [ "$(grep -m1 '^AGENTBOX_DOCKER=' .env | cut -d= -f2-)" = on ]; then printf '%s\n' -f docker-compose.docker.yml; fi
+}
+mapfile -t COMPOSE_FILES < <(compose_files)
+DC=(docker compose "${COMPOSE_FILES[@]}")
 
 # Run the gate's admin command. The running gate owns its store, so the command
 # goes to it (it waits for a gate that is still starting); with the gate
@@ -411,7 +417,7 @@ case "${1:-help}" in
         if [ "${2:-}" = "--isolate-host" ]; then
             # shellcheck source=scripts/isolate-host.sh
             . "$SCRIPT_DIR/isolate-host.sh"
-            agentbox_isolate_host -f docker-compose.yml -f "docker-compose.$(overlay).yml"
+            agentbox_isolate_host "${COMPOSE_FILES[@]}"
         fi
         ;;
     passwd|password)
