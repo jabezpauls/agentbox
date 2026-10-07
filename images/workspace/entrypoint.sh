@@ -78,6 +78,16 @@ if [ "${1:-}" = code-server ] && [ -f "$vsix" ]; then
     fi
 fi
 
+# Claude Code's status line feeds the Workbench's usage meters (plan limits,
+# forecasts, context per session) through agentbox-status, which then prints
+# the status line the person had, or a short one of its own. Installed on
+# every start, so a status line set up since then is chained rather than
+# displaced; the settings file is the home volume's, shared by every sandbox
+# service, so only the Workbench's container writes it.
+if [ "${1:-}" = agentbox-workbench ] && command -v agentbox-status >/dev/null 2>&1; then
+    agentbox-status install || true
+fi
+
 # Git works out of the box inside the sandbox rather than erroring on ownership.
 git config --global --get safe.directory >/dev/null 2>&1 || \
     git config --global --add safe.directory '*'
