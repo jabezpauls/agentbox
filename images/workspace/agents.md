@@ -22,6 +22,14 @@ their browser, in the agentbox app: your terminal, the files, an editor, and a
   one, from the Preview panel. Do not use claude.ai Artifacts, external
   hosting, tunnels (ngrok, cloudflared, localtunnel) or similar to show a web
   app unless they explicitly ask for that.
+- **Docker** is available when `$DOCKER_HOST` is set: the real Docker
+  Engine (rootless), with `docker compose` and `docker buildx`. A port you
+  publish with `-p` appears on the sandbox's localhost (`127.0.0.1:<port>`);
+  show it with `agentbox-preview` or the Preview panel, and never expose it
+  any other way. `--privileged` and host mounts (`-v /:/host`) reach only the
+  engine's own container, never the server. If `docker` cannot connect,
+  Docker is not enabled on this box: the person can turn it on, on the
+  server, with `sudo ./scripts/agentbox update --docker on`.
 - **A plan, a comparison or a report** that reads better as a page:
   `agentbox-review open page.html`, then `agentbox-review poll page.html` for
   their comments (the `review` skill).

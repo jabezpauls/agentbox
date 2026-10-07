@@ -1,0 +1,16 @@
+#!/bin/sh
+# The Docker CLI (/usr/bin/docker), with one addition: when the box has no
+# Docker Engine for it to talk to, a failing command says why, and how the
+# owner turns it on, instead of only that /var/run/docker.sock is not there.
+#
+# The engine is docker-compose.docker.yml's, beside the sandbox; with it on,
+# every sandbox container has DOCKER_HOST, and this is the CLI and nothing more.
+if [ -n "${DOCKER_HOST:-}" ] || [ -n "${DOCKER_CONTEXT:-}" ] || [ -S /var/run/docker.sock ]; then
+    exec /usr/bin/docker "$@"
+fi
+/usr/bin/docker "$@"
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo "agentbox: Docker is not enabled on this box (\$DOCKER_HOST is not set). The box's owner can turn it on, on the server: sudo ./scripts/agentbox update --docker on" >&2
+fi
+exit "$status"
