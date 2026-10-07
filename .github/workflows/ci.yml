@@ -22,7 +22,7 @@ jobs:
           shellcheck install.sh scripts/agentbox scripts/install-herdr.sh \
             scripts/isolate-host.sh scripts/build-release.sh scripts/next-version.sh \
             images/workspace/entrypoint.sh \
-            images/workspace/agentbox-workbench \
+            images/workspace/agentbox-workbench images/workspace/docker \
             images/gate/agentbox-gate web/cli/install.sh \
             scripts/refresh-cloudflare-ips.sh \
             tests/proxy/gate-bypass.sh tests/proxy/topology.sh tests/install/*.sh \
