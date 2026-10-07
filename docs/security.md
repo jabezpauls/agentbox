@@ -101,6 +101,12 @@ proxy.
   sandbox's own loopback
   reaches it (and the bridge refuses it too if a request arrives with an
   `Origin` or forwarding headers).
+- **Usage reports stay inside too.** `/api/usage/report` is where each
+  agent's status line tells the bridge its plan usage; the gate answers `404`
+  for it under any spelling, and the bridge takes it only over its own
+  loopback with no `Origin` or forwarding headers, so nothing outside the
+  sandbox can feed the meters. Reading them (`/api/usage`) is behind sign-in
+  like the rest of the app.
 - **Nothing without a session or a device token.** A page load without one is
   sent to `/login?next=<where it was going>`; any other request gets `401`. The
   only routes open without one are the sign-in page and its assets, sign-in
