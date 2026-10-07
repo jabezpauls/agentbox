@@ -1,0 +1,215 @@
+/* Plan usage: the sidebar's foot (compact) and Home (large).
+ *
+ * Every number sits in a column of its own width and tabular figures, so a
+ * countdown ticking from 10m to 9m59s never moves the bar beside it. Colour
+ * follows the bridge's severity and never carries it alone: the numbers are
+ * always printed, and the meter's text says them in words. */
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.usage-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 18px;
+}
+.usage-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.usage-asof {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.usage-eta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: var(--usage-hot-soft);
+  color: var(--usage-hot);
+}
+
+/* A reached limit: the one state in the footer that is allowed to shout. */
+.usage-limit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.3;
+  background: var(--usage-hot-soft);
+  color: var(--usage-hot);
+}
+.usage-limit svg {
+  flex: none;
+}
+.usage-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-rows {
+  display: grid;
+  /* window · bar · used · pace · reset */
+  grid-template-columns: auto minmax(24px, 1fr) 4.2ch 5.2ch 5.6ch;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 3px;
+}
+.usage-row {
+  --usage: var(--usage-ok);
+  --usage-soft: var(--usage-ok-soft);
+  /* Each row is its own box (a meter, with a title to hover) on its parent's
+     columns, so every row's numbers line up under the others. */
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.usage-row.is-warn {
+  --usage: var(--usage-warn);
+  --usage-soft: var(--usage-warn-soft);
+}
+.usage-row.is-hot {
+  --usage: var(--usage-hot);
+  --usage-soft: var(--usage-hot-soft);
+}
+.usage-win {
+  /* Tabular figures space out "5-hour"; the label is a word, not a number. */
+  font-variant-numeric: normal;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.usage-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--usage-soft);
+}
+.usage-ghost,
+.usage-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--usage);
+}
+/* Where the window is headed by its reset: the same ink, faint. */
+.usage-ghost {
+  opacity: 0.28;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .usage-ghost,
+  .usage-fill {
+    transition: width var(--dur-slow) var(--ease-out);
+  }
+}
+.usage-pct {
+  text-align: right;
+  font-weight: 600;
+  color: var(--text);
+}
+.usage-row.is-hot .usage-pct,
+.usage-row.is-warn .usage-pct {
+  color: var(--usage);
+}
+.usage-pace {
+  color: var(--text-2);
+}
+.usage-row.is-hot .usage-pace {
+  color: var(--usage);
+  font-weight: 600;
+}
+.usage-reset {
+  text-align: right;
+  color: var(--text-3);
+}
+
+/* Old numbers: still there, plainly not live. */
+.usage-provider.is-stale .usage-rows {
+  opacity: 0.55;
+}
+.usage-provider.is-stale .usage-name {
+  color: var(--text-3);
+}
+
+/* --- in the sidebar's foot ---------------------------------------------------- */
+
+.sidebar-usage {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.sidebar-usage .usage {
+  gap: var(--sp-2);
+}
+
+/* --- on Home ------------------------------------------------------------------ */
+
+.usage.is-large {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+}
+.usage.is-large .usage-provider {
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.usage.is-large .usage-provider.is-limited {
+  border-color: color-mix(in srgb, var(--usage-hot) 45%, var(--border));
+}
+.usage.is-large .usage-name {
+  font-size: var(--fs-xs);
+}
+.usage.is-large .usage-rows {
+  grid-template-columns: auto minmax(40px, 1fr) 4.2ch 5.2ch auto;
+  column-gap: var(--sp-2);
+  row-gap: 6px;
+}
+.usage.is-large .usage-row {
+  font-size: var(--fs-xs);
+  line-height: 20px;
+}
+.usage.is-large .usage-track {
+  height: 6px;
+}
+.usage.is-large .usage-win {
+  font-weight: 500;
+  color: var(--text-2);
+}
+.usage.is-large .usage-eta {
+  /* It carries words here ("5-hour limit in"), which tabular figures space out. */
+  font-variant-numeric: normal;
+}

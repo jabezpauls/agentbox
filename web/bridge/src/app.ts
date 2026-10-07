@@ -28,6 +28,8 @@ import { AppsService } from "./apps/service.js";
 import { gateApps } from "./apps/gate.js";
 import { registerAppRoutes } from "./routes/apps.js";
 import { request as herdrRequest } from "./herdr/socket.js";
+import { UsageService } from "./usage/service.js";
+import { registerUsageRoutes } from "./routes/usage.js";
 
 /**
  * Watches for locally listening ports. Polling runs only between `start()` and
@@ -61,6 +63,12 @@ export interface AppDeps {
   editor?: EditorChannel;
   /** Apps: the gate's records with their live state; defaults to the configured gate. */
   apps?: AppsService;
+  /**
+   * The usage meters. Defaults to one in memory alone, reading no logs and
+   * persisting nothing, so a test server never touches a real home: main.ts
+   * hands in the real one.
+   */
+  usage?: UsageService;
 }
 
 /**
@@ -139,6 +147,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
     });
   app.addHook("onClose", async () => apps.stopWatching());
 
+  const usage = deps.usage ?? new UsageService();
+
   registerApiRoutes(app, config, deps.hub, { ports: deps.ports, sharing: () => apps.sharing });
   registerAppRoutes(app, apps);
   registerProjectRoutes(app, projects);
@@ -159,7 +169,8 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
       }),
   );
   registerReviewRoutes(app, config, review);
-  registerEventsWs(app, deps.hub, deps.ports, events);
+  registerUsageRoutes(app, usage);
+  registerEventsWs(app, deps.hub, deps.ports, events, usage);
   registerTerminalWs(app, streams);
 
   // The app used to live under `/workbench/`, and links into it are out there:

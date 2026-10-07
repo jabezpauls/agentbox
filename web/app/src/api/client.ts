@@ -8,6 +8,7 @@ import type {
   ReviewSession,
   ReviewSessionDetail,
   SessionSnapshot,
+  UsageSnapshot,
 } from "@workbench/shared";
 import { apiUrl } from "./base.ts";
 
@@ -101,6 +102,11 @@ export function getSession(): Promise<SessionSnapshot> {
 
 export function getPorts(): Promise<ListeningPort[]> {
   return getJson<ListeningPort[]>("/api/ports");
+}
+
+/** Plan limits and context, as the agents last reported them. */
+export function getUsage(): Promise<UsageSnapshot> {
+  return getJson<UsageSnapshot>("/api/usage");
 }
 
 export function getReviewSessions(): Promise<ReviewSession[]> {

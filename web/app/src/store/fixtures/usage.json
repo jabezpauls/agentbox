@@ -1,0 +1,63 @@
+{
+  "computedAt": 1791400000,
+  "providers": [
+    {
+      "provider": "claude",
+      "fiveHour": { "usedPct": 21, "resetsAt": 1791411240, "projectedPct": 72, "etaSeconds": null, "severity": "warn" },
+      "sevenDay": { "usedPct": 9, "resetsAt": 1791763200, "projectedPct": 31, "etaSeconds": null, "severity": "ok" },
+      "observedAt": 1791399988,
+      "stale": false,
+      "limited": false
+    },
+    {
+      "provider": "codex",
+      "fiveHour": { "usedPct": 4, "resetsAt": 1791414800, "projectedPct": null, "etaSeconds": null, "severity": "ok" },
+      "sevenDay": { "usedPct": 38, "resetsAt": 1791605000, "projectedPct": null, "etaSeconds": null, "severity": "warn" },
+      "observedAt": 1791399620,
+      "stale": false,
+      "limited": false
+    }
+  ],
+  "agents": [
+    {
+      "paneId": "w1:p1",
+      "sessionId": "5f0c2a8e-3d1b-4c55-9a7e-2b6f81d40c13",
+      "provider": "claude",
+      "model": "Opus 5.5",
+      "contextPct": 53,
+      "contextSize": 200000,
+      "contextSeverity": "ok",
+      "observedAt": 1791399988
+    },
+    {
+      "paneId": "w1:p2",
+      "sessionId": "a71e9d04-6b2f-4f0e-8c3a-95d2e7b1f6aa",
+      "provider": "claude",
+      "model": "Claude Sonnet 5 (1M context)",
+      "contextPct": 88,
+      "contextSize": 1000000,
+      "contextSeverity": "hot",
+      "observedAt": 1791399940
+    },
+    {
+      "paneId": "w2:p1",
+      "sessionId": "rollout-2026-10-07T14-02-11-019a",
+      "provider": "codex",
+      "model": "gpt-5-codex",
+      "contextPct": 71,
+      "contextSize": 272000,
+      "contextSeverity": "warn",
+      "observedAt": 1791399620
+    },
+    {
+      "paneId": null,
+      "sessionId": "0d3b7c19-2e8a-4b61-b0f4-6c5a9e8d2f70",
+      "provider": "claude",
+      "model": "Haiku 4.5",
+      "contextPct": 12,
+      "contextSize": 200000,
+      "contextSeverity": "ok",
+      "observedAt": 1791397000
+    }
+  ]
+}

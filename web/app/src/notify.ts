@@ -5,8 +5,9 @@ import { paneTitle, type Session } from "./store/session.ts";
  * `blocked` and `done` are agent state transitions; `error` a failed call;
  * `app` says an app was put in Preview; `info` and `success` news from the
  * rest of the app — an upload finished, something went to the trash.
+ * `usage` warns that a plan limit is near; `limit` says one is reached.
  */
-export type ToastKind = "blocked" | "done" | "error" | "app" | "info" | "success";
+export type ToastKind = "blocked" | "done" | "error" | "app" | "info" | "success" | "usage" | "limit";
 
 export interface Toast {
   kind: ToastKind;

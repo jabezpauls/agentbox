@@ -222,6 +222,9 @@ COPY --chown=1000:1000 images/workspace/agentbox-review /usr/local/bin/agentbox-
 # Root-owned, as every other binary on PATH: the sandbox user runs it and
 # cannot change it.
 COPY --chmod=0755 images/workspace/agentbox-preview /usr/local/bin/agentbox-preview
+# Claude Code's status line, which reports to the usage meters; root-owned for
+# the same reason, and installed into ~/.claude/settings.json by the entrypoint.
+COPY --chmod=0755 images/workspace/agentbox-status /usr/local/bin/agentbox-status
 
 # The `ssh` service (docker-compose.yml): sshd as the sandbox user, with a
 # configuration of agentbox's own. Debian's package leaves host keys in

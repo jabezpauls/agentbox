@@ -27,6 +27,12 @@ export interface Config {
   cgroupRoot: string;
   /** What the system view reports as agentbox's version, when the image says. */
   version: string | null;
+  /** Where the usage meters keep their history, on the home volume. */
+  usageFile: string;
+  /** Claude Code's account file, which names the logged-in account. */
+  claudeAccountFile: string;
+  /** Codex's home, whose session logs carry its rate limits. */
+  codexHome: string;
 }
 export function defaultSocketPath(env = process.env): string {
   if (env.HERDR_SOCKET_PATH) return env.HERDR_SOCKET_PATH;
@@ -53,5 +59,12 @@ export function loadConfig(env = process.env): Config {
     gateAppsUrl: (env.AGENTBOX_GATE_APPS_URL || "http://gate:7901").replace(/\/+$/, ""),
     cgroupRoot: env.WORKBENCH_CGROUP_ROOT ?? "/sys/fs/cgroup",
     version: env.AGENTBOX_VERSION || null,
+    usageFile: env.WORKBENCH_USAGE_FILE ?? path.join(env.HOME || os.homedir(), ".agentbox", "usage.json"),
+    // Claude Code keeps it in CLAUDE_CONFIG_DIR when that is set, else beside
+    // ~/.claude rather than in it.
+    claudeAccountFile: env.CLAUDE_CONFIG_DIR
+      ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json")
+      : path.join(env.HOME || os.homedir(), ".claude.json"),
+    codexHome: env.CODEX_HOME || path.join(env.HOME || os.homedir(), ".codex"),
   };
 }

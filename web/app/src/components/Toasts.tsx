@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertCircle, AlertTriangle, AppWindow, Info, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, AlertTriangle, AppWindow, Gauge, Info, OctagonPause, X } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import type { StoredToast } from "../store/app.ts";
 import { navigate } from "../shell/router.ts";
@@ -30,6 +30,8 @@ const ICONS: Record<StoredToast["kind"], typeof Info> = {
   success: CheckCircle2,
   info: Info,
   app: AppWindow,
+  usage: Gauge,
+  limit: OctagonPause,
 };
 
 /** The second line when the toast brings none of its own. */
@@ -46,6 +48,8 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
   const openApp = useApp((s) => s.openApp);
 
   const isError = toast.kind === "error";
+  // A reached limit stalls every agent on it: it is read like an error.
+  const urgent = isError || toast.kind === "limit";
   const Icon = ICONS[toast.kind];
   const sub = toast.detail ?? DEFAULT_SUB[toast.kind];
   // An app toast shows the app, an agent toast jumps to its pane; another
@@ -63,10 +67,10 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
   // under the pointer that came to read it. One with an Undo gets longer.
   useEffect(() => {
     if (expanded) return;
-    const ms = isError ? ERROR_DISMISS_MS : toast.action ? ACTION_DISMISS_MS : DISMISS_MS;
+    const ms = urgent ? ERROR_DISMISS_MS : toast.action ? ACTION_DISMISS_MS : DISMISS_MS;
     const id = setTimeout(() => dismiss(toast.id), ms);
     return () => clearTimeout(id);
-  }, [toast.id, toast.action, dismiss, isError, expanded]);
+  }, [toast.id, toast.action, dismiss, urgent, expanded]);
 
   // The newest row is nearest the viewer, so depth also drives the stacking
   // order — without it the rows behind print their text through the front one.
@@ -93,7 +97,7 @@ function ToastRow({ toast, depth, expanded }: RowProps) {
     <li
       className={`toast is-${toast.kind}${depth === 0 ? " is-front" : ""}`}
       style={style}
-      role={isError ? "alert" : undefined}
+      role={urgent ? "alert" : undefined}
     >
       <span className="toast-icon" aria-hidden="true">
         <Icon size={15} />

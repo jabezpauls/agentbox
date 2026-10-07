@@ -5,6 +5,7 @@ import { getReviewSessions } from "../api/client.ts";
 import { isCrashed, useApps, type AppView } from "../apps/model.ts";
 import { paneTitle, type Session } from "../store/session.ts";
 import { useApp } from "../store/app.ts";
+import { anyLimited } from "../usage/model.ts";
 import type { SurfaceId } from "./routes.ts";
 
 /**
@@ -105,15 +106,19 @@ export function useNeeds(): Need[] {
   return useMemo(() => needsYou(session, seenDone, reviews, apps), [session, seenDone, reviews, apps]);
 }
 
-/** Which rail entries carry a "needs you" dot. */
+/**
+ * Which rail entries carry a "needs you" dot. A plan limit reached marks Home
+ * (which says so first) and the Workbench (whose agents are stalled on it).
+ */
 export function useAttention(): Partial<Record<SurfaceId, boolean>> {
   const needs = useNeeds();
+  const limited = useApp((s) => anyLimited(s.usage));
   return useMemo(
     () => ({
-      home: needs.some((n) => n.kind !== "done"),
-      workbench: needs.some((n) => n.kind === "blocked"),
+      home: limited || needs.some((n) => n.kind !== "done"),
+      workbench: limited || needs.some((n) => n.kind === "blocked"),
       apps: needs.some((n) => n.kind === "crashed"),
     }),
-    [needs],
+    [needs, limited],
   );
 }
