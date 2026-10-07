@@ -1,5 +1,10 @@
 """Check one compose mode's wiring; reads `docker compose config --format json` on stdin.
 
+    topology.py <mode> [docker]
+
+With `docker`, the config includes docker-compose.docker.yml (Docker inside the
+sandbox), and the engine's container is checked too.
+
 Prints one line per check, "ok <what>" or "FAIL <what>", and exits non-zero if
 any check fails or the config cannot be read. See topology.sh.
 """
@@ -7,6 +12,7 @@ import json
 import sys
 
 mode = sys.argv[1]
+docker = sys.argv[2:] == ["docker"]
 cfg = json.load(sys.stdin)
 svc = cfg["services"]
 nets = {name: set((s.get("networks") or {}).keys()) for name, s in svc.items()}
@@ -71,4 +77,66 @@ check([v.get("target") for v in init.get("volumes") or []] == ["/home/coder"], "
 check("chown -h" in " ".join(init.get("entrypoint") or []), "home-init changes links, not their targets")
 check((svc["code"].get("depends_on") or {}).get("home-init", {}).get("condition") == "service_completed_successfully",
       "the sandbox starts after home-init")
+
+# The sandbox's own containers: the agents' user, no capability, no way to gain
+# one, with Docker's overlay or without it.
+SANDBOX = ["code", "terminal", "shell", "ssh", "monitor", "workbench"]
+for name in SANDBOX:
+    s = svc[name]
+    check(s.get("user") == "1000:1000" and s.get("cap_drop") == ["ALL"] and not s.get("cap_add")
+          and "no-new-privileges:true" in (s.get("security_opt") or []) and not s.get("privileged"),
+          "%s runs as 1000 with no capability and no-new-privileges" % name)
+
+# No container is handed a Docker socket of the host's, nor any host path but
+# the proxy's own configuration, read-only.
+for name, s in svc.items():
+    vols = s.get("volumes") or []
+    check(not any("docker.sock" in str(v.get("source", "")) or "docker.sock" in str(v.get("target", "")) for v in vols),
+          "%s mounts no Docker socket" % name)
+    binds = [v for v in vols if v.get("type") == "bind"]
+    if name == "proxy":
+        check(all(v.get("read_only") and str(v.get("target", "")).startswith("/etc/caddy/") for v in binds),
+              "the proxy's host paths are its configuration, read-only")
+    else:
+        check(not binds, "%s mounts no host path (has %s)" % (name, [v.get("source") for v in binds]))
+
+SOCKET_DIR = "/run/agentbox-docker"
+DOCKER_HOST = "unix://%s/docker.sock" % SOCKET_DIR
+if not docker:
+    check("docker" not in svc, "no Docker engine unless the box turns it on")
+    check(all("DOCKER_HOST" not in (svc[n].get("environment") or {}) for n in SANDBOX), "no DOCKER_HOST without it")
+else:
+    d = svc.get("docker")
+    check(d is not None, "the Docker engine is a service of its own")
+    d = d or {}
+    check(not d.get("privileged"), "the engine is not privileged")
+    check(not d.get("ports"), "the engine publishes no port")
+    check(d.get("cap_drop") == ["ALL"] and sorted(d.get("cap_add") or []) == ["SETGID", "SETUID"],
+          "the engine holds SETUID and SETGID alone (has %s)" % d.get("cap_add"))
+    check(sorted(x.get("source") for x in d.get("devices") or []) == ["/dev/fuse", "/dev/net/tun"],
+          "the engine's devices are /dev/fuse and /dev/net/tun")
+    check(d.get("network_mode") == "service:code", "the engine shares the sandbox's network, and joins none")
+    check(not d.get("networks"), "the engine is on no network of its own")
+    check(not d.get("pid") and not d.get("ipc") and not d.get("userns_mode"),
+          "the engine shares no process, IPC or user namespace")
+    check(str(d.get("image", "")).endswith("-dind-rootless"), "the engine is the rootless image (%s)" % d.get("image"))
+    check(not d.get("user") or str(d.get("user")).split(":")[0] not in ("0", "root"), "the engine does not run as root")
+    # The socket's directory: one volume, in memory, only UID 1000's.
+    sock = [v.get("source") for v in d.get("volumes") or [] if v.get("target") == SOCKET_DIR]
+    check(len(sock) == 1, "the engine's socket is on a volume at %s" % SOCKET_DIR)
+    run = cfg.get("volumes", {}).get(sock[0] if sock else "", {})
+    opts = run.get("driver_opts") or {}
+    o = set((opts.get("o") or "").split(","))
+    check(opts.get("type") == "tmpfs" and opts.get("device") == "tmpfs", "the socket's volume is a tmpfs")
+    check("uid=1000" in o and "mode=0700" in o, "the socket's volume is UID 1000's alone, mode 0700 (%s)" % opts.get("o"))
+    for name in SANDBOX:
+        s = svc[name]
+        check((s.get("environment") or {}).get("DOCKER_HOST") == DOCKER_HOST, "%s has DOCKER_HOST" % name)
+        check(any(v.get("source") in sock and v.get("target") == SOCKET_DIR for v in s.get("volumes") or []),
+              "%s mounts the socket's volume" % name)
+    holders = sorted(n for n, s in svc.items()
+                     if any(v.get("source") in sock for v in s.get("volumes") or []))
+    check(holders == sorted(SANDBOX + ["docker"]), "only the sandbox and the engine mount the socket (%s)" % holders)
+    # environment is a mapping, merged across files: the Workbench keeps its own.
+    check((svc["workbench"].get("environment") or {}).get("AGENTBOX_GATE_APPS_URL"), "the Workbench keeps its own environment")
 sys.exit(1 if failed else 0)

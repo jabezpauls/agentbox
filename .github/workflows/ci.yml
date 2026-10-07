@@ -36,7 +36,12 @@ jobs:
           sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholderplaceholderplaceholderplaceholder|' .env
           for mode in standalone behind-proxy traefik traefik-passthrough; do
             docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" config -q
+            # Docker inside the sandbox (AGENTBOX_DOCKER=on) composes on top of each.
+            docker compose -f docker-compose.yml -f "docker-compose.$mode.yml" -f docker-compose.docker.yml config -q
           done
+          # Its engine is Docker's own rootless image, at the major version
+          # AGENTBOX_DOCKER_VERSION names, and `apply` pulls it with the rest.
+          test "$(docker compose -f docker-compose.yml -f docker-compose.standalone.yml -f docker-compose.docker.yml config --images | grep '^docker:')" = "docker:29-dind-rootless"
           # The first update from an older checkout runs the older script, which
           # adds the (now empty) previews overlay when AGENTBOX_PREVIEW_DOMAIN
           # is set: that must still compose.
@@ -74,7 +79,9 @@ jobs:
       - name: Who can reach whom, in each mode
         # The proxy shares a network with the gate alone (the sandbox cannot
         # reach it), the gate joins the sandbox's network, and only the proxy
-        # publishes a port — none at all in traefik mode.
+        # publishes a port — none at all in traefik mode. Each mode again with
+        # Docker inside the sandbox: an unprivileged engine on the sandbox's
+        # network, reached by a socket only the sandbox user can open.
         run: tests/proxy/topology.sh
 
       - name: The two copies of Cloudflare's ranges agree
