@@ -1,35 +1,11 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { EditorChannel } from "../editor.js";
 import { sendError } from "../files/routes.js";
 import type { FilesService } from "../files/service.js";
 import { FilesError } from "../files/roots.js";
+import { insideOnly } from "../local-caller.js";
 
-/** Headers a proxy adds: their presence means the request came through one. */
-const FORWARDED = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip"];
-
-/**
- * True when a socket to `/ws/editor` comes from inside the sandbox rather
- * than through the front door. The extension runs in code-server's extension
- * host, which shares the bridge's network namespace, so it connects over
- * loopback with a Node client that sends no `Origin`. A browser always sends
- * one on a websocket handshake, and a proxy — the gate — adds forwarding
- * headers, so neither passes even when the proxy itself is on loopback.
- */
-export function isLocalEditor(req: FastifyRequest): boolean {
-  const addr = req.socket.remoteAddress ?? "";
-  const loopback = addr === "::1" || /^(::ffff:)?127\./.test(addr);
-  if (!loopback) return false;
-  if (req.headers.origin !== undefined) return false;
-  return !FORWARDED.some((h) => req.headers[h] !== undefined);
-}
-
-function localOnly(req: FastifyRequest, reply: FastifyReply, done: () => void): void {
-  if (isLocalEditor(req)) {
-    done();
-    return;
-  }
-  void reply.code(403).send({ error: "the editor channel is only for the editor inside the sandbox" });
-}
+const localOnly = insideOnly("the editor channel is only for the editor inside the sandbox");
 
 function position(raw: unknown, what: string): number | undefined {
   if (raw === undefined || raw === null) return undefined;

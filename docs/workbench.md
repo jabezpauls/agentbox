@@ -180,6 +180,42 @@ jumps to the one waiting longest.
 
 Closing a pane, a tab or a workspace that still has a working agent asks first.
 
+### Usage meters
+
+The app shows each agent harness's plan limits beside the agents: how much of
+the 5-hour and 7-day windows is used, where each is headed by its reset
+(`→NN%`), how long until it resets, and — when the cap is under an hour away
+at the current pace — a countdown to it. Each session shows its model and how
+full its context window is. A window colours by where it is headed once there
+is a projection (warn from 70%, hot from 85%) and by current usage before that
+(30% and 70%); context warns from 70% and is hot from 85%.
+
+The numbers are the harnesses' own:
+
+- **Claude Code** hands its status line command the session's model, context
+  and the account's rate limits. agentbox makes that command
+  `agentbox-status`, which passes them to the bridge and then prints a status
+  line as before. If you had a status line of your own, it is kept: on every
+  start the box records its command in `~/.agentbox/statusline-chain.json`
+  and `agentbox-status` runs it with the same input and prints what it prints
+  (with nothing of yours, it prints a short `model · ctx · 5h · 7d` line).
+  Change `statusLine` in `~/.claude/settings.json` and the next start chains
+  the new one; the rest of the file is never touched, and a file that does not
+  parse is left alone. Claude Code only refreshes its rate limits when a
+  session talks to the API, so numbers go *stale* (and are shown as such)
+  after ten minutes without a live reading.
+- **Codex** writes its rate limits into its session logs
+  (`~/.codex/sessions/…`) after every response; the bridge reads the newest
+  ones every 20 seconds. Codex's sessions are not tied to a pane.
+
+The projection is [claude-statusbar](https://github.com/leeguooooo/claude-code-usage-bar)'s
+(MIT, © leeguooooo), ported to the bridge: it blends the recent pace, the
+window's average pace and learned time-of-day rates, ignores the frozen
+numbers an idle session keeps replaying, takes official re-baselines after a
+grace period, and keeps each logged-in account's readings apart. Its history
+lives in `~/.agentbox/usage.json`, so it survives restarts; time-of-day uses
+the box's `TZ`.
+
 ## The editor
 
 ![The editor, kept running inside the app](images/editor-dark.png)
@@ -710,6 +746,14 @@ loopback, `127.0.0.1` or `::1`.
   editor, at the line, and answers `{delivered}`. The editor is joined to the
   bridge by the **agentbox connect** extension baked into the image, over
   `/ws/editor` — a socket the bridge accepts only from inside the sandbox.
+- `GET /api/usage` — the usage meters as a `UsageSnapshot`: per provider the
+  5-hour and 7-day windows (used, reset, projection, near-cap ETA, severity),
+  whether they are stale or at the limit, and the sessions reported in the
+  last hour with their pane, model and context. The events socket sends the
+  same as a `usage` message on connect and whenever it changes; countdowns
+  run from its `computedAt`. `POST /api/usage/report` is where
+  `agentbox-status` delivers Claude Code's status line JSON; like
+  `/ws/editor`, it is accepted only from inside the sandbox.
 
 ## firstmate
 

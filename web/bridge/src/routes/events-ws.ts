@@ -3,13 +3,15 @@ import type { EventsMessage } from "@workbench/shared";
 import type { SessionHub } from "../herdr/session.js";
 import type { PortsWatcher } from "../app.js";
 import type { BridgeEvents } from "../events.js";
+import type { UsageService } from "../usage/service.js";
 import { wsOriginGuard } from "../ws-origin.js";
 import { heartbeat } from "../ws-heartbeat.js";
 
 /**
- * `/ws/events`: on open send a fresh snapshot and the current listening ports,
- * then forward every hub message verbatim, push port changes as they occur,
- * and pass on the bridge's own events (a clone's progress, say).
+ * `/ws/events`: on open send a fresh snapshot, the current listening ports and
+ * the usage meters, then forward every hub message verbatim, push port and
+ * usage changes as they occur, and pass on the bridge's own events (a clone's
+ * progress, say).
  * The ports watcher polls only while at least one events client is connected,
  * so this route ref-counts it: started on the first client, stopped on the last.
  */
@@ -18,6 +20,7 @@ export function registerEventsWs(
   hub: SessionHub,
   ports?: PortsWatcher,
   events?: BridgeEvents,
+  usage?: UsageService,
 ): void {
   let clientCount = 0;
 
@@ -25,6 +28,7 @@ export function registerEventsWs(
     let off: (() => void) | null = null;
     let offPorts: (() => void) | null = null;
     let offEvents: (() => void) | null = null;
+    let offUsage: (() => void) | null = null;
 
     const send = (m: EventsMessage): void => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m));
@@ -46,6 +50,10 @@ export function registerEventsWs(
           send({ kind: "ports", ports: ports.current(), readable: ports.readable() });
           offPorts = ports.on((p) => send({ kind: "ports", ports: p, readable: ports.readable() }));
         }
+        if (usage) {
+          send({ kind: "usage", usage: usage.refresh() });
+          offUsage = usage.on((u) => send({ kind: "usage", usage: u }));
+        }
         off = hub.on(send);
       })
       .catch(() => {
@@ -63,6 +71,8 @@ export function registerEventsWs(
       offPorts = null;
       if (offEvents) offEvents();
       offEvents = null;
+      if (offUsage) offUsage();
+      offUsage = null;
       clientCount -= 1;
       if (ports && clientCount === 0) ports.stop();
     });
