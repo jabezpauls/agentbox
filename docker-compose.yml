@@ -41,7 +41,11 @@ x-sandbox: &sandbox
     - no-new-privileges:true
   cap_drop:
     - ALL
-  pids_limit: 512
+  # Processes and threads, for the whole of one container. herdr, every agent
+  # and every dev server live in the Workbench's: Claude Code, Node and
+  # Chromium are each dozens of threads, and at the limit herdr cannot start
+  # one and stops accepting connections.
+  pids_limit: ${AGENTBOX_PIDS:-4096}
   cpus: ${AGENTBOX_CPUS:-2}
   mem_limit: ${AGENTBOX_MEMORY:-4g}
   volumes:
