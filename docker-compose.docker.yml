@@ -9,9 +9,11 @@
 #
 # It is not privileged, has no Docker socket of the host's, and mounts no host
 # path. dockerd runs as UID 1000 inside a user namespace of its own (rootless
-# mode): root in there is UID 1000 out here, and the UIDs it maps (100000 and
-# up) are unused on the host. What it needs to do that, and nothing more:
-#   - SETUID and SETGID, for newuidmap and newgidmap to set up the namespace;
+# mode): root in there is UID 1000 out here, and the other UIDs it maps are
+# 100000 and up (its image's /etc/subuid), no host account's on most hosts.
+# What it needs to do that, and nothing more:
+#   - SETUID and SETGID, for newuidmap and newgidmap to set up the namespace
+#     (file capabilities, which no-new-privileges would refuse them);
 #   - an unconfined seccomp profile and system paths, for the namespace's own
 #     mounts (/proc, overlay); Docker's default profile refuses them;
 #   - /dev/fuse and /dev/net/tun, for its storage and its network.
