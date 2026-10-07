@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PASSWORD, login, openWs, request, sameOrigin, startHarness, type Harness } from "./helpers.js";
 
-// The two bridge paths the gate treats specially: the WebDAV mount, whose
+// The bridge paths the gate treats specially: the WebDAV mount, whose
 // filenames may hold characters the path guard otherwise refuses, and the
-// editor channel, which is for the extension inside the sandbox alone.
+// editor channel and the usage report, which are for the sandbox alone.
 
 let h: Harness;
 let cookie: string;
@@ -92,5 +92,22 @@ describe("the editor channel", () => {
     const res = await openWs(`ws://127.0.0.1:${h.port}/ws/events`, { origin: h.base, cookie });
     expect("status" in res ? res.status : 101).toBe(101);
     if ("ws" in res) res.ws.close();
+  });
+});
+
+describe("the usage report", () => {
+  it("is not found from outside, signed in or not", async () => {
+    const before = h.allSeen().length;
+    for (const p of ["/api/usage/report", "/api/usage/report/", "/api/usage/%72eport", "/api/%75sage/report?x=1"]) {
+      for (const headers of [{}, { ...sameOrigin(h, { cookie }) }, bearer]) {
+        expect((await request(h.base, "POST", p, { headers, body: { status: { session_id: "x" } } })).status, p).toBe(404);
+      }
+    }
+    expect(h.allSeen().length).toBe(before);
+  });
+
+  it("leaves the meters themselves to the bridge", async () => {
+    const res = await request(h.base, "GET", "/api/usage", { headers: bearer });
+    expect(res.json()).toMatchObject({ echo: "bridge", url: "/api/usage" });
   });
 });

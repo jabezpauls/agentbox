@@ -157,6 +157,15 @@ describe("the route table", () => {
     expect(at("/ws/editorial")).toEqual({ kind: "upstream", upstream: "bridge", target: "/ws/editorial" });
   });
 
+  it("does not take usage reports from outside", () => {
+    for (const u of ["/api/usage/report", "/api/usage/report/", "/api/usage/report?x=1", "/api/usage/%72eport", "/api/%75sage/report"]) {
+      expect(at(u), u).toEqual({ kind: "notFound" });
+    }
+    // The meters themselves are the app's, like any other API.
+    expect(at("/api/usage")).toEqual({ kind: "upstream", upstream: "bridge", target: "/api/usage" });
+    expect(at("/api/usage/reports")).toEqual({ kind: "upstream", upstream: "bridge", target: "/api/usage/reports" });
+  });
+
   it("sends everything else to the bridge, path untouched", () => {
     expect(at("/")).toEqual({ kind: "upstream", upstream: "bridge", target: "/" });
     expect(at("/workbench/api/health")).toEqual({ kind: "upstream", upstream: "bridge", target: "/workbench/api/health" });

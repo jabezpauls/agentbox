@@ -75,6 +75,14 @@ const EDITOR_PROXIES = ["/proxy", "/absproxy"];
  */
 export const EDITOR_CHANNEL = "/ws/editor";
 
+/**
+ * Where each agent's status line reports its plan usage to the bridge. Only a
+ * process in the sandbox may say what the agents are doing, so this is for
+ * the sandbox's loopback alone, like the editor channel: the bridge refuses
+ * anything that is not local, and the gate does not forward it at all.
+ */
+export const USAGE_REPORT = "/api/usage/report";
+
 /** Apps: `/a/<id>/…`. */
 export const APP_PREFIX = "/a";
 
@@ -89,6 +97,7 @@ export function route(path: string, query: string | null): Route {
   if (isDavPath(path)) return { kind: "upstream", upstream: "bridge", target: `${path}${qs}` };
 
   if (underSegment(path, EDITOR_CHANNEL)) return { kind: "notFound" };
+  if (underSegment(path, USAGE_REPORT)) return { kind: "notFound" };
 
   // An app, and nothing but the app: the data plane, under the app policy.
   // The bare `/a/<id>` gets its trailing slash, so the app's relative URLs
