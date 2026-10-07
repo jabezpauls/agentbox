@@ -1940,8 +1940,12 @@
 .toast.is-done {
   --st: var(--success);
 }
-.toast.is-error {
+.toast.is-error,
+.toast.is-limit {
   --st: var(--danger);
+}
+.toast.is-usage {
+  --st: var(--warning);
 }
 .toast.is-success {
   --st: var(--success);

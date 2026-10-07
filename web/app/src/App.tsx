@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ProjectCloneEvent } from "@workbench/shared";
 import { connectEvents } from "./api/events.ts";
-import { getSession } from "./api/client.ts";
+import { getSession, getUsage } from "./api/client.ts";
 import { fromSnapshot } from "./store/session.ts";
 import { useApp } from "./store/app.ts";
 import { useTheme } from "./theme/useTheme.ts";
@@ -68,6 +68,11 @@ export function App() {
       .then((snap) => {
         if (!cancelled && !socketSeeded) useApp.setState({ session: fromSnapshot(snap) });
       })
+      .catch(() => {});
+    // The same for plan usage. Its socket message wins by its own clock (see
+    // applyUsage); a bridge without usage, or none reported yet, is no error.
+    getUsage()
+      .then((u) => useApp.getState().applyUsage(u))
       .catch(() => {});
 
     const dispose = connectEvents({

@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import type { AppView, EventsMessage, HerdrEvent, ListeningPort } from "@workbench/shared";
+import type { AppView, EventsMessage, HerdrEvent, ListeningPort, UsageSnapshot } from "@workbench/shared";
 import type { ConnStatus } from "../api/events.ts";
 import { getSession, listApps, makeApp, rpc, RpcError, type HealthInfo } from "../api/client.ts";
 import { applyEvent, emptySession, fromSnapshot, type Session } from "./session.ts";
 import { blockedCount, notifyTransitions, rpcErrorTitle, type Toast } from "../notify.ts";
 import type { Theme } from "../theme/useTheme.ts";
 import { setTitleCount } from "../shell/title.ts";
+import { usageAlerts, type AlertMemory } from "../usage/model.ts";
 
 export interface StoredToast extends Toast {
   id: string;
@@ -167,6 +168,8 @@ export interface AppState {
   /** Why the apps could not be read last time, in words; null when they were. */
   appsError: string | null;
   health: HealthInfo | null;
+  /** Plan limits and context, as the agents last reported them; null until the bridge says. */
+  usage: UsageSnapshot | null;
   ui: UiState;
   seenDone: Record<string, number>;
   toasts: StoredToast[];
@@ -178,6 +181,11 @@ export interface AppState {
   applyMessage(m: EventsMessage): void;
   setStatus(s: ConnStatus): void;
   setHealth(h: HealthInfo): void;
+  /**
+   * Take a usage snapshot (from the socket or the REST seed), unless one
+   * computed later is already here, and toast what it newly says.
+   */
+  applyUsage(u: UsageSnapshot): void;
   setUi(partial: Partial<UiState>): void;
   /**
    * Update the inspector. `persist: false` is for the live phase of a resize
@@ -264,6 +272,15 @@ let previewAutoOpened = false;
 const EXIT_RESYNC_MS = 150;
 let exitResync: ReturnType<typeof setTimeout> | null = null;
 
+// What the usage toasts have already said, for the life of the page: the
+// bridge re-sends the same snapshot on every reconnect and timer tick.
+const usageAlerted: AlertMemory = new Map();
+
+/** Forget what the usage toasts have said. Tests only. */
+export function resetUsageAlerts(): void {
+  usageAlerted.clear();
+}
+
 function narrowViewport(): boolean {
   return typeof matchMedia === "function" && matchMedia("(max-width: 700px)").matches;
 }
@@ -287,6 +304,7 @@ export const useApp = create<AppState>((set, get) => ({
   apps: null,
   appsError: null,
   health: null,
+  usage: null,
   ui: initialUi,
   seenDone: readSeen(),
   toasts: [],
@@ -353,6 +371,10 @@ export const useApp = create<AppState>((set, get) => ({
         void get().refreshApps();
         break;
       }
+      case "usage": {
+        get().applyUsage(m.usage);
+        break;
+      }
       case "reset": {
         // herdr reconnected: take a fresh snapshot rather than trust our mirror.
         get().resyncSession();
@@ -367,6 +389,15 @@ export const useApp = create<AppState>((set, get) => ({
 
   setHealth(health) {
     set({ health });
+  },
+
+  applyUsage(usage) {
+    // A shape this page does not know (an older or newer bridge) is ignored, not thrown on.
+    if (!usage || !Array.isArray(usage.providers) || !Array.isArray(usage.agents)) return;
+    const prev = get().usage;
+    if (prev && prev.computedAt > usage.computedAt) return;
+    set({ usage });
+    for (const a of usageAlerts(usage, usageAlerted, Date.now() / 1000)) get().pushToast(a.toast, { dedupe: a.dedupe });
   },
 
   setUi(partial) {

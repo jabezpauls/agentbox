@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionSnapshot } from "@workbench/shared";
+import type { SessionSnapshot, UsageSnapshot } from "@workbench/shared";
 
 import { rpc, RpcError } from "../api/client.ts";
-import { useApp } from "./app.ts";
+import { resetUsageAlerts, useApp } from "./app.ts";
 import { fromSnapshot } from "./session.ts";
 import snapshotFixture from "./fixtures/snapshot.json" with { type: "json" };
+import usageFixture from "./fixtures/usage.json" with { type: "json" };
 
 const herdrNow = snapshotFixture as unknown as SessionSnapshot;
 
@@ -97,5 +98,47 @@ describe("rpc", () => {
     const err = (await rpc("server.stop").catch((e: unknown) => e)) as RpcError;
     expect(err.message).toBe("method not allowed: server.stop");
     expect(err.code).toBeUndefined();
+  });
+});
+
+describe("usage", () => {
+  const usage = usageFixture as unknown as UsageSnapshot;
+  const limited = (): UsageSnapshot => {
+    const u = structuredClone(usage);
+    Object.assign(u.providers[0]!, { limited: true });
+    u.providers[0]!.fiveHour!.usedPct = 100;
+    return u;
+  };
+
+  beforeEach(() => {
+    vi.setSystemTime(usage.computedAt * 1000);
+    resetUsageAlerts();
+    useApp.setState({ usage: null });
+  });
+
+  it("keeps the snapshot the socket sends", () => {
+    useApp.getState().applyMessage({ kind: "usage", usage });
+    expect(useApp.getState().usage).toEqual(usage);
+  });
+
+  it("never lets an older snapshot (a slow REST seed) replace a newer one", () => {
+    useApp.getState().applyUsage(usage);
+    const older = { ...structuredClone(usage), computedAt: usage.computedAt - 60, agents: [] };
+    useApp.getState().applyUsage(older);
+    expect(useApp.getState().usage?.agents).toHaveLength(usage.agents.length);
+  });
+
+  it("ignores a shape it does not know", () => {
+    useApp.getState().applyMessage({ kind: "usage", usage: {} as UsageSnapshot });
+    expect(useApp.getState().usage).toBeNull();
+  });
+
+  it("toasts a reached limit once, however often the bridge repeats it", () => {
+    for (let i = 0; i < 3; i++) {
+      useApp.getState().applyMessage({ kind: "usage", usage: { ...limited(), computedAt: usage.computedAt + i * 30 } });
+    }
+    const toasts = useApp.getState().toasts.filter((t) => t.kind === "limit");
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.title).toContain("Claude's 5-hour limit is reached");
   });
 });
