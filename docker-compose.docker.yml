@@ -1,0 +1,77 @@
+# Docker inside the sandbox (AGENTBOX_DOCKER=on): the real Docker Engine,
+# rootless, for the agents. Composed on top of the base stack and the mode's
+# overlay by scripts/agentbox and install.sh.
+#
+# The engine runs in a container of its own that shares the sandbox's network
+# namespace: a port an agent publishes (`docker run -p 3000:3000`) listens on
+# the sandbox's localhost, where Preview finds it, and nowhere else. Nothing is
+# published from the host.
+#
+# It is not privileged, has no Docker socket of the host's, and mounts no host
+# path. dockerd runs as UID 1000 inside a user namespace of its own (rootless
+# mode): root in there is UID 1000 out here, and the other UIDs it maps are
+# 100000 and up (its image's /etc/subuid), no host account's on most hosts.
+# What it needs to do that, and nothing more:
+#   - SETUID and SETGID, for newuidmap and newgidmap to set up the namespace
+#     (file capabilities, which no-new-privileges would refuse them);
+#   - an unconfined seccomp profile and system paths, for the namespace's own
+#     mounts (/proc, overlay); Docker's default profile refuses them;
+#   - /dev/fuse and /dev/net/tun, for its storage and its network.
+# SELinux stays enforcing. See docs/security.md.
+#
+# The sandbox reaches it through one Unix socket, on an in-memory volume that
+# only UID 1000 can open; there is no TCP listener.
+
+x-docker-client: &docker-client
+  volumes:
+    - docker-run:/run/agentbox-docker
+  environment:
+    DOCKER_HOST: unix:///run/agentbox-docker/docker.sock
+
+services:
+  docker:
+    image: docker:${AGENTBOX_DOCKER_VERSION:-29}-dind-rootless
+    command: ["dockerd", "--host=unix:///run/agentbox-docker/docker.sock"]
+    restart: unless-stopped
+    network_mode: "service:code"
+    depends_on:
+      - code
+    environment:
+      # No TLS, and so (with --host given) no TCP listener either.
+      DOCKER_TLS_CERTDIR: ""
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - seccomp=unconfined
+      - systempaths=unconfined
+    devices:
+      - /dev/fuse
+      - /dev/net/tun
+    pids_limit: 4096
+    cpus: ${AGENTBOX_DOCKER_CPUS:-2}
+    mem_limit: ${AGENTBOX_DOCKER_MEMORY:-4g}
+    volumes:
+      # Images, containers and volumes: kept across restarts and updates.
+      - docker-data:/home/rootless/.local/share/docker
+      - docker-run:/run/agentbox-docker
+
+  code: *docker-client
+  terminal: *docker-client
+  shell: *docker-client
+  ssh: *docker-client
+  monitor: *docker-client
+  workbench: *docker-client
+
+volumes:
+  docker-data:
+    name: agentbox_docker
+  # The socket's directory: in memory, and only UID 1000's.
+  docker-run:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=0700

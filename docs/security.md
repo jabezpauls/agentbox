@@ -8,12 +8,12 @@ over the host.
 
 | Boundary | How it is enforced |
 | --- | --- |
-| The Docker daemon | The socket is never mounted. A container with `/var/run/docker.sock` is root on the host; agentbox does not use it, and `docker compose config` will show no such mount. |
+| The Docker daemon | The host's socket is never mounted. A container with `/var/run/docker.sock` is root on the host; agentbox does not use it, and `docker compose config` will show no such mount. With [Docker inside the sandbox](#docker-inside-the-sandbox) on, the sandbox gets the socket of a Docker Engine of its own, rootless, in a container beside it, never the host's. |
 | The host filesystem | No bind mounts. `/workspace` is a named Docker volume; nothing from `/`, `/home`, or `/etc` is exposed. |
 | Other stacks' data | The sandbox is on its own bridge network (`agentbox_internal`) with no route to another stack's private network, so their databases and internal services are not reachable. |
 | The host itself | This is **not** automatic. `agentbox_internal` is an ordinary bridge, so by default a container can route to the host's own services (a management UI, SSH, a deploy webhook) through the bridge gateway, exactly as any Docker container can. On a shared host you must block it: see "Isolating the sandbox from the host" below. A single-purpose host with nothing else on it does not need this. |
-| Privilege escalation | Every container has `no-new-privileges:true` and `cap_drop: [ALL]`. The sandbox's processes run as UID 1000 and the gate as UID 10001, never root; both hold no capabilities, and the gate's filesystem is read-only. The proxy (Caddy's image) runs as root inside its own container, which holds no capability but `NET_BIND_SERVICE` (for :80/:443) and has a read-only filesystem apart from its certificate volumes. None of the three can raise its privileges. One more container runs, and exits, before the sandbox starts: `home-init`, root in the sandbox's image with only `CHOWN` and `DAC_READ_SEARCH`, no network and only the home volume mounted. It gives UID 1000 back whatever in its home it does not own (left by older images), changing symbolic links themselves, never their targets, and staying on that volume. |
-| Host resources | CPU and memory ceilings per service, plus a PID limit, so a runaway agent cannot starve the host. |
+| Privilege escalation | Every container has `cap_drop: [ALL]`, and every one but Docker's engine (below) has `no-new-privileges:true`. The sandbox's processes run as UID 1000 and the gate as UID 10001, never root; both hold no capabilities, and the gate's filesystem is read-only. The proxy (Caddy's image) runs as root inside its own container, which holds no capability but `NET_BIND_SERVICE` (for :80/:443) and has a read-only filesystem apart from its certificate volumes. None of the three can raise its privileges. One more container runs, and exits, before the sandbox starts: `home-init`, root in the sandbox's image with only `CHOWN` and `DAC_READ_SEARCH`, no network and only the home volume mounted. It gives UID 1000 back whatever in its home it does not own (left by older images), changing symbolic links themselves, never their targets, and staying on that volume. With [Docker inside the sandbox](#docker-inside-the-sandbox) on, one more runs: the engine, as UID 1000, holding `SETUID` and `SETGID` for its user namespace, without `no-new-privileges` and with seccomp unconfined; it is not privileged. |
+| Host resources | CPU and memory ceilings per service, plus a PID limit (`AGENTBOX_PIDS`, 4096 per container), so a runaway agent cannot starve the host. Docker's engine, when on, has ceilings of its own (`AGENTBOX_DOCKER_CPUS`, `AGENTBOX_DOCKER_MEMORY`, 4096 processes), which bound every container the agents start in it. |
 
 ## What the sandbox *can* reach
 
@@ -33,6 +33,9 @@ over the host.
   app, and nothing else. It is keyed on its own address there and cannot
   claim another, and it cannot read or write the gate's store. It cannot
   reach the proxy at all.
+- With [Docker inside the sandbox](#docker-inside-the-sandbox) on, its
+  engine's socket: the sandbox can run, build and compose containers there,
+  which share its network and reach nothing it cannot.
 - The gate's app API (:7901), which is the sandbox's side of the app
   registry: it can register, change and remove apps — always private, never on
   one of agentbox's own ports — and nothing else (see "Apps" below).
@@ -554,6 +557,79 @@ Residuals, stated plainly:
   own frame alone. Session keys are short hashes matched against that shape, so
   a `..` in a key is refused rather than resolved.
 
+## Docker inside the sandbox
+
+Off unless the owner turns it on (`install.sh --docker on`, or
+`./scripts/agentbox update --docker on`). It adds one container,
+`docker` from `docker-compose.docker.yml`: Docker's own
+`docker:<version>-dind-rootless` image running `dockerd` in rootless mode, as
+UID 1000, the same user the sandbox runs as. The agents reach it through
+`DOCKER_HOST`, and can then run, build and compose containers of their own.
+
+Treat it as part of the sandbox: anything in the sandbox can use the engine,
+and the engine can do anything the sandbox can, and a little more, described
+below. What it adds to the host's exposure is kernel surface, not access.
+
+**What it can do**
+
+- Run containers as root inside a user namespace of its own: root in there is
+  UID 1000 outside, and its other UIDs are 100000 to 165535 (the image's
+  `/etc/subuid`). Without user-namespace remapping in the host's Docker, those
+  are the same numbers on the host. Its files live on the `agentbox_docker`
+  volume, under Docker's root-only directory.
+- Listen on the sandbox's network. It shares `code`'s network namespace
+  (`network_mode: service:code`): a port published with `-p` listens there,
+  on the sandbox's localhost and its address on `agentbox_internal`, exactly
+  like a dev server, so Preview serves it as an app and the gate's app policy
+  applies to it. Its containers' outbound traffic leaves through the same
+  namespace (slirp4netns), so it is the sandbox's traffic: `--isolate-host`'s
+  rules and any egress filtering cover it unchanged.
+
+**What it cannot do**
+
+- It is not privileged, holds no capability but `SETUID` and `SETGID`, mounts
+  no host path and no Docker socket of the host's, publishes no port on the
+  host, and has a process namespace of its own (it cannot see the sandbox's
+  processes, nor they its).
+- `docker run --privileged` inside it does not start: the kernel refuses it
+  a writable `/sys` (the engine's own is read-only, and a namespace inside it
+  cannot mount a more permissive one). `-v /:/host` mounts the engine's own
+  filesystem. `--network host` is the engine's own namespace, with nothing
+  of the host's networks in it.
+- It has no TCP listener: one Unix socket, on an in-memory volume that only
+  UID 1000 can open (mode 0700), mounted by the sandbox's containers and the
+  engine alone. The gate and the proxy never see it.
+- Resource limits on its containers (`docker run --memory`) are not enforced,
+  as rootless Docker has no cgroups to enforce them with here; the engine's
+  own ceilings bound everything it runs.
+
+**What it needs, and why**
+
+| Setting | Why |
+| --- | --- |
+| `cap_add: [SETUID, SETGID]` (everything else dropped) | `newuidmap` and `newgidmap` write the user namespace's UID and GID maps. They gain `CAP_SETUID` and `CAP_SETGID` from file capabilities, which the container's bounding set must hold. |
+| no `no-new-privileges` | It would stop those two programs gaining their file capabilities, and the engine could not map more than its own UID. |
+| `seccomp=unconfined` | Docker's default profile refuses `unshare`/`clone` of new namespaces, and `mount`, to a container without `CAP_SYS_ADMIN`; the engine makes user, mount and network namespaces and mounts its containers' filesystems inside them. |
+| `systempaths=unconfined` | Docker masks parts of `/proc` and `/sys` in every container. The kernel will not mount a fresh `/proc` in a user namespace where the existing one has paths covered, so without this every container the engine starts fails at "mounting proc". |
+| `/dev/net/tun` | slirp4netns gives the engine's namespace its network through a TAP device. |
+| `/dev/fuse` | fuse-overlayfs, the storage driver on a kernel that refuses overlayfs in a user namespace. |
+
+SELinux stays enforcing, and AppArmor is not changed. It is tested on a Rocky
+Linux 10 host with SELinux enforcing, and on a host with neither SELinux nor
+AppArmor. On a host where Docker confines containers with AppArmor (Ubuntu,
+Debian), Docker's default profile may refuse the engine's mounts; agentbox
+does not turn it off for you.
+
+**What is left: the kernel.** Seccomp is the filter that keeps most of the
+kernel's system calls away from a container, and user namespaces let an
+unprivileged process reach kernel code otherwise kept for `CAP_SYS_ADMIN`
+(mounting filesystems, configuring network namespaces). Both are where local
+privilege escalations are usually found. A kernel bug reachable that way is a
+way from the sandbox to the host's root, which a plain sandbox container
+would not have had. Keep the kernel patched, keep SELinux enforcing, prefer a
+rootless Docker on the host (where an escape lands in a user account), and
+leave Docker off on a box that does not need it.
+
 ## Verifying the boundary yourself
 
 Do not take the table above on trust; the claims are observable:
@@ -582,6 +658,20 @@ docker ps -a --filter volume=agentbox_gate --format '{{.Names}}'
 ```
 
 Expect `user=10001:10001 ro=true caps=[ALL]`, and only the gate listed.
+
+```bash
+# With Docker inside the sandbox on: the engine is not privileged, holds
+# SETUID and SETGID alone, shares the sandbox's network, and publishes nothing.
+docker inspect agentbox-docker-1 \
+  --format 'priv={{.HostConfig.Privileged}} caps={{.HostConfig.CapAdd}} drop={{.HostConfig.CapDrop}} net={{.HostConfig.NetworkMode}} ports={{.HostConfig.PortBindings}}'
+# --privileged inside it does not start, and a host mount is its own filesystem.
+docker exec agentbox-code-1 docker run --rm --privileged alpine true
+docker exec agentbox-code-1 docker run --rm -v /:/host alpine ls /host
+```
+
+Expect `priv=false caps=[SETUID SETGID] drop=[ALL] net=container:<id>
+ports=map[]`, the `--privileged` run refused ("error mounting sysfs"), and a
+listing of the engine's own root.
 
 ## Rootless mode (recommended)
 

@@ -128,6 +128,9 @@ accident. From your laptop, `agentbox files` and `agentbox mount` do the same.
 - **System.** CPU, memory, disks and processes, for the sandbox and the host.
   btop when you want more.
 - **Settings.** Password, two-factor, sessions, devices, sharing, appearance.
+- **Docker, if you want it.** `--docker on` gives the agents a rootless Docker
+  Engine of their own, with Compose and Buildx; what they publish shows up in
+  the Preview. Off by default ([what it costs](docs/install.md#docker-inside-the-sandbox)).
 
 It works on a phone, and `⌘K` searches everything. The full tour is in
 [docs/workbench.md](docs/workbench.md).
@@ -172,6 +175,8 @@ built the rest around that.
   password, session cookie and tokens from everything it passes on.
 - **No Docker socket, no host mounts, no root.** Sandbox processes run as UID
   1000 with every capability dropped, under CPU, memory and process limits.
+  Docker inside the sandbox, if you turn it on, is a rootless engine of its
+  own, not the host's ([what that relaxes](docs/security.md#docker-inside-the-sandbox)).
 - **Two-factor** (TOTP, with recovery codes), and rate limits with lockout on
   every password check.
 - **A firewall for shared hosts.** `--isolate-host` installs nftables rules

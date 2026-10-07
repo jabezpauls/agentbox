@@ -127,6 +127,31 @@ called "build --pull" && pass "--build makes even the default pair build" || fai
 (cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --no-build) >/dev/null 2>&1 || true
 expect AGENTBOX_BUILD off "--no-build turns it off"
 
+echo "Docker inside the sandbox is an overlay of its own"
+[ -f "$BOX/docker-compose.docker.yml" ] && pass "the release carries docker-compose.docker.yml" || fail "the bundle has no Docker overlay"
+WITH="compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.docker.yml"
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --docker on) >/dev/null 2>&1 || fail "update --docker on failed"
+expect AGENTBOX_DOCKER on "update --docker on is written"
+called "$WITH pull" && called "$WITH up -d --no-build --remove-orphans" \
+    && pass "the stack is pulled and started with the overlay" || fail "no overlay: $(cat "$WORK/calls")"
+called "$WITH config --images" && pass "and its images are checked, the engine's included" || fail "images not checked with the overlay"
+rm -f "$WORK/calls"
+bash "$BOX/install.sh" --yes --password abcdefgh2 >/dev/null 2>&1 || fail "re-run with a new password failed"
+expect AGENTBOX_DOCKER on "a re-run of install.sh keeps Docker on"
+called "$WITH exec -T gate agentbox-gate set-password" && pass "and reaches the gate through the same files" || fail "install.sh's gate command: $(grep gate "$WORK/calls")"
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --build) >/dev/null 2>&1 || true
+called "$WITH build --pull" && called "$WITH pull --quiet docker" \
+    && pass "a box that builds its images still pulls the engine's" || fail "build with Docker on: $(cat "$WORK/calls")"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --no-build) >/dev/null 2>&1 || true
+rm -f "$WORK/calls"
+(cd / && "$BOX/scripts/agentbox" update --version v0.0.1 --docker off) >/dev/null 2>&1 || fail "update --docker off failed"
+expect AGENTBOX_DOCKER off "update --docker off is written"
+called "docker-compose.docker.yml" && fail "the overlay is still composed: $(cat "$WORK/calls")" \
+    || { called "compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --no-build --remove-orphans" \
+        && pass "the stack restarts without it, removing the engine's container" || fail "no restart: $(cat "$WORK/calls")"; }
+
 echo "a download that does not match its checksums is refused"
 "$ROOT/scripts/build-release.sh" v0.0.3 "$REL/download/v0.0.3" >/dev/null
 sed -i 's/^[0-9a-f]\{64\}  agentbox.tar.gz$/0000000000000000000000000000000000000000000000000000000000000000  agentbox.tar.gz/' "$REL/download/v0.0.3/SHA256SUMS"

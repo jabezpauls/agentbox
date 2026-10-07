@@ -37,6 +37,8 @@ PASSWORD=""
 CPUS="2"
 MEMORY="4g"
 SHARING="on"
+# Docker inside the sandbox: a rootless Docker Engine beside it (docker-compose.docker.yml).
+DOCKER="off"
 # Behind Cloudflare? on/off; empty until decided (flag, .env, or the mode's default).
 CLOUDFLARE=""
 # A header the operator's own proxy sets to the client's address (behind-proxy
@@ -98,6 +100,10 @@ Run with no options for an interactive walk-through.
   --sharing <on|off>    Whether you may make an app public from the Preview
                         panel (default on); off keeps every app private
   --preview <path|off>  The older name of --sharing (path means on)
+  --docker <on|off>     Docker inside the sandbox (default off): a rootless
+                        Docker Engine in a container of its own beside it, for
+                        the agents' docker, docker compose and docker buildx
+                        (see docs/install.md and docs/security.md)
   --cloudflare <on|off> The hostname is proxied through Cloudflare (default on in
                         traefik mode, off otherwise); decides whose address the
                         sign-in limits count
@@ -165,6 +171,7 @@ while [ $# -gt 0 ]; do
                 *)    die "--preview must be off or path (or use --sharing on|off)" ;;
             esac
             shift 2 ;;
+        --docker)        flag DOCKER "${2:-}"; shift 2 ;;
         --cloudflare)    flag CLOUDFLARE "${2:-}"; shift 2 ;;
         --real-ip-header) flag REAL_IP_HEADER "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
@@ -241,7 +248,7 @@ ENV_FILE="$INSTALL_DIR/.env"
 # The keys this installer manages, and the setting each one holds.
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND AGENTBOX_BIND_PUBLIC:BIND_PUBLIC
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER AGENTBOX_TLS:TLS
-AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
+AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_DOCKER:DOCKER AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
 AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY AGENTBOX_BUILD:BUILD"
@@ -354,6 +361,7 @@ if [ "$INTERACTIVE" = "true" ]; then
     else
         ask "Is the hostname proxied through Cloudflare? (on / off)" "$CLOUDFLARE" CLOUDFLARE
     fi
+    ask "Docker inside the sandbox, for the agents? (on / off)" "$DOCKER" DOCKER
     ask_yn "Firewall the sandbox off the host (shared host only)?" n ISOLATE_HOST
 
     # Echo the equivalent one-liner so the choices are reproducible and auditable.
@@ -361,7 +369,7 @@ if [ "$INTERACTIVE" = "true" ]; then
     [ -n "$DOMAIN" ] && RESOLVED="$RESOLVED --domain $DOMAIN"
     [ "$MODE" = "behind-proxy" ] && RESOLVED="$RESOLVED --bind $BIND"
     [ "$MODE" = "traefik" ] && RESOLVED="$RESOLVED --edge-network $EDGE_NETWORK --cert-resolver $CERT_RESOLVER --tls $TLS"
-    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS --cloudflare $CLOUDFLARE"
+    RESOLVED="$RESOLVED --user $USERNAME --agents $AGENTS --cloudflare $CLOUDFLARE --docker $DOCKER"
     [ "$ISOLATE_HOST" = "true" ] && RESOLVED="$RESOLVED --isolate-host"
     printf '\n'
     log "Resolved command:"
@@ -424,6 +432,10 @@ fi
 case "$SHARING" in
     on|off) ;;
     *) die "--sharing must be on or off" ;;
+esac
+case "$DOCKER" in
+    on|off) ;;
+    *) die "--docker must be on or off" ;;
 esac
 # behind-proxy publishes plain HTTP, and its Caddy believes X-Forwarded-For
 # from any private address (it expects your proxy there). On an address
@@ -660,6 +672,7 @@ AGENTBOX_TLS=$TLS
 AGENTBOX_USER=$USERNAME
 AGENTBOX_PASSWORD_HASH=$HASH_ESCAPED
 AGENTBOX_SHARING=$SHARING
+AGENTBOX_DOCKER=$DOCKER
 AGENTBOX_CLOUDFLARE=$CLOUDFLARE
 AGENTBOX_REAL_IP_HEADER=$REAL_IP_HEADER
 AGENTBOX_AGENTS=$AGENTS
@@ -690,6 +703,9 @@ mv "$NEW_ENV" .env
 OVERLAY="$MODE"
 [ "$MODE" = traefik ] && [ "$TLS" = passthrough ] && OVERLAY="traefik-passthrough"
 COMPOSE=(-f docker-compose.yml -f "docker-compose.$OVERLAY.yml")
+# Docker inside the sandbox is an overlay of its own (scripts/agentbox reads
+# .env the same way).
+[ "$DOCKER" = on ] && COMPOSE+=(-f docker-compose.docker.yml)
 
 # Pull the release's images (or build them here: a checkout, --build, or
 # --agents other than the prebuilt pair) and start, removing any service this
@@ -768,6 +784,7 @@ else
     printf '  Password  (the one you passed with --password)\n'
 fi
 printf '  Agents    %s\n' "$AGENTS"
+printf '  Docker    %s  (inside the sandbox: --docker on|off)\n' "$DOCKER"
 printf '  Cloudflare %s  (whose address sign-in limits count: --cloudflare on|off)\n' "$CLOUDFLARE"
 [ -n "$REAL_IP_HEADER" ] && printf '  Client IP header %s  (your proxy must overwrite it on every request)\n' "$REAL_IP_HEADER"
 printf '\n  Sign in at /login, then: Editor /vscode/   Workbench /workbench   Terminal /terminal   Shell /shell   Monitor /monitor\n'

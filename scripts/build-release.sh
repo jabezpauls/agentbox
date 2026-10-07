@@ -27,6 +27,7 @@ PATHS=(
     install.sh .env.example .dockerignore
     docker-compose.yml docker-compose.standalone.yml docker-compose.behind-proxy.yml
     docker-compose.traefik.yml docker-compose.traefik-passthrough.yml docker-compose.previews.yml
+    docker-compose.docker.yml
     proxy scripts images web
     README.md LICENSE docs/install.md docs/cli.md docs/security.md docs/workbench.md
 )

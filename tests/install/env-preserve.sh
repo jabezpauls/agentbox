@@ -167,6 +167,22 @@ else
     pass "--sharing takes on or off only"
 fi
 
+echo "Docker inside the sandbox"
+seed
+run --isolate-host
+expect AGENTBOX_DOCKER off "an install that never said has Docker off"
+run --docker on
+expect AGENTBOX_DOCKER on "--docker on is written"
+run
+expect AGENTBOX_DOCKER on "and kept on the next run"
+run --docker off
+expect AGENTBOX_DOCKER off "--docker off turns it off again"
+if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --docker yes >/dev/null 2>&1; then
+    fail "--docker yes was accepted"
+else
+    pass "--docker takes on or off only"
+fi
+
 echo "the removed per-port preview hostnames"
 seed
 if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes --preview-domain p.example.com 2>"$DIR/err" >/dev/null; then
@@ -290,6 +306,7 @@ mkdir -p "$DIR/scripts"
 cp "$ROOT/scripts/agentbox" "$ROOT/scripts/isolate-host.sh" "$DIR/scripts/"
 before="$(cat "$DIR/.env")"
 for args in "--mode bogus" "--preview public" "--cloudflare maybe" "--agents claude;x" "--agents claude --mode bogus" \
+    "--docker yes" "--docker on --sharing maybe" \
     "--real-ip-header CF-Connecting-IP" "--real-ip-header x-forwarded-for" "--real-ip-header X-Agentbox-Client-IP" "--real-ip-header X}"; do
     # shellcheck disable=SC2086  # word-split on purpose: each entry is a flag and value
     if (cd / && "$DIR/scripts/agentbox" update $args) >/dev/null 2>&1; then
@@ -346,6 +363,11 @@ if grep -q -- "--cloudflare on" "$DIR/err"; then pass "and points at --cloudflar
 seed
 (cd / && "$DIR/scripts/agentbox" update --real-ip-header X-Real-IP) >/dev/null 2>&1 || true
 expect AGENTBOX_REAL_IP_HEADER X-Real-IP "update --real-ip-header X-Real-IP is written"
+seed
+(cd / && "$DIR/scripts/agentbox" update --docker on) >/dev/null 2>&1 || true
+expect AGENTBOX_DOCKER on "update --docker on is written"
+(cd / && "$DIR/scripts/agentbox" update --docker off) >/dev/null 2>&1 || true
+expect AGENTBOX_DOCKER off "and update --docker off"
 
 echo "agentbox update records the version it updates to"
 # A checkout with an upstream to pull from, and a docker that does nothing.

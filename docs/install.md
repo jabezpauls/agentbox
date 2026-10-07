@@ -60,6 +60,7 @@ prints the resolved command before it runs anything.
 | `--tls <edge\|passthrough>` | `edge` | traefik: who terminates TLS — Traefik (`edge`), or this box's own Caddy with its own certificate, Traefik passing TLS through (`passthrough`, for a DNS-only record; implies `--cloudflare off`). See [direct TLS](#direct-tls-passthrough). |
 | `--user` / `--password` | `admin` / generated | The sign-in. Only a bcrypt hash is stored, in the gate. On an existing install, `--password` replaces the current password and signs every session out. |
 | `--sharing <on\|off>` | `on` | Whether you may share an app from the Preview panel (anyone with the link, or a passcode, for as long as you choose). `off` keeps every app private. `--preview path\|off`, its old name, still works. See [sharing apps](workbench.md#sharing-an-app). |
+| `--docker <on\|off>` | `off` | Docker inside the sandbox: a rootless Docker Engine in a container of its own beside it, so agents can `docker run`, `docker compose up` and `docker buildx build`. See [below](#docker-inside-the-sandbox). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
 | `--real-ip-header <name>` | none | behind-proxy/traefik: a header your own proxy writes the visitor's address into and overwrites on every request (e.g. `X-Real-IP`), read before `X-Forwarded-For`. Rarely needed; see [behind-proxy](#if-something-already-serves-ports-80-and-443). |
 | `--agents <list>` | `claude,codex` | Which coding agents the sandbox carries, comma-separated (`claude`, `codex`). `herdr` is always installed. The prebuilt image has both; any other list builds the image on the server. See [below](#choosing-coding-agents). |
@@ -201,6 +202,46 @@ replaces the rules rather than stacking them. It needs root (for `nft` and `syst
 a rootless host, where a breakout lands in a user account and the isolation is
 not needed. A single-purpose host with nothing else on it does not need it
 either.
+
+### Docker inside the sandbox
+
+`--docker on` (or `sudo ./scripts/agentbox update --docker on` on an existing
+box) gives the agents a real Docker Engine. The sandbox image always carries
+the Docker CLI with Compose and Buildx; this adds the engine, in a container
+of its own (`docker`, from `docker-compose.docker.yml`), and sets
+`DOCKER_HOST` in every sandbox container, SSH sessions included. Without it,
+`docker` says Docker is not enabled on this box.
+
+- **Ports.** The engine shares the sandbox's network, so `docker run -p
+  3000:3000` listens on the sandbox's localhost, like any dev server, and
+  `agentbox-preview open 3000` shows it in the Preview. Nothing is published
+  on the server.
+- **What it costs.** One more container, with ceilings of its own,
+  `AGENTBOX_DOCKER_CPUS` and `AGENTBOX_DOCKER_MEMORY` (default `2` and `4g`,
+  set in `.env`), which every container the agents start shares (a
+  `docker run --memory` of their own is not enforced). Images, containers,
+  build cache and volumes live on the `agentbox_docker` volume and can grow
+  large: `docker system df` inside the sandbox says how much,
+  and `docker system prune` frees it. `--docker off` removes the engine's
+  container and keeps the volume; `docker volume rm agentbox_docker` on the
+  server, with Docker off, frees it.
+- **What it can reach.** It is not privileged and has no Docker socket or
+  path of the host's: `--privileged` does not start inside it, and
+  `-v /:/host` and `--network host` reach the engine's own container, not
+  the server. It does run with less confinement than the sandbox (two
+  capabilities, no seccomp filter, two devices); [the security
+  model](security.md#docker-inside-the-sandbox) says what and why, and what
+  that leaves exposed. Leave it off unless the agents need it.
+- **The engine's version** follows `AGENTBOX_DOCKER_VERSION` (a major
+  version of Docker's `docker:<version>-dind-rootless` image, default `29`);
+  `update` and `apply` pull it afresh.
+
+It is tested on a Rocky Linux 10 host with SELinux enforcing, and on a host
+with no SELinux or AppArmor. On a host where Docker confines containers with
+AppArmor (Ubuntu, Debian), Docker's default profile may refuse the engine's
+mounts; please report it rather than loosening the profile. With Docker
+itself rootless on the server, the engine nests one user namespace inside
+another, which is untested.
 
 ### DNS
 
@@ -444,7 +485,9 @@ To adopt a setting on an existing box, pass the install flag to `update`, which
 writes the matching `.env` key and re-applies it: `agentbox update --agents
 claude` builds with just Claude, `agentbox update --mode traefik` swaps the
 overlay, `agentbox update --tls passthrough` swaps it for
-[direct TLS](#direct-tls-passthrough), and `--cloudflare`, `--real-ip-header`,
+[direct TLS](#direct-tls-passthrough), `agentbox update --docker on` adds
+[Docker inside the sandbox](#docker-inside-the-sandbox) (and `off` removes
+it), and `--sharing`, `--cloudflare`, `--real-ip-header`,
 `--isolate-host`, `--cert-resolver`,
 `--edge-network`, `--cpus`, `--memory`, `--proxy-cpus`, `--proxy-memory`,
 `--build` and `--no-build` all work the same way. `update`

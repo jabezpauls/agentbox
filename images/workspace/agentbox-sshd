@@ -21,13 +21,14 @@ fi
 [ -e /home/coder/.ssh/authorized_keys ] || : >/home/coder/.ssh/authorized_keys
 chmod 600 /home/coder/.ssh/authorized_keys
 
-# sshd gives a session none of its own environment: hand on the container's.
+# sshd gives a session none of its own environment: hand on the container's
+# (DOCKER_HOST too, when the box has Docker: docker-compose.docker.yml).
 conf=/tmp/agentbox-sshd
 mkdir -p "$conf"
 tmp="$(mktemp "$conf/.env.XXXXXX")"
 # One SetEnv line: sshd keeps only the first.
 line=SetEnv
-for name in TZ LANG PATH NPM_CONFIG_PREFIX AGENTBOX_VERSION ANTHROPIC_API_KEY OPENAI_API_KEY; do
+for name in TZ LANG PATH NPM_CONFIG_PREFIX AGENTBOX_VERSION ANTHROPIC_API_KEY OPENAI_API_KEY DOCKER_HOST; do
     eval "value=\${$name:-}"
     # Only what SetEnv can carry as one quoted word.
     case "$value" in ''|*'"'*|*'\'*|*'

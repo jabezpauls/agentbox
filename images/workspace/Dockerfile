@@ -85,6 +85,20 @@ RUN mkdir -p -m 0755 /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/* \
     && gh --version
 
+# The Docker CLI, with Compose and Buildx, from Docker's own apt repository:
+# the client only. The engine runs beside the sandbox, in a container of its
+# own, when the box turns Docker on (docker-compose.docker.yml), which also
+# sets DOCKER_HOST; until then the wrapper below says how to turn it on.
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod go+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+         > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version && docker compose version && docker buildx version
+COPY --chmod=0755 images/workspace/docker /usr/local/bin/docker
+
 # ttyd powers the full-screen shell and the process monitor. Debian does not
 # ship it, so take the upstream static binary for this architecture.
 RUN arch="$(dpkg --print-architecture)" \
