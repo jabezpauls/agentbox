@@ -12,6 +12,7 @@ import { AppsService } from "./apps/service.js";
 import { gateApps } from "./apps/gate.js";
 import { createDataPlane } from "./data-plane.js";
 import { UsageService } from "./usage/service.js";
+import { CodexSessions } from "./usage/codex.js";
 
 const USAGE = "Usage: workbench-bridge [--help]\n\nRuns the Workbench bridge server that proxies browser clients to herdr.";
 
@@ -63,10 +64,14 @@ async function main(argv: string[]): Promise<void> {
   // link working across a restart.
   void apps.relaunchPinned().catch((err: unknown) => console.warn("[workbench] relaunching pinned apps failed", err));
 
-  // The usage meters: the agents' plan limits as their status lines report
-  // them, kept on the home volume so the forecast's history survives a
+  // The usage meters: the agents' plan limits as their status lines and logs
+  // report them, kept on the home volume so the forecast's history survives a
   // restart.
-  const usage = new UsageService({ file: config.usageFile, claudeAccountFile: config.claudeAccountFile });
+  const usage = new UsageService({
+    file: config.usageFile,
+    claudeAccountFile: config.claudeAccountFile,
+    codex: new CodexSessions({ home: config.codexHome }),
+  });
   usage.start();
 
   const app = await buildApp(config, { hub, ports, files, events, apps, usage });

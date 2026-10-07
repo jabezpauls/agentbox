@@ -31,6 +31,8 @@ export interface Config {
   usageFile: string;
   /** Claude Code's account file, which names the logged-in account. */
   claudeAccountFile: string;
+  /** Codex's home, whose session logs carry its rate limits. */
+  codexHome: string;
 }
 export function defaultSocketPath(env = process.env): string {
   if (env.HERDR_SOCKET_PATH) return env.HERDR_SOCKET_PATH;
@@ -63,5 +65,6 @@ export function loadConfig(env = process.env): Config {
     claudeAccountFile: env.CLAUDE_CONFIG_DIR
       ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json")
       : path.join(env.HOME || os.homedir(), ".claude.json"),
+    codexHome: env.CODEX_HOME || path.join(env.HOME || os.homedir(), ".codex"),
   };
 }
