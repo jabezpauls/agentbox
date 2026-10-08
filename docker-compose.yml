@@ -91,6 +91,12 @@ services:
   # agents installed in the image.
   code:
     <<: *sandbox
+    # The sandbox's one process namespace is this container's (the others
+    # join it), so its PID 1 inherits every orphan: Chromium alone leaves a
+    # few behind on each launch. code-server never reaps them; Docker's init
+    # does. Without it a day of browser tools left thousands of zombies,
+    # each holding a slot of the process limit.
+    init: true
     depends_on:
       home-init:
         condition: service_completed_successfully

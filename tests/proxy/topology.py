@@ -139,4 +139,5 @@ else:
     check(holders == sorted(SANDBOX + ["docker"]), "only the sandbox and the engine mount the socket (%s)" % holders)
     # environment is a mapping, merged across files: the Workbench keeps its own.
     check((svc["workbench"].get("environment") or {}).get("AGENTBOX_GATE_APPS_URL"), "the Workbench keeps its own environment")
+check(svc["code"].get("init") is True, "the sandbox's PID 1 is an init that reaps orphans")
 sys.exit(1 if failed else 0)
