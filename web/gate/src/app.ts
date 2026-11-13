@@ -20,6 +20,8 @@ import { machinesHeaderLines, machinesOriginOf, machinesRequestRefusal, setMachi
 import { registerMachines } from "./machines/routes.js";
 import { ClaudeTokens } from "./machines/claude-token.js";
 import { MachineRouter } from "./machines/router.js";
+import { MachineAppGateway, machineAppsRefusal } from "./machines/app-gateway.js";
+import { MachineAppGrants, MachineApps, MachineAppTickets } from "./machines/apps.js";
 import { MachinesSessions } from "./machines/session.js";
 import { Grants } from "./grants.js";
 import { createSandboxApi } from "./sandbox-api.js";
@@ -157,9 +159,17 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     now,
     // On every link that comes up: the shared Claude token, if it opted in.
     onOnline: (id) => core.machines.pushClaudeToken(id),
+    // A node's apps: its whole list each time; none while it is offline.
+    onApps: (id, apps) => {
+      if (apps === null) {
+        machineApps.clear(id);
+        machineAppGateway?.dropMachine(id);
+      } else if (!machineApps.sync(id, apps)) console.warn(`[gate] machine ${id} sent an app list that is not one`);
+    },
     ...(deps.link ?? {}),
   });
   const claudeTokens = new ClaudeTokens(config.dataDir, now);
+  const machineApps = new MachineApps(now);
   const core: GateCore = {
     config,
     store,
@@ -199,11 +209,24 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
           registry.delivered(rec, token === null ? null : claudeTokens.generation);
         }
       },
+      apps: machineApps,
+      appTickets: new MachineAppTickets(now),
     },
   };
   const machineRouter = new MachineRouter(core);
   core.machines.router = machineRouter;
   const names = core.hosts;
+  // The machine-apps origin: apps on machines, under the box's app policy, framed by the machines page alone.
+  const machineAppGateway: MachineAppGateway | null = names
+    ? new MachineAppGateway({
+        core,
+        apps: machineApps,
+        tickets: core.machines.appTickets,
+        grants: new MachineAppGrants(),
+        probes: new WindowLimiter(60, 60_000, now),
+        machinesOrigin: machinesOriginOf(names.machines),
+      })
+    : null;
   if (names) console.log(`[gate] machines are on: ${names.machines} and ${names.machineApps}, beside ${names.main}`);
   const grants = new Grants(store);
   const appGateway = new AppGateway({
@@ -299,11 +322,6 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, refusal.status, refusal.message);
       return true;
     }
-    // Nothing is served on the machine-apps origin yet.
-    if (kind === "machine-apps") {
-      plain(res, 404, "not found");
-      return true;
-    }
     return false;
   }
 
@@ -314,16 +332,25 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, 421, "misdirected request");
       return;
     }
-    if (kind !== "main") setMachinesHeaders(res);
+    if (kind === "machines") setMachinesHeaders(res);
     const target = splitTarget(req.url ?? "");
     if (!isRoutablePath(target.path)) {
-      plain(res, 400, "bad path");
+      if (kind === "machine-apps") machineAppsRefusal(res, 400, "bad path");
+      else plain(res, 400, "bad path");
       return;
     }
     // Everything from here on — the route, the way back after signing in, the
     // path forwarded — sees the one canonical spelling.
     const path = canonicalPath(target.path);
     const { query } = target;
+    if (kind === "machine-apps") {
+      // Apps on machines, under the app policy (machines/app-gateway.ts); the gate's own routes are not here.
+      const info = settle(req, kind);
+      if (!info.viaProxy) return machineAppsRefusal(res, 421, "misdirected request");
+      if (req.headers["service-worker"] !== undefined) return machineAppsRefusal(res, 403, "service workers are not allowed here");
+      await (machineAppGateway as MachineAppGateway).handle(req, res, path, query, info);
+      return;
+    }
     if (kind !== "main") {
       // The machines origin is the gate's alone: its own routes, and a
       // machine's own server over its link — nothing forwarded to the sandbox.
@@ -417,6 +444,13 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     socket.on("error", () => socket.destroy());
     const kind = classifyHost(req.headers.host, names);
     if (kind === null) return refuseUpgrade(socket, 421, "Misdirected Request");
+    if (kind === "machine-apps") {
+      const info = settle(req, kind);
+      if (!info.viaProxy) return refuseUpgrade(socket, 421, "Misdirected Request");
+      const t = splitTarget(req.url ?? "");
+      if (!isRoutablePath(t.path)) return refuseUpgrade(socket, 400, "Bad Request");
+      return (machineAppGateway as MachineAppGateway).upgrade(req, socket, head, canonicalPath(t.path), t.query, info);
+    }
     if (kind !== "main") {
       const extra = machinesHeaderLines();
       const info = settle(req, kind);
@@ -525,6 +559,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     close: async () => {
       clearInterval(pruner);
       machineRouter.close();
+      machineAppGateway?.close();
       links.close();
       appGateway.close();
       clientIps.stop();

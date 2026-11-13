@@ -15,7 +15,10 @@ export const APP_GRANT_COOKIE = "__Secure-agentbox-app";
  */
 export const MACHINES_COOKIE = "__Host-agentbox-machines";
 
-const OURS = [SESSION_COOKIE, APP_GRANT_COOKIE, MACHINES_COOKIE].map((n) => n.toLowerCase());
+/** A machine app's grant (machines/apps.ts), path-scoped to one app on the machine-apps origin. */
+export const MACHINE_APP_COOKIE = "__Secure-agentbox-mapp";
+
+const OURS = [SESSION_COOKIE, APP_GRANT_COOKIE, MACHINES_COOKIE, MACHINE_APP_COOKIE].map((n) => n.toLowerCase());
 
 /**
  * True for a cookie name the gate owns. Compared case-insensitively: browsers

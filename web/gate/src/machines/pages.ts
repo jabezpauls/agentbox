@@ -30,19 +30,23 @@ export const MACHINES_PAGE_CSP = [
 /**
  * The machines UI (web/app's second entry): its own files only, as the
  * sign-in. Styles may be set inline (the terminal sets its own), script never.
+ * It frames one thing: a machine's app, on the machine-apps origin (Preview).
  */
-export const MACHINES_UI_CSP = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "base-uri 'none'",
-  "worker-src 'none'",
-].join("; ");
+export function machinesUiCsp(appsHost: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    `frame-src https://${appsHost}`,
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "worker-src 'none'",
+  ].join("; ");
+}
 
 /** Where the machines pages' files are served (machines host only). */
 export const MACHINES_ASSETS = "/_gate/machines/assets";

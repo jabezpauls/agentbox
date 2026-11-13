@@ -11,6 +11,7 @@ import type { Joins } from "./machines/joins.js";
 import type { LinkHub } from "./machines/link.js";
 import type { Registry } from "./machines/registry.js";
 import type { ClaudeTokens } from "./machines/claude-token.js";
+import type { MachineApps, MachineAppTickets } from "./machines/apps.js";
 import type { MachineRouter } from "./machines/router.js";
 import type { MachinesSessions } from "./machines/session.js";
 import type { PasswordChecker } from "./password.js";
@@ -98,6 +99,9 @@ export interface MachinesCore {
   claudeTokens: ClaudeTokens;
   /** Send a machine what it should hold of the shared token now (it, or nothing). */
   pushClaudeToken: (machineId: string) => void;
+  /** The machines' apps (`agentbox-preview`), apart from the box's, and the tickets that open them. */
+  apps: MachineApps;
+  appTickets: MachineAppTickets;
 }
 
 /** Compare two strings in time that does not depend on where they differ. */

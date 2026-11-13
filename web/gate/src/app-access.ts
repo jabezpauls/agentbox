@@ -124,14 +124,14 @@ function isNavigation(req: IncomingMessage): boolean {
 }
 
 /** Whether the answer is likely HTML or CSS, and so worth asking for uncompressed. */
-function mayBeEditable(req: IncomingMessage): boolean {
+export function mayBeEditable(req: IncomingMessage): boolean {
   const dest = req.headers["sec-fetch-dest"];
   if (dest === "document" || dest === "iframe" || dest === "frame" || dest === "style") return true;
   const accept = String(req.headers.accept ?? "");
   return accept.includes("text/html") || accept.includes("text/css");
 }
 
-function flatten(pairs: ReadonlyArray<readonly [string, string]>): string[] {
+export function flatten(pairs: ReadonlyArray<readonly [string, string]>): string[] {
   const out: string[] = [];
   for (const [n, v] of pairs) out.push(n, v);
   return out;
@@ -185,10 +185,109 @@ export interface AppGatewayDeps {
   forwarded(info: RequestInfo): Forwarded;
 }
 
+/** Pages being read whole to be edited, now: the box's apps and the machines' together. */
+let rewriting = 0;
+
+/**
+ * Send an app's response on, its headers already put under the app policy
+ * (`pairs`): as it comes, or — `edit`, and HTML or CSS — read whole (up to a
+ * bound), with the path fixes for an app served under `prefix` (fidelity.ts).
+ * Shared by the box's apps (`/a/<id>`) and the machines' (machines/app-gateway.ts).
+ */
+export function relayAppResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  upRes: IncomingMessage,
+  pairsIn: Array<[string, string]>,
+  opts: { edit: boolean; prefix: string },
+): void {
+  let pairs = pairsIn;
+  const status = upRes.statusCode ?? 502;
+  let kind = opts.edit && req.method !== "HEAD" && status !== 204 && status !== 304 && status >= 200 ? editableType(upRes.headers["content-type"]) : null;
+  // Too many pages being edited at once: this one goes on unedited
+  // rather than the gate holding more than it can.
+  if (kind && rewriting >= MAX_REWRITES) kind = null;
+  if (!kind) {
+    res.writeHead(status, upRes.statusMessage, flatten(pairs));
+    pipeline(upRes, res, () => {});
+    return;
+  }
+  // HTML or CSS: read it whole (up to a bound), edit it, send it.
+  rewriting += 1;
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    rewriting -= 1;
+  };
+  res.once("close", release);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let streaming = false;
+  upRes.on("data", (c: Buffer) => {
+    if (streaming) return;
+    size += c.length;
+    chunks.push(c);
+    if (size > MAX_REWRITE) {
+      // Too big to hold: send it on as it came, unedited.
+      streaming = true;
+      upRes.pause();
+      res.writeHead(status, upRes.statusMessage, flatten(pairs.filter(([n]) => n.toLowerCase() !== "content-length")));
+      for (const b of chunks) res.write(b);
+      chunks.length = 0;
+      release();
+      upRes.removeAllListeners("data");
+      upRes.removeAllListeners("end");
+      pipeline(upRes, res, () => {});
+    }
+  });
+  upRes.on("end", () => {
+    if (streaming) return;
+    const raw = Buffer.concat(chunks);
+    const encoding = upRes.headers["content-encoding"];
+    const plainBody = decode(raw, typeof encoding === "string" ? encoding : undefined);
+    if (plainBody === null) {
+      // An encoding the gate cannot read, or one that decodes to more than
+      // it will hold: pass it on as it is.
+      release();
+      res.writeHead(status, upRes.statusMessage, flatten(pairs));
+      res.end(raw);
+      return;
+    }
+    // latin1 maps every byte to one character and back, so whatever the
+    // page's charset, everything the edit does not touch survives exactly.
+    const text = plainBody.toString("latin1");
+    let edited: string;
+    let hint: string | null = null;
+    if (kind === "html") {
+      const r = rewriteHtml(text, { prefix: opts.prefix });
+      edited = r.html;
+      hint = r.hint;
+    } else {
+      edited = rewriteCss(text, opts.prefix);
+    }
+    const body = Buffer.from(edited, "latin1");
+    // The validators named the app's bytes, not these: a revalidation must
+    // not answer "unchanged" for an edit made under other settings (the
+    // path fixes turned off, say).
+    pairs = pairs.filter(([n]) => {
+      const l = n.toLowerCase();
+      return l !== "content-length" && l !== "content-encoding" && l !== "content-md5" && l !== "etag" && l !== "last-modified";
+    });
+    pairs.push(["Content-Length", String(body.length)]);
+    if (hint) pairs.push([HINT_HEADER, hint]);
+    release();
+    res.writeHead(status, upRes.statusMessage, flatten(pairs));
+    res.end(body);
+  });
+  upRes.on("error", () => {
+    release();
+    res.destroy();
+  });
+}
+
 export class AppGateway {
   private readonly live = new Map<string, Set<Live>>();
-  /** Pages being read whole to be edited, now. */
-  private rewriting = 0;
   private readonly sweep: ReturnType<typeof setInterval>;
   private styles: string | null = null;
 
@@ -436,91 +535,9 @@ export class AppGateway {
         this.plain(res, 404, "not found");
         return;
       }
-      let pairs = appResponseHeaders(filterResponseHeaders(upRes), this.policy(app, req));
+      const pairs = appResponseHeaders(filterResponseHeaders(upRes), this.policy(app, req));
       if (opts.grant) pairs.push(["Set-Cookie", opts.grant]);
-      const status = upRes.statusCode ?? 502;
-      let kind = edit && req.method !== "HEAD" && status !== 204 && status !== 304 && status >= 200 ? editableType(upRes.headers["content-type"]) : null;
-      // Too many pages being edited at once: this one goes on unedited
-      // rather than the gate holding more than it can.
-      if (kind && this.rewriting >= MAX_REWRITES) kind = null;
-      if (!kind) {
-        res.writeHead(status, upRes.statusMessage, flatten(pairs));
-        pipeline(upRes, res, () => {});
-        return;
-      }
-      // HTML or CSS: read it whole (up to a bound), edit it, send it.
-      this.rewriting += 1;
-      let released = false;
-      const release = (): void => {
-        if (released) return;
-        released = true;
-        this.rewriting -= 1;
-      };
-      res.once("close", release);
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let streaming = false;
-      upRes.on("data", (c: Buffer) => {
-        if (streaming) return;
-        size += c.length;
-        chunks.push(c);
-        if (size > MAX_REWRITE) {
-          // Too big to hold: send it on as it came, unedited.
-          streaming = true;
-          upRes.pause();
-          res.writeHead(status, upRes.statusMessage, flatten(pairs.filter(([n]) => n.toLowerCase() !== "content-length")));
-          for (const b of chunks) res.write(b);
-          chunks.length = 0;
-          release();
-          upRes.removeAllListeners("data");
-          upRes.removeAllListeners("end");
-          pipeline(upRes, res, () => {});
-        }
-      });
-      upRes.on("end", () => {
-        if (streaming) return;
-        const raw = Buffer.concat(chunks);
-        const encoding = upRes.headers["content-encoding"];
-        const plainBody = decode(raw, typeof encoding === "string" ? encoding : undefined);
-        if (plainBody === null) {
-          // An encoding the gate cannot read, or one that decodes to more than
-          // it will hold: pass it on as it is.
-          release();
-          res.writeHead(status, upRes.statusMessage, flatten(pairs));
-          res.end(raw);
-          return;
-        }
-        // latin1 maps every byte to one character and back, so whatever the
-        // page's charset, everything the edit does not touch survives exactly.
-        const text = plainBody.toString("latin1");
-        const prefix = `/a/${app.id}`;
-        let edited: string;
-        let hint: string | null = null;
-        if (kind === "html") {
-          const r = rewriteHtml(text, { prefix });
-          edited = r.html;
-          hint = r.hint;
-        } else {
-          edited = rewriteCss(text, prefix);
-        }
-        const body = Buffer.from(edited, "latin1");
-        // The validators named the app's bytes, not these: a revalidation must
-        // not answer "unchanged" for an edit made under other settings (the
-        // path fixes turned off, say).
-        pairs = pairs.filter(([n]) => {
-          const l = n.toLowerCase();
-          return l !== "content-length" && l !== "content-encoding" && l !== "content-md5" && l !== "etag" && l !== "last-modified";
-        });
-        pairs.push(["Content-Length", String(body.length)]);
-        if (hint) pairs.push([HINT_HEADER, hint]);
-        release();
-        res.writeHead(status, upRes.statusMessage, flatten(pairs));
-        res.end(body);
-      });
-      upRes.on("error", () => {
-        release();
-        res.destroy();
-      });
+      relayAppResponse(req, res, upRes, pairs, { edit, prefix: `/a/${app.id}` });
     });
 
     upReq.on("error", () => {

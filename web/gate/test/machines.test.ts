@@ -142,11 +142,14 @@ describe("with machines on, hosts", () => {
     expect((await get(h, MAIN, "/login")).status).toBe(200);
   });
 
-  it("serve nothing on the machine-apps origin yet", async () => {
+  it("serve only registered apps on the machine-apps origin, in an opaque origin, and none of the gate's own routes", async () => {
     h = await on();
-    const res = await get(h, APPS, "/");
-    expect(res.status).toBe(404);
-    expect(res.headers["cross-origin-resource-policy"]).toBe("same-origin");
+    for (const p of ["/", "/signin", "/_gate/machines/list", "/login", `/${"a".repeat(32)}/`]) {
+      const res = await get(h, APPS, p);
+      expect(res.status, p).toBe(404);
+      expect(res.headers["content-security-policy"], p).toMatch(/^sandbox /);
+      expect(res.headers["referrer-policy"], p).toBe("no-referrer");
+    }
   });
 });
 

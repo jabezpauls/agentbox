@@ -154,6 +154,9 @@ describe("link streams", () => {
     expect(decodeOpen(encodeOpen({ kind: "upgrade", session: "s1", grant: "g_1" }))).toEqual({ kind: "upgrade", session: "s1", grant: "g_1" });
     expect(decodeOpen(Buffer.from("{nope"))).toEqual({ kind: "http", session: null, grant: null });
     expect(decodeOpen(Buffer.from(JSON.stringify({ session: "a b", grant: 5 })))).toEqual({ kind: "http", session: null, grant: null });
+    // An app's port, when it is one; never anything else.
+    expect(decodeOpen(encodeOpen({ kind: "http", session: null, grant: null, app: 3000 })).app).toBe(3000);
+    for (const app of [0, 70000, 3.5, "3000", null]) expect(decodeOpen(Buffer.from(JSON.stringify({ app }))).app).toBeUndefined();
   });
 });
 
