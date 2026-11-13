@@ -1,11 +1,18 @@
 import fs from "node:fs";
+import path from "node:path";
 import { CliError, EXIT } from "../errors.js";
 import { callControl, startControl } from "./control.js";
 import { readCredentials, writeCredentials } from "./credentials.js";
 import { NodeLink, type NodeLinkOptions } from "./link.js";
 import type { NodePaths } from "./paths.js";
 import { loadPolicy, setPaused, summarize, watchPolicy, type LoadedPolicy } from "./policy.js";
+import { HERDR_VERSION } from "./install.js";
+import { execStart } from "./service-linux.js";
 import { gatherSpecs } from "./specs.js";
+import { checkForUpdate, describeReport } from "./update.js";
+
+/** The exit code of a node that replaced itself: not 0, so the service restarts it. */
+export const RESTART_EXIT = 75;
 
 /**
  * `agentbox node run`: the node itself. Holds the link, watches the policy,
@@ -26,6 +33,8 @@ export interface RunOptions {
   now?: () => number;
   /** Link timings (tests shorten them). */
   link?: Partial<Omit<NodeLinkOptions, "box" | "token" | "machineId" | "version" | "describe">>;
+  /** Check for signed updates (tests turn it off). */
+  checkUpdates?: boolean;
 }
 
 export async function runNode(o: RunOptions): Promise<number> {
@@ -104,8 +113,42 @@ export async function runNode(o: RunOptions): Promise<number> {
   });
   o.signal.addEventListener("abort", () => finish(EXIT.OK), { once: true });
 
+  // Signed updates from GitHub Releases (update.ts): daily, and when the gate
+  // answers `upgrade`. A replaced node exits with RESTART_EXIT, which the
+  // service (Restart=on-failure) restarts into the new binary.
+  let checking = false;
+  const checkUpdates = async (): Promise<void> => {
+    if (checking || o.checkUpdates === false) return;
+    checking = true;
+    try {
+      const herdr = path.join(o.paths.bin, "herdr");
+      const report = await checkForUpdate({
+        policy: policy.policy.updates,
+        running: o.version,
+        // Only the standalone executable replaces itself; agentbox.mjs under Node does not.
+        nodePath: execStart().length === 3 ? process.execPath : null,
+        ...(fs.existsSync(herdr) ? { herdr: { path: herdr, version: HERDR_VERSION } } : {}),
+        // herdr is not supervised by the node yet (phase 4): nothing of the node's runs in it.
+        idle: () => true,
+      });
+      o.log(`update: ${describeReport(report)}`);
+      if (report.state === "updated" && report.restart) finish(RESTART_EXIT);
+    } catch (err) {
+      o.log(`update check failed: ${(err as Error).message}`);
+    } finally {
+      checking = false;
+    }
+  };
+  link.on("upgrade", () => void checkUpdates());
+  const firstCheck = setTimeout(() => void checkUpdates(), 10 * 60_000);
+  firstCheck.unref();
+  const daily = setInterval(() => void checkUpdates(), 24 * 60 * 60_000);
+  daily.unref();
+
   link.start();
   const code = await done;
+  clearTimeout(firstCheck);
+  clearInterval(daily);
   link.stop(link.state === "revoked" ? "revoked" : "stopped");
   stopWatching();
   control.close();
