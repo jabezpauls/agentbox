@@ -18,8 +18,8 @@ import { writePrivate } from "./paths.js";
  * One JSON line each way: `{"secret","command","args"}` → `{"ok", …}`.
  */
 
-export type ControlCommand = "status" | "pause" | "resume" | "leave" | "preview" | "preview-list" | "preview-stop";
-const COMMANDS = new Set<string>(["status", "pause", "resume", "leave", "preview", "preview-list", "preview-stop"]);
+export type ControlCommand = "status" | "pause" | "resume" | "leave" | "preview" | "preview-list" | "preview-stop" | "passphrase";
+const COMMANDS = new Set<string>(["status", "pause", "resume", "leave", "preview", "preview-list", "preview-stop", "passphrase"]);
 
 export type ControlHandler = (command: ControlCommand, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 

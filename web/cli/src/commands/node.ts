@@ -339,6 +339,9 @@ const passphrase = command({
     } finally {
       prompt.close();
     }
+    // A running node takes it now, and ends every grant the old one earned.
+    const live = await callControl(np.control, np.controlSecret, "passphrase", 5_000);
+    if (live !== null && live.ok !== true) throw new CliError(`the running node did not take it (${String(live.error ?? "refused")}); restart it`);
     ctx.err("This machine now proves presence with the new passphrase.\n");
   },
 });
