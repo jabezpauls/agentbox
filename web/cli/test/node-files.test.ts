@@ -71,6 +71,15 @@ describe("the never-writable and never-visible lists", () => {
     expect(linux.isHidden("/home/o/.sshkeys")).toBe(false);
   });
 
+  it("never let a program be planted on PATH inside home", () => {
+    const r = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: { PATH: "/home/o/go/bin:/usr/bin:/home/o" }, resolve: false });
+    expect(r.isWriteDenied("/home/o/go/bin/docker")).toBe(true);
+    expect(r.isWriteDenied("/home/o/.local/bin/git")).toBe(true);
+    expect(r.isWriteDenied("/home/o/notes.txt")).toBe(false);
+    const win = pathRules({ home: "C:\\Users\\o", nodeDir: "C:\\n", platform: "win32", env: { PATH: "C:\\Windows;C:\\Users\\o\\AppData\\Local\\Microsoft\\WindowsApps" }, resolve: false });
+    expect(win.isWriteDenied("c:\\users\\o\\appdata\\local\\microsoft\\windowsapps\\git.exe")).toBe(true);
+  });
+
   it("never let a repository's git config or hooks be written", () => {
     const r = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: {}, resolve: false });
     expect(r.isWriteDenied("/home/o/code/app/.git/config")).toBe(true);

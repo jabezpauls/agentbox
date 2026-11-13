@@ -12,9 +12,11 @@ import type { Policy } from "./policy.js";
  *
  * - **never writable** (reads allowed unless also hidden): the node's own
  *   folder, shell profiles, autostart locations, `~/.ssh/authorized_keys`,
- *   git's global config — and, in any repository, `.git/config` and
- *   `.git/hooks`, which git runs from. With `terminals` off this is what keeps
- *   "write a file" from becoming "run code";
+ *   git's global config — and, beyond the spec's list, every folder on PATH
+ *   inside the home folder (`~/.local/bin`: the node itself runs `docker` and
+ *   `nvidia-smi` by name), desktop entries, and in any repository
+ *   `.git/config` and `.git/hooks`, which git runs from. With `terminals` off
+ *   this is what keeps "write a file" from becoming "run code";
  * - **never visible**: `~/.ssh`, `~/.gnupg`, agentbox's own config and the
  *   node's secrets, Claude Code's credentials and the node's
  *   `CLAUDE_CONFIG_DIR`, browser profiles, the Windows credential stores.
@@ -61,6 +63,13 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
   const N = o.nodeDir;
   const j = (...parts: string[]): string => P.join(...parts);
   const nodeSecrets = ["credentials.json", "secrets", "claude", "control.secret", "control.sock", "state"].map((f) => j(N, f));
+  // Folders on PATH inside home: a program put there runs the next time anything is run by that name.
+  const ci = platform === "win32" || platform === "darwin";
+  const fold = (p: string): string => (ci ? P.normalize(p).toLowerCase() : P.normalize(p));
+  const home = fold(H);
+  const onPath = (env.PATH ?? env.Path ?? "")
+    .split(P.delimiter)
+    .filter((d) => d !== "" && P.isAbsolute(d) && fold(d) !== home && fold(d).startsWith(home + P.sep));
 
   if (platform === "win32") {
     const A = env.APPDATA && P.isAbsolute(env.APPDATA) ? env.APPDATA : j(H, "AppData", "Roaming");
@@ -88,6 +97,7 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
       ],
       writeDenied: [
         N,
+        ...onPath,
         j(H, "Documents", "PowerShell"),
         j(H, "Documents", "WindowsPowerShell"),
         j(A, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"),
@@ -136,7 +146,12 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
     ],
     writeDenied: [
       N,
-      ...[".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".xprofile", ".xsession", ".xinitrc"].map((f) => j(H, f)),
+      ...onPath,
+      j(H, ".local", "bin"),
+      j(H, "bin"),
+      j(H, ".local", "share", "applications"),
+      j(H, ".pam_environment"),
+      ...[".bashrc", ".bash_aliases", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".xprofile", ".xsession", ".xinitrc"].map((f) => j(H, f)),
       ...inConfig("fish"),
       ...inConfig("powershell"),
       ...inConfig("systemd", "user"),
