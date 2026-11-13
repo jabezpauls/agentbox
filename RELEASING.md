@@ -20,7 +20,13 @@ does it all, in this order:
    workflow's own token, which starts no further workflow), and the release is
    created with `agentbox.tar.gz` (also as `agentbox-vX.Y.Z.tar.gz`),
    `install.sh` and `SHA256SUMS`, marked latest. That is what
-   `releases/latest/download/install.sh` and `agentbox update` fetch.
+   `releases/latest/download/install.sh` and `agentbox update` fetch. With
+   them go the machines' files: the standalone executables
+   (`agentbox-linux-x64`, `agentbox-linux-arm64`, `agentbox.exe`, and
+   `agentbox-node.exe`, the windowless copy), built by
+   [`web/cli/scripts/build-sea.mjs`](web/cli/scripts/build-sea.mjs) and
+   started once on each platform first, and `machines-manifest.json` with its
+   signature `machines-manifest.json.sig` (below).
 5. **npm.** The CLI is published as `@jabezpauls/agentbox` `X.Y.Z` through
    npm's trusted publishing, with provenance.
 
@@ -90,6 +96,66 @@ scripts/next-version.sh --bump minor
    installs fail at the pull with "could not pull …". Do it once; later
    releases keep the setting.
 
+5. **The machines signing key.** Before the first release with machines in
+   it, as [Signing machines releases](#signing-machines-releases) says. Without
+   the `MACHINES_SIGNING_KEY` secret every release fails at its `machines` job.
+
+## Signing machines releases
+
+A machine's node updates only from `machines-manifest.json` on the latest
+GitHub release, and only if `machines-manifest.json.sig` beside it is an
+ed25519 signature of it by a key the node was built with: it never trusts the
+box, or a key it learns later. The manifest names, per platform, the node's
+executable, herdr and Claude Code, each by URL and SHA-256
+([`web/cli/scripts/machines-manifest.mjs`](web/cli/scripts/machines-manifest.mjs)
+writes and signs it; Claude Code's pinned version and digests live there, and
+herdr's Linux pins come from `scripts/install-herdr.sh`).
+
+The private key lives only in the repository secret `MACHINES_SIGNING_KEY`
+(and an offline copy you keep). The node carries the public keys in
+[`web/cli/src/node/release-keys.ts`](web/cli/src/node/release-keys.ts):
+`RELEASE_PUBLIC_KEYS`, at most two, the current key and the next one. With
+the list empty the node refuses every update, and says why.
+
+### Making the keys, once
+
+On a machine you trust, not in CI:
+
+```bash
+umask 077
+openssl genpkey -algorithm ed25519 -out machines-current.pem   # PKCS#8 PEM
+openssl genpkey -algorithm ed25519 -out machines-next.pem
+openssl pkey -in machines-current.pem -pubout                   # its public key
+openssl pkey -in machines-next.pem -pubout
+gh secret set MACHINES_SIGNING_KEY --repo jabezpauls/agentbox < machines-current.pem
+```
+
+Put both public keys (each `-----BEGIN PUBLIC KEY-----` … `-----END PUBLIC
+KEY-----` block, whole) into `RELEASE_PUBLIC_KEYS`, current first, and merge
+that before (or with) the first release machines should update from. Keep
+both private keys offline (a password manager, or encrypted:
+`openssl pkey -in machines-next.pem -aes256 -out machines-next.enc.pem`), and
+delete the plain files. Once the list has keys, the release's `machines` job checks the secret signs
+with one of the built-in keys, and fails if not.
+
+### Rotating
+
+Because every node already trusts the next key:
+
+1. Make a new "next after next" key pair.
+2. Set the secret to the **next** key: `gh secret set MACHINES_SIGNING_KEY
+   --repo jabezpauls/agentbox < machines-next.pem`.
+3. In `RELEASE_PUBLIC_KEYS`, drop the old current key, so the list is the
+   next key (now current) and the new one (now next). Merge: that release is
+   signed with the key every node trusts, and the nodes it updates carry the
+   new list.
+
+Machines that skip that release still trust the key it was signed with, so
+they keep updating. If the current key leaks, rotate at once the same way; a
+node that has not updated since still trusts the leaked key, so say so in the
+release notes. If both keys leak, nodes must be reinstalled by hand from a
+release with new keys.
+
 ## Trying a release locally
 
 Build its files and look at its images without publishing anything:
@@ -97,6 +163,7 @@ Build its files and look at its images without publishing anything:
 ```bash
 scripts/build-release.sh v1.2.0 dist/release     # bundle, install.sh, SHA256SUMS
 TAG=v1.2.0 docker buildx bake -f docker-bake.hcl --print
+(cd web && AGENTBOX_VERSION=v1.2.0 npm run build:sea -w cli)   # web/cli/dist/sea
 ```
 
 and install from them with `AGENTBOX_RELEASE_URL` (a folder laid out as

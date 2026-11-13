@@ -14,7 +14,8 @@ name: release
 #      latest and sha-<commit>;
 #   4. the commit is tagged vX.Y.Z, and the bundle install.sh downloads,
 #      install.sh itself and SHA256SUMS are attached to a new GitHub release,
-#      marked latest;
+#      marked latest, with the machines' standalone executables and their
+#      manifest, signed with MACHINES_SIGNING_KEY (no key, no release);
 #   5. the CLI is published to npm as @jabezpauls/agentbox X.Y.Z, through
 #      npm's trusted publishing (OIDC; provenance comes with it).
 #
@@ -258,8 +259,91 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  machines:
+    # The standalone executables a machine runs as its node, and the signed
+    # manifest that is the only thing a node updates from. Cross-built here
+    # (scripts/build-sea.mjs downloads each platform's official Node 24 and
+    # checks it); run on each platform in machines-check.
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: The signing key is there
+        # Never shipped unsigned: every machine would refuse it, or worse,
+        # learn to expect a release without a signature.
+        env:
+          MACHINES_SIGNING_KEY: ${{ secrets.MACHINES_SIGNING_KEY }}
+        run: |
+          [ -n "$MACHINES_SIGNING_KEY" ] || {
+            echo "::error::the repository secret MACHINES_SIGNING_KEY is not set, so the machines manifest cannot be signed; see RELEASING.md, \"Signing machines releases\""
+            exit 1
+          }
+      - run: npm ci
+        working-directory: web
+      - name: Build the standalone executables
+        working-directory: web
+        env:
+          AGENTBOX_VERSION: ${{ needs.version.outputs.tag }}
+        run: npm run build:sea -w cli
+      - name: Write and sign the machines manifest
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          MACHINES_SIGNING_KEY: ${{ secrets.MACHINES_SIGNING_KEY }}
+        run: |
+          node web/cli/scripts/machines-manifest.mjs --tag "$TAG" \
+            --assets web/cli/dist/sea/assets.json --out dist/machines --require-signature
+          cp web/cli/dist/sea/agentbox-linux-x64 web/cli/dist/sea/agentbox-linux-arm64 \
+            web/cli/dist/sea/agentbox.exe web/cli/dist/sea/agentbox-node.exe dist/machines/
+          cd dist/machines
+          sha256sum agentbox-linux-x64 agentbox-linux-arm64 agentbox.exe agentbox-node.exe \
+            machines-manifest.json machines-manifest.json.sig > SHA256SUMS.machines
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: machines-files
+          path: dist/machines/*
+          if-no-files-found: error
+          retention-days: 7
+
+  machines-check:
+    # Each executable starts on its own platform, with no Node installed
+    # there to lean on, and says the release's version.
+    needs: [version, machines]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            file: agentbox-linux-arm64
+          - runner: windows-latest
+            file: agentbox.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: machines-files
+          path: machines
+      - name: ${{ matrix.file }} --version
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          FILE: ${{ matrix.file }}
+        run: |
+          cd machines
+          grep " $FILE\$" SHA256SUMS.machines | sha256sum -c -
+          chmod +x "$FILE"
+          out="$(env -i PATH=/usr/bin:/bin "./$FILE" --version)"
+          echo "$out"
+          [ "$out" = "agentbox $TAG" ]
+
   github-release:
-    needs: [version, manifests, bundle]
+    needs: [version, manifests, bundle, machines, machines-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -283,6 +367,10 @@ jobs:
         with:
           name: release-files
           path: dist/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: machines-files
+          path: dist/release
       - name: Publish the GitHub release
         working-directory: dist/release
         run: |
@@ -290,10 +378,15 @@ jobs:
             echo "::notice::the GitHub release $TAG already exists; leaving it"
             exit 0
           fi
+          cat SHA256SUMS.machines >> SHA256SUMS
           sha256sum -c SHA256SUMS
+          # A machine's node reads releases/latest/download/machines-manifest.json
+          # and its .sig, and downloads the executables the manifest names.
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest="$NEWEST" \
             --title "agentbox $TAG" --generate-notes \
-            agentbox.tar.gz "agentbox-$TAG.tar.gz" install.sh SHA256SUMS
+            agentbox.tar.gz "agentbox-$TAG.tar.gz" install.sh SHA256SUMS \
+            agentbox-linux-x64 agentbox-linux-arm64 agentbox.exe agentbox-node.exe \
+            machines-manifest.json machines-manifest.json.sig
 
   npm:
     needs: [version, github-release]
