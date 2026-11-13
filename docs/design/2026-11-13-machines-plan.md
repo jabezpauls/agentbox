@@ -38,7 +38,9 @@ key, herdr 0.9.3, Claude Code ≥ 2.1.225.
   behaviour.
 - **On a machine:** no root/admin, no WSL, no Node.js requirement (from phase
   6), no Docker requirement, no keyring, no native add-ons, no listening
-  network port. Unix socket / named pipe only, owner-only.
+  network port. Unix socket / named pipe only; owner-only, or (a Windows pipe,
+  whose ACL Node cannot set) every request carrying a secret from an owner-only
+  file.
 - **No new runtime dependencies** in the gate beyond moving `ws` from
   devDependencies to dependencies. The node bundles only what the CLI bundles
   today plus code from the new shared package.
@@ -355,8 +357,10 @@ unknown key, and an older signed version are each refused in tests; the CI e2e
 **Deliver:**
 
 - herdr from the zip (pinned digests), named-pipe control, `terminal session
-  control` streaming; the ConPTY fallback only if phase 0 said so.
-- `service-windows.ts`: Run entry + GUI stub; `windowsHide` on every spawn;
+  control` streaming (phase 0: all work as on Linux; no ConPTY fallback
+  needed).
+- `service-windows.ts`: Run entry + `agentbox-node.exe node supervise` (the
+  SEA with its PE subsystem set to GUI, built in CI); `windowsHide` on every spawn;
   log rotation; `leave` removes the entry.
 - Shell default (`pwsh` else Windows PowerShell); paths; the Windows hidden and
   write-deny lists; UNC/device/stream/trailing-dot refusals exercised.

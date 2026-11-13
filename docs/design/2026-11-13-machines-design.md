@@ -3,7 +3,8 @@
 Status: design v2, November 2026. v1 was reviewed independently (findings
 folded in below); the owner decided the open questions. Covers "B" — agents
 working on a joined machine. "A" — sending compute jobs to a machine — is kept
-in view so nothing here blocks it, but is not built.
+in view so nothing here blocks it, but is not built. Amended after the phase 0
+spike (`2026-11-13-machines-spike.md`).
 
 ## Why
 
@@ -165,10 +166,12 @@ New, before anything else is built:
 **1. The node** — a mode of the existing CLI (`web/cli`).
 
 - Two forms: the existing `agentbox.mjs` (Node 20+), and a **standalone
-  executable** per platform (Node's single-executable application, bundled as
-  CommonJS) for machines without Node: Linux x64/arm64, Windows x64. It is
-  large (about 90–120 MB; it carries the Node runtime) — the price of needing
-  nothing else.
+  executable** per platform (Node 24's single-executable application, from a
+  CommonJS entry of its own, since the CLI's uses top-level `await`) for
+  machines without Node: Linux x64/arm64, Windows x64. It is large (about
+  120 MiB on Linux, 90 MiB on Windows, about 40 MiB gzipped; it carries the
+  Node runtime) — the price of needing nothing else. It starts in about 30 ms
+  (Linux) and 80 ms (Windows); measured in phase 0.
 - Commands: `agentbox node join | run | status | pause | resume | leave | logs |
   passphrase`, and on a machine `agentbox-preview <port>` (the box's verb).
 - `node run` holds the link, supervises a local herdr, runs the node's HTTP
@@ -178,8 +181,10 @@ New, before anything else is built:
   the bridge's API — herdr RPC (through the bridge's RPC allowlist), the
   terminal WebSocket, Files — from code shared with the bridge.
 - A local control socket for `agentbox-preview`, `status`, `pause`: a Unix
-  socket in the node's `0700` folder, or a named pipe with an owner-only ACL on
-  Windows. Never TCP.
+  socket in the node's `0700` folder, or a named pipe on Windows. Node cannot
+  set a pipe's ACL (its default lets every local user read, not write), so
+  each request carries a random secret from a `0600` file in the node folder.
+  Never TCP.
 
 **2. The gate's machines side** — new modules in `web/gate`: host
 classification; the machines session and passphrase; the handoff; the link
@@ -419,15 +424,23 @@ second.
   downloaded directly from Anthropic's release store
   (`downloads.claude.ai/claude-code-releases/<version>/…`), checked against
   the SHA-256 in the node's signed manifest, into `bin/`. The vendor installer
-  is not used (it always fetches the latest and installs elsewhere). Minimum
+  is not used (it always fetches the latest and installs elsewhere). Pinned
+  first to 2.1.311 (`stable` in phase 0). Minimum
   version 2.1.225 (earlier ones could swap in a stored login's token on a
   `401`). The node runs it with `DISABLE_UPDATES=1`; the node updates it.
 - **Its own config folder.** The node starts Claude Code with
-  `CLAUDE_CONFIG_DIR=<node folder>/claude`, pre-seeded with
-  `hasCompletedOnboarding: true` — without that flag a fresh Claude Code shows
-  its first-run screens and a browser sign-in even with a token set. The
-  owner's own `~/.claude` is not read or written; the agents' settings and
-  history on a machine are agentbox's, apart from the owner's.
+  `CLAUDE_CONFIG_DIR=<node folder>/claude`, pre-seeded (when absent) with
+  `.claude.json` = `{"hasCompletedOnboarding": true, "projects": {"<home>":
+  {"hasTrustDialogAccepted": true}}}` and `settings.json` =
+  `{"disableDeepLinkRegistration": "disable"}`. Without the first flag a fresh
+  Claude Code shows its theme picker and a login choice even with a token set;
+  without the trust entry it stops at the folder-trust dialog (trust is
+  inherited by subfolders; drive roots are added on Windows for allowed
+  folders outside home); without the setting it registers a `claude-cli://`
+  handler in the owner's desktop (`~/.local/share/applications`,
+  `HKCU\Software\Classes`). The owner's own `~/.claude` and `~/.claude.json`
+  are not read or written; the agents' settings and history on a machine are
+  agentbox's, apart from the owner's.
 - **Signed in once.** The owner runs `claude setup-token` once (a one-year
   token for their own subscription) and pastes it on the machines origin's
   Admin page. The gate keeps it in a write-only secrets file of its own, never
@@ -442,8 +455,8 @@ second.
   (`/login`, in the machine's terminal).
 - **Revoking a machine** wipes `secrets/` at the next link (and `leave` wipes it
   locally); because the machine may have kept a copy, the UI tells the owner
-  to replace the shared token. Phase 0 tests how revocation at claude.ai
-  behaves.
+  to replace the shared token. How soon revocation at claude.ai stops a
+  running and a new session is to be measured by hand with the owner.
 - **What it is told.** The node starts Claude Code with
   `--append-system-prompt-file <node folder>/agents.md` — agentbox's
   instructions for machines (where it is, `agentbox-preview`, never make
@@ -489,13 +502,16 @@ agents no way into the box. The node token never grants it.
 
 | | Linux | Windows |
 | --- | --- | --- |
-| Start | systemd **user** unit | per-user Run entry (`HKCU\…\Run`) starting a small GUI-subsystem stub that starts the node with no window |
+| Start | systemd **user** unit | per-user Run entry (`HKCU\…\Run`) starting `agentbox-node.exe node supervise` — the same executable with its PE subsystem set to GUI, so it has no console — which starts `agentbox.exe node run` with no window |
 | Logged out | `loginctl enable-linger` (allowed for oneself under default polkit; where it is not, `join` says the node runs while logged in, or offers an `@reboot` crontab line) | runs while the user is signed in; shown as "offline (signed out)" |
-| Crash | `Restart=on-failure` | the stub restarts it, with backoff |
+| Crash | `Restart=on-failure` | `node supervise` restarts it, with backoff |
 | Logs | journald, `agentbox node logs` | `state\node.log`, rotated at 10 MB × 3 |
 | Shell | `$SHELL` | `pwsh` if present, else Windows PowerShell |
 
-Every child the node starts on Windows is spawned with `windowsHide`. The node
+Every child the node starts on Windows is spawned with `windowsHide`: without
+it a child of the windowless node gets a visible console window (phase 0).
+The node's herdr runs in a herdr session of its own (`HERDR_SESSION`), so it
+never restores or shows the owner's own herdr workspaces. The node
 supervises herdr: restarts it if it exits, and checks its control socket every
 30 s (a listener can die while the process lives), restarting after two failed
 checks.
@@ -546,16 +562,22 @@ checks.
 
 No WSL, no admin.
 
-- **herdr**: the pinned release's `herdr-windows-x86_64.zip` (herdr.exe plus its
-  ConPTY runtime), digests pinned by agentbox (herdr publishes none). Its
-  control socket is a named pipe speaking the same NDJSON (Node's
-  `net.connect` reaches it). Terminal streaming uses `terminal session
-  control` over stdio, which the bridge already uses; phase 0 confirms it on
-  Windows. No x64 emulation promise for Windows on Arm.
+- **herdr**: the pinned release's `herdr-windows-x86_64.zip` (`herdr.exe` plus
+  its ConPTY runtime, `conpty.dll` and `OpenConsole.exe`), the zip and each
+  file in it pinned by agentbox. Its control socket is a named pipe, named
+  `\\.\pipe\` followed by `HERDR_SOCKET_PATH` verbatim, speaking the same
+  NDJSON (Node's `net.connect` reaches it). Terminal streaming uses `terminal
+  session control` over stdio, as the bridge does; both confirmed in phase 0.
+  The pipe has Windows' default DACL and a global name, so another local user
+  could take the name first: the node puts a fresh random part in
+  `HERDR_SOCKET_PATH` at each herdr start, and **Windows machines shared with
+  other users are not supported in v1**. No x64 emulation promise for Windows
+  on Arm.
 - **Claude Code**: Anthropic's signed `win32-x64` build. Git Bash is optional
   (Claude Code uses PowerShell without it); none is installed.
 - **Smart App Control**: Windows 11 with it on blocks unsigned executables,
-  which the node and herdr are. Phase 0 measures it; the decision (Authenticode
+  which the node and herdr are (injecting the SEA breaks `node.exe`'s
+  signature; herdr ships unsigned). Measured by hand with the owner; the decision (Authenticode
   signing, or documenting Smart App Control as unsupported) is made before the
   Windows phase.
 - **Paths**: `/`-style in the API; drives as roots; the path rules in "Files
