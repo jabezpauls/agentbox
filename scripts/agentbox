@@ -478,6 +478,70 @@ case "${1:-help}" in
             *) echo "usage: agentbox totp reset" >&2; exit 1 ;;
         esac
         ;;
+    machines)
+        # Machines: a second origin the gate serves alone, opened with a main
+        # session and the machines passphrase. The passphrase is typed here,
+        # on the host, and reaches the gate on stdin only — never in argv, a
+        # file or .env — so nothing the sandbox serves ever sees it.
+        case "${2:-}" in
+            enable)
+                shift 2
+                MHOST="$(env_get AGENTBOX_MACHINES_HOST)"; AHOST="$(env_get AGENTBOX_MACHINE_APPS_HOST)"
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                        --machines-host) MHOST="${2:-}"; shift 2 ;;
+                        --apps-host)     AHOST="${2:-}"; shift 2 ;;
+                        *) echo "usage: agentbox machines enable --machines-host <host> --apps-host <host>" >&2; exit 1 ;;
+                    esac
+                done
+                MHOST="$(printf '%s' "$MHOST" | tr '[:upper:]' '[:lower:]')"
+                AHOST="$(printf '%s' "$AHOST" | tr '[:upper:]' '[:lower:]')"
+                DOMAIN="$(env_get AGENTBOX_DOMAIN)"
+                { [ -n "$MHOST" ] && [ -n "$AHOST" ]; } \
+                    || { echo "name both hostnames: agentbox machines enable --machines-host machines.example.com --apps-host mapps.example.com" >&2; exit 1; }
+                for h in "$MHOST" "$AHOST"; do
+                    printf '%s' "$h" | grep -Eq '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$' \
+                        || { echo "not a plain hostname: '$h'" >&2; exit 1; }
+                done
+                { [ -n "$DOMAIN" ] && [ "$DOMAIN" != localhost ]; } \
+                    || { echo "machines need the box's own domain (install.sh --domain); a box reached by localhost cannot have them" >&2; exit 1; }
+                { [ "$MHOST" != "$AHOST" ] && [ "$MHOST" != "$DOMAIN" ] && [ "$AHOST" != "$DOMAIN" ]; } \
+                    || { echo "the domain and the two machines hostnames must be three different names" >&2; exit 1; }
+                if [ -t 0 ]; then
+                    echo "The machines passphrase opens your machines from the browser. Type it only"
+                    echo "here and on https://$MHOST — never on the box's own pages. At least 12 characters."
+                    read -rsp "Machines passphrase: " PASS; echo
+                    read -rsp "Again: " AGAIN; echo
+                    [ "$PASS" = "$AGAIN" ] || { echo "the passphrases did not match" >&2; exit 1; }
+                else
+                    IFS= read -r PASS || true
+                fi
+                [ -n "$PASS" ] || { echo "no passphrase given" >&2; exit 1; }
+                case "$PASS" in
+                    *$'\r'*) echo "a passphrase may not contain a carriage return" >&2; exit 1 ;;
+                esac
+                # Set before the hostnames go live, so the machines origin never
+                # exists without one. Every machines session ends.
+                printf '%s\n' "$PASS" | gate_cmd machines-passphrase >/dev/null
+                unset PASS AGAIN
+                set_env AGENTBOX_MACHINES_HOST "$MHOST"
+                set_env AGENTBOX_MACHINE_APPS_HOST "$AHOST"
+                # The gate and the proxy pick the hostnames up; the sandbox is
+                # left alone.
+                "${DC[@]}" up -d --no-deps --no-build gate proxy
+                echo "machines are on at https://$MHOST (apps at https://$AHOST)."
+                echo "Point DNS for both at this server; behind your own proxy, forward both to the box as you do the domain."
+                ;;
+            disable)
+                OUT="$(gate_cmd machines-off)"
+                unset_env AGENTBOX_MACHINES_HOST
+                unset_env AGENTBOX_MACHINE_APPS_HOST
+                "${DC[@]}" up -d --no-deps --no-build gate proxy
+                echo "machines are off; every machines session ended ($(printf '%s' "$OUT" | sed -n 's/.*"endedMachinesSessions": *\([0-9]*\).*/\1/p') signed out)"
+                ;;
+            *) echo "usage: agentbox machines enable --machines-host <host> --apps-host <host> | disable" >&2; exit 1 ;;
+        esac
+        ;;
     gate)
         # The gate's other admin commands: status, unlock, revoke-all.
         shift
@@ -541,6 +605,10 @@ agentbox <command>
   passwd [new]          set the sign-in password (prompted, or generated);
                         signs every session out
   totp reset            turn two-factor off, for a lost phone
+  machines enable --machines-host <h> --apps-host <h>
+                        turn machines on (asks for the machines passphrase here;
+                        run again to change it); signs every machines session out
+  machines disable      turn machines off and sign every machines session out
   gate status|unlock|revoke-all
                         what the gate has; clear sign-in lockouts; end every
                         session and revoke every device token

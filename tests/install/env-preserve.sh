@@ -451,5 +451,35 @@ echo "AGENTBOX_CLOUDFLARE=on" >> "$DIR/.env"
 expect AGENTBOX_TLS passthrough "update --tls passthrough is written"
 expect AGENTBOX_CLOUDFLARE off "and turns Cloudflare trust off"
 
+echo "machines' hostnames"
+seed
+run --isolate-host
+cp "$DIR/.env" "$DIR/.env.without"
+if ! grep -q '^AGENTBOX_MACHINE' "$DIR/.env"; then pass "a box without machines gets no machines keys"; else fail "machines keys appeared: $(grep '^AGENTBOX_MACHINE' "$DIR/.env")"; fi
+run --isolate-host
+if cmp -s "$DIR/.env" "$DIR/.env.without"; then pass "and a re-run leaves its .env byte for byte"; else fail "a re-run changed a box without machines"; fi
+run --machines-host Machines.Example.com --apps-host mapps.example.com
+expect AGENTBOX_MACHINES_HOST machines.example.com "--machines-host is written, in lower case"
+expect AGENTBOX_MACHINE_APPS_HOST mapps.example.com "--apps-host is written"
+run --isolate-host
+expect AGENTBOX_MACHINES_HOST machines.example.com "a re-run keeps the machines host"
+expect AGENTBOX_MACHINE_APPS_HOST mapps.example.com "and the machine-apps host"
+expect AGENTBOX_DOMAIN work.example.com "and the domain beside them"
+run --machines-host "" --apps-host ""
+if ! grep -q '^AGENTBOX_MACHINE' "$DIR/.env"; then pass "both given empty turn machines off"; else fail "machines keys stayed after being cleared"; fi
+for args in "--machines-host machines.example.com" "--apps-host mapps.example.com" \
+    "--machines-host work.example.com --apps-host mapps.example.com" \
+    "--machines-host same.example.com --apps-host same.example.com" \
+    "--machines-host 10.0.0.1 --apps-host mapps.example.com" \
+    "--machines-host machines.example.com:8443 --apps-host mapps.example.com"; do
+    seed
+    # shellcheck disable=SC2086  # each is several words
+    if AGENTBOX_INSTALL_ENV_ONLY=1 bash "$ROOT/install.sh" --dir "$DIR" --yes $args >/dev/null 2>&1; then
+        fail "$args was accepted"
+    else
+        pass "$args is refused"
+    fi
+done
+
 [ "$FAILED" -eq 0 ] || { echo "env-preserve check FAILED" >&2; exit 1; }
 echo "env-preserve check passed"

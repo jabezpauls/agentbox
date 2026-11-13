@@ -54,6 +54,10 @@ PROXY_MEMORY="256m"
 AGENTS="claude,codex"
 ISOLATE_HOST="false"
 PUBLIC_URL=""
+# Machines' two hostnames: both, or neither (the feature is off). The
+# passphrase is set with ./scripts/agentbox machines enable, never here.
+MACHINES_HOST=""
+APPS_HOST=""
 ASSUME_YES="false"
 INTERACTIVE="false"
 # Names of the settings given on the command line. Those override .env; every
@@ -111,6 +115,11 @@ Run with no options for an interactive walk-through.
                         client's address and overwrites on every request (e.g.
                         X-Real-IP); read before X-Forwarded-For. Not for
                         Cloudflare (use --cloudflare on); default none
+  --machines-host <h>   The machines origin's hostname (e.g. machines.example.com),
+                        with --apps-host; both or neither. Kept in .env. Turning
+                        machines on also needs a passphrase: run
+                        ./scripts/agentbox machines enable (see docs/security.md)
+  --apps-host <h>       The machine-apps origin's hostname (e.g. mapps.example.com)
   --agents <list>       Coding agents in the sandbox, comma-separated (default
                         claude,codex, the prebuilt image; any other list builds
                         the image here)
@@ -175,6 +184,8 @@ while [ $# -gt 0 ]; do
         --cloudflare)    flag CLOUDFLARE "${2:-}"; shift 2 ;;
         --real-ip-header) flag REAL_IP_HEADER "${2:-}"; shift 2 ;;
         --agents)        flag AGENTS "${2:-}"; shift 2 ;;
+        --machines-host) flag MACHINES_HOST "${2:-}"; shift 2 ;;
+        --apps-host)     flag APPS_HOST "${2:-}"; shift 2 ;;
         --isolate-host)  ISOLATE_HOST="true"; shift ;;
         --cpus)          flag CPUS "${2:-}"; shift 2 ;;
         --memory)        flag MEMORY "${2:-}"; shift 2 ;;
@@ -249,7 +260,7 @@ ENV_FILE="$INSTALL_DIR/.env"
 MANAGED="AGENTBOX_DOMAIN:DOMAIN AGENTBOX_MODE:MODE AGENTBOX_BIND:BIND AGENTBOX_BIND_PUBLIC:BIND_PUBLIC
 AGENTBOX_EDGE_NETWORK:EDGE_NETWORK AGENTBOX_CERT_RESOLVER:CERT_RESOLVER AGENTBOX_TLS:TLS
 AGENTBOX_USER:USERNAME AGENTBOX_SHARING:SHARING AGENTBOX_DOCKER:DOCKER AGENTBOX_CLOUDFLARE:CLOUDFLARE AGENTBOX_AGENTS:AGENTS
-AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER
+AGENTBOX_REAL_IP_HEADER:REAL_IP_HEADER AGENTBOX_MACHINES_HOST:MACHINES_HOST AGENTBOX_MACHINE_APPS_HOST:APPS_HOST
 AGENTBOX_PUBLIC_URL:PUBLIC_URL AGENTBOX_CPUS:CPUS AGENTBOX_MEMORY:MEMORY
 AGENTBOX_PROXY_CPUS:PROXY_CPUS AGENTBOX_PROXY_MEMORY:PROXY_MEMORY AGENTBOX_BUILD:BUILD"
 if [ -f "$ENV_FILE" ]; then
@@ -462,6 +473,20 @@ fi
 [ -z "$DOMAIN" ] && DOMAIN="localhost"
 if [ -z "$PUBLIC_URL" ] && [ "$DOMAIN" != "localhost" ]; then
     PUBLIC_URL="https://$DOMAIN"
+fi
+# Machines: both hostnames or neither, each a plain hostname, distinct from the
+# domain and each other; a box reached by IP or localhost cannot have them.
+MACHINES_HOST="$(printf '%s' "$MACHINES_HOST" | tr '[:upper:]' '[:lower:]')"
+APPS_HOST="$(printf '%s' "$APPS_HOST" | tr '[:upper:]' '[:lower:]')"
+if [ -n "$MACHINES_HOST$APPS_HOST" ]; then
+    { [ -n "$MACHINES_HOST" ] && [ -n "$APPS_HOST" ]; } || die "--machines-host and --apps-host go together: give both, or neither"
+    for h in "$MACHINES_HOST" "$APPS_HOST"; do
+        printf '%s' "$h" | grep -Eq '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$' \
+            || die "--machines-host and --apps-host must be plain hostnames, like machines.example.com (got '$h')"
+    done
+    [ "$DOMAIN" != localhost ] || die "machines need a --domain: a box reached by localhost cannot have them"
+    [ "$MACHINES_HOST" != "$APPS_HOST" ] && [ "$MACHINES_HOST" != "$DOMAIN" ] && [ "$APPS_HOST" != "$DOMAIN" ] \
+        || die "--domain, --machines-host and --apps-host must be three different hostnames"
 fi
 case "$AGENTS" in
     *[!a-z0-9,_-]*) die "--agents takes a comma-separated list of agent names (e.g. claude,codex)" ;;
@@ -684,6 +709,10 @@ AGENTBOX_PROXY_MEMORY=$PROXY_MEMORY
 AGENTBOX_VERSION=$VERSION
 AGENTBOX_BUILD=$BUILD
 ENVFILE
+# Machines' hostnames only when set, so a box without them keeps the .env it had.
+if [ -n "$MACHINES_HOST" ]; then
+    printf 'AGENTBOX_MACHINES_HOST=%s\nAGENTBOX_MACHINE_APPS_HOST=%s\n' "$MACHINES_HOST" "$APPS_HOST" >> "$NEW_ENV"
+fi
 # The release whose images to pull, pinned: moving to another is an explicit
 # `./scripts/agentbox update`.
 [ -n "$TAG" ] && printf 'AGENTBOX_TAG=%s\n' "$TAG" >> "$NEW_ENV"
