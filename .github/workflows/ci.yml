@@ -224,7 +224,8 @@ jobs:
         # The built gate with machines on, behind a stand-in proxy, and a
         # "machine" running the built bundle: join with a typed code, online
         # with specs, a gate restart, network loss, a duplicate, pause and
-        # resume, and revoke.
+        # resume, presence and a terminal, Files and its refusals, an
+        # agentbox-preview app on the machine-apps host, and revoke.
         run: node e2e/machines.mjs
         working-directory: web/cli
 
