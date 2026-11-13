@@ -4,7 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { filesFixture, type FilesFixture } from "./helpers/files.js";
-import { findFd, searchNames } from "../src/files/search.js";
+import { findFd, searchNames } from "@workbench/hostcore";
 
 // Uploads over a real socket: what inject cannot show is a body that arrives
 // in pieces, without a length, or not at all.

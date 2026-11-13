@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { FilesError, Roots } from "../src/files/roots.js";
-import { tmpBase } from "./helpers/files.js";
+import { tmpBase } from "./helpers/tmp.js";
 
 let base: string;
 let ws: string;

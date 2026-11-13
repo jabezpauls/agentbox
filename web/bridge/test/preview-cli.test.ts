@@ -13,7 +13,7 @@ import { loadConfig } from "../src/config.js";
 import { BridgeEvents } from "../src/events.js";
 import { AppsService } from "../src/apps/service.js";
 import { listListeningPorts } from "../src/ports.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import { FakeGate } from "./helpers/fake-gate.js";
 
 // The CLI the image installs, run as the image runs it, against the bridge's

@@ -1,12 +1,13 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppDeps } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
-import type { SessionHub } from "../../src/herdr/session.js";
-import { FilesService, type FilesOptions } from "../../src/files/service.js";
+import { type SessionHub, FilesService, type FilesOptions } from "@workbench/hostcore";
 import { SystemMonitor } from "../../src/system.js";
+import { tmpBase } from "../../../hostcore/test/helpers/tmp.js";
+
+export { tmpBase };
 
 export const stubHub = {
   connected: false,
@@ -17,10 +18,6 @@ export const stubHub = {
   start: async () => {},
   stop: () => {},
 } as unknown as SessionHub;
-
-export function tmpBase(): string {
-  return fs.existsSync("/tmp/claude-1000") ? "/tmp/claude-1000" : os.tmpdir();
-}
 
 export interface FilesFixture {
   base: string;

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
-import { request } from "./socket.js";
+import { request } from "@workbench/hostcore";
 
 export interface Server {
   spawned: boolean;

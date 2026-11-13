@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 import type { TerminalClientMessage, TerminalMuxClientMessage, TerminalServerMessage } from "@workbench/shared";
-import type { Attachment, TerminalStreams, Viewer } from "../herdr/terminal.js";
+import type { Attachment, TerminalStreams, Viewer } from "@workbench/hostcore";
 import { wsOriginGuard } from "../ws-origin.js";
 import { heartbeat } from "../ws-heartbeat.js";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { AddressInfo } from "node:net";
-import { parseXml, XML_LIMITS, XmlError, serialize } from "../src/files/dav/xml.js";
+import { parseXml, XML_LIMITS, XmlError, serialize } from "@workbench/hostcore";
 import { filesFixture, type FilesFixture } from "./helpers/files.js";
 
 /** Time a parse; return whether it threw an XmlError, and how long it took. */

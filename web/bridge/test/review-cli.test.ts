@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import { ReviewStore } from "../src/review/store.js";
 
 // The CLI the image installs, run as the image runs it. Exercising the shipped

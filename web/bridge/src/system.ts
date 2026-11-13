@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { SystemDisk, SystemInfo, SystemProcess, SystemVersions } from "@workbench/shared";
-import { mapLimit } from "./files/entries.js";
+import { mapLimit } from "@workbench/hostcore";
 
 // --- parsing (pure, tested against fixtures) --------------------------------
 

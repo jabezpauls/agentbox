@@ -1,11 +1,9 @@
 import { loadConfig } from "./config.js";
 import { ensureServer } from "./herdr/supervisor.js";
-import { SessionHub } from "./herdr/session.js";
-import { request as herdrRequest } from "./herdr/socket.js";
+import { FilesService, herdrRequest, SessionHub } from "@workbench/hostcore";
 import { buildApp } from "./app.js";
 import { PortsWatcher, listListeningPorts } from "./ports.js";
 import { ensureReviewRoot } from "./review/store.js";
-import { FilesService } from "./files/service.js";
 import { sweepClones } from "./projects.js";
 import { BridgeEvents } from "./events.js";
 import { AppsService } from "./apps/service.js";

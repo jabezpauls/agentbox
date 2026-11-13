@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import type { ListeningPort } from "@workbench/shared";
-import { mapLimit } from "./files/entries.js";
+import { mapLimit } from "@workbench/hostcore";
 
 /** A raw LISTEN row from `/proc/net/tcp` or `/proc/net/tcp6`. */
 export interface ProcNetTcpRow {

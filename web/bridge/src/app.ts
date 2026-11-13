@@ -5,16 +5,22 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import type { ListeningPort } from "@workbench/shared";
 import type { Config } from "./config.js";
-import type { SessionHub } from "./herdr/session.js";
-import { TerminalStreams } from "./herdr/terminal.js";
+import {
+  DAV_METHODS,
+  FilesService,
+  herdrRequest,
+  pathGuard,
+  registerDavRoutes,
+  registerFilesRoutes,
+  routableUrl,
+  TerminalStreams,
+  type SessionHub,
+} from "@workbench/hostcore";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { ReviewStore } from "./review/store.js";
-import { pathGuard } from "./path-guard.js";
-import { FilesService } from "./files/service.js";
-import { registerFilesRoutes } from "./files/routes.js";
 import { SystemMonitor } from "./system.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { BridgeEvents } from "./events.js";
@@ -23,11 +29,9 @@ import { registerProjectRoutes } from "./routes/projects.js";
 import { EditorChannel } from "./editor.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { listListeningPorts } from "./ports.js";
-import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 import { AppsService } from "./apps/service.js";
 import { gateApps } from "./apps/gate.js";
 import { registerAppRoutes } from "./routes/apps.js";
-import { request as herdrRequest } from "./herdr/socket.js";
 import { UsageService } from "./usage/service.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 

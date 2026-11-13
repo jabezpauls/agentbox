@@ -5,7 +5,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { APP_CSP, buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 
 // Static serving needs no herdr; a stub hub keeps the other routes registrable.
 const stubHub = {

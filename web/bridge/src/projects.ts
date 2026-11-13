@@ -13,11 +13,18 @@ import type {
   SessionSnapshot,
 } from "@workbench/shared";
 import type { BridgeEvents } from "./events.js";
-import { mapLimit } from "./files/entries.js";
-import { decodeName, fsPath } from "./files/names.js";
-import { fsError, FilesError, STATE_DIR, within } from "./files/roots.js";
-import type { FilesService } from "./files/service.js";
-import { noClobberRename, removeTree } from "./files/tree.js";
+import {
+  decodeName,
+  fsError,
+  FilesError,
+  fsPath,
+  mapLimit,
+  noClobberRename,
+  removeTree,
+  STATE_DIR,
+  within,
+  type FilesService,
+} from "@workbench/hostcore";
 
 export interface ProjectsDeps {
   files: FilesService;

@@ -1,8 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { EditorChannel } from "../editor.js";
-import { sendError } from "../files/routes.js";
-import type { FilesService } from "../files/service.js";
-import { FilesError } from "../files/roots.js";
+import { sendError, type FilesService, FilesError } from "@workbench/hostcore";
 import { insideOnly } from "../local-caller.js";
 
 const localOnly = insideOnly("the editor channel is only for the editor inside the sandbox");
