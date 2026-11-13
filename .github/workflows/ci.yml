@@ -220,6 +220,13 @@ jobs:
         # install and update, and `curl … | sh` in a clean node:22 container.
         run: npm run e2e -w cli
         working-directory: web
+      - name: Machines end to end
+        # The built gate with machines on, behind a stand-in proxy, and a
+        # "machine" running the built bundle: join with a typed code, online
+        # with specs, a gate restart, network loss, a duplicate, pause and
+        # resume, and revoke.
+        run: node e2e/machines.mjs
+        working-directory: web/cli
 
       - uses: actions/upload-artifact@v4
         if: failure()
