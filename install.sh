@@ -485,7 +485,7 @@ if [ -n "$MACHINES_HOST$APPS_HOST" ]; then
             || die "--machines-host and --apps-host must be plain hostnames, like machines.example.com (got '$h')"
     done
     [ "$DOMAIN" != localhost ] || die "machines need a --domain: a box reached by localhost cannot have them"
-    [ "$MACHINES_HOST" != "$APPS_HOST" ] && [ "$MACHINES_HOST" != "$DOMAIN" ] && [ "$APPS_HOST" != "$DOMAIN" ] \
+    { [ "$MACHINES_HOST" != "$APPS_HOST" ] && [ "$MACHINES_HOST" != "$DOMAIN" ] && [ "$APPS_HOST" != "$DOMAIN" ]; } \
         || die "--domain, --machines-host and --apps-host must be three different hostnames"
 fi
 case "$AGENTS" in

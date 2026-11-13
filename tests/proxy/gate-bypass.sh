@@ -1032,7 +1032,7 @@ EOF
         l="${l//\$\{AGENTBOX_EDGE_NETWORK:-edge-prod\}/$NET_EDGE}"
         # Machines off, as Compose renders it: the rule's machines hostnames,
         # the rest of the line, interpolate to nothing.
-        l="${l%%'${AGENTBOX_MACHINES_HOST:+'*}"
+        l="${l%%\$\{AGENTBOX_MACHINES_HOST:+*}"
         labels+=(--label "$l")
     done < <(sed -n 's/^ *- \(traefik\..*\)$/\1/p' "$ROOT/docker-compose.traefik-passthrough.yml")
     [ "${#labels[@]}" -gt 8 ] || fail "no traefik labels found in docker-compose.traefik-passthrough.yml"
