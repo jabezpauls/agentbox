@@ -7,6 +7,10 @@ export type { HerdrStreamEvent, Subscription } from "./herdr/socket.js";
 export { SessionHub } from "./herdr/session.js";
 export { killWithFallback, TerminalStreams } from "./herdr/terminal.js";
 export type { Attachment, Killable, Viewer } from "./herdr/terminal.js";
+export { isBackpressured, MAX_CHANNELS, muxFrame, PANE_RE, serveTerminalSocket } from "./herdr/terminal-socket.js";
+export type { TerminalSocketLike } from "./herdr/terminal-socket.js";
+export { heartbeat, HEARTBEAT_MS } from "./ws-heartbeat.js";
+export type { Pingable } from "./ws-heartbeat.js";
 
 export { isAllowed, isAllowed as isRpcAllowed } from "./rpc-allowlist.js";
 export { pathGuard, pathGuard as guardPath } from "./path-guard.js";
