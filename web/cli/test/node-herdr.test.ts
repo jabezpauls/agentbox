@@ -51,6 +51,16 @@ describe.skipIf(!herdr)("the node's herdr", () => {
     const adopted = next<[string, { restored: boolean }]>(t, "ready");
     await t.start();
     expect(await adopted).toEqual([second, { restored: false, envPath: second }]);
+    const last = (JSON.parse(fs.readFileSync(path.join(dir, "state", "herdr.json"), "utf8")) as { pid: number }).pid;
     t.stop(true);
+    // Gone before its folder is removed: a herdr still writing its state makes the removal fail.
+    for (let i = 0; i < 100; i++) {
+      try {
+        process.kill(last, 0);
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }, 30_000);
 });
