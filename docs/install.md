@@ -63,6 +63,7 @@ prints the resolved command before it runs anything.
 | `--docker <on\|off>` | `off` | Docker inside the sandbox: a rootless Docker Engine in a container of its own beside it, so agents can `docker run`, `docker compose up` and `docker buildx build`. See [below](#docker-inside-the-sandbox). |
 | `--cloudflare <on\|off>` | `on` in traefik mode, else `off` | The hostname is proxied through Cloudflare (or reached through a Cloudflare Tunnel). Decides whose address sign-in limits count; see below. |
 | `--real-ip-header <name>` | none | behind-proxy/traefik: a header your own proxy writes the visitor's address into and overwrites on every request (e.g. `X-Real-IP`), read before `X-Forwarded-For`. Rarely needed; see [behind-proxy](#if-something-already-serves-ports-80-and-443). |
+| `--machines-host <host>` / `--apps-host <host>` | — | [Machines](machines.md): the machines origin's and the machine-apps origin's hostnames, both or neither, each different from `--domain` (behind Cloudflare, first-level subdomains: Universal SSL covers only those). Kept in `.env` and wired into every mode. Machines stay off until you set the machines passphrase with `sudo ./scripts/agentbox machines enable`, which can also set the hostnames instead. |
 | `--agents <list>` | `claude,codex` | Which coding agents the sandbox carries, comma-separated (`claude`, `codex`). `herdr` is always installed. The prebuilt image has both; any other list builds the image on the server. See [below](#choosing-coding-agents). |
 | `--version <tag>` | the latest | The release to install, e.g. `v1.2.0`. On an existing install, moves it to that release. |
 | `--build` / `--no-build` | off | Build the images on the server from the release's sources instead of pulling them, or go back to pulling. |
@@ -255,6 +256,11 @@ get a green check rather than guessing.
 One: `code.example.com`, which serves everything — the sign-in, the editor, the
 Workbench, the terminals. Standalone mode obtains its certificate on the first
 request.
+
+With [machines](machines.md) on, two more, pointed at the same server:
+`machines.example.com` and `mapps.example.com` (the names you pass as
+`--machines-host` and `--apps-host`). Behind your own proxy or a Cloudflare
+Tunnel, route both to the box exactly as you route the domain.
 
 ## Signing in
 

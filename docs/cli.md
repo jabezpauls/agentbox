@@ -133,8 +133,14 @@ clean.
 | `herdr add` | the box as a saved machine in herdr here (`herdr machine add <box>`) |
 | `herdr call <method> [json]` · `herdr socket [path]` | raw herdr RPC, and a local Unix socket that speaks to the box's herdr (not on Windows) |
 | `update` | the CLI your box serves, in place of this one |
+| `node join <box>` · `status` · `pause` · `resume` · `passphrase` · `logs` · `leave` · `run` | this computer as a [machine](machines.md) of a box: join it, and manage its node |
 
 `agentbox <command> --help` has the details.
+
+On a computer joined to a box as a machine, `update` is refused: the node
+updates itself from signed GitHub releases only. The `node` commands, and
+`agentbox-preview` on a machine, are described in
+[docs/machines.md](machines.md#commands-on-a-machine).
 
 ### Exit codes
 
