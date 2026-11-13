@@ -24,6 +24,12 @@ export interface PasswordRecord {
 }
 
 export interface SessionRecord {
+  /**
+   * Whose session: the box's (`main`). Absent in sessions made before
+   * machines, which are the box's too. A machines session is never one of
+   * these: it lives in `machines.sessions`, under a cookie of its own.
+   */
+  aud?: "main";
   /** A handle for listing and ending the session; not a credential. */
   id: string;
   /** SHA-256 of the cookie's secret. */
@@ -36,6 +42,32 @@ export interface SessionRecord {
   remember: boolean;
   ip: string;
   userAgent: string;
+}
+
+/**
+ * A session on the machines origin: opened with a live main session and the
+ * machines passphrase (machines/session.ts), and accepted nowhere else. Kept
+ * apart from the box's sessions, so nothing that reads those — an older gate
+ * included — can mistake one for the other.
+ */
+export interface MachinesSessionRecord {
+  aud: "machines";
+  id: string;
+  /** SHA-256 of the cookie's secret. */
+  hash: string;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+  ip: string;
+  userAgent: string;
+}
+
+export interface MachinesData {
+  /** The machines passphrase, bcrypt; set on the host only (`agentbox machines enable`). */
+  passphrase: PasswordRecord | null;
+  /** Bumped when the passphrase changes, so a sign-in checked against the old one is refused. */
+  generation: number;
+  sessions: MachinesSessionRecord[];
 }
 
 export interface TokenRecord {
@@ -128,6 +160,11 @@ export interface StoreData {
    * use. Kept in the store so a restart does not void every grant.
    */
   appKey: string | null;
+  machines: MachinesData;
+}
+
+export function emptyMachines(): MachinesData {
+  return { passphrase: null, generation: 0, sessions: [] };
 }
 
 export function emptyTotp(): TotpRecord {
@@ -145,6 +182,7 @@ function emptyData(): StoreData {
     tokens: [],
     apps: [],
     appKey: null,
+    machines: emptyMachines(),
   };
 }
 
@@ -181,6 +219,16 @@ function parse(text: string, file: string): StoreData {
     tokens: Array.isArray(data.tokens) ? data.tokens : base.tokens,
     apps: Array.isArray(data.apps) ? data.apps : base.apps,
     appKey: typeof data.appKey === "string" ? data.appKey : null,
+    machines: parseMachines(data.machines),
+  };
+}
+
+function parseMachines(raw: unknown): MachinesData {
+  const m = (typeof raw === "object" && raw !== null ? raw : {}) as Partial<MachinesData>;
+  return {
+    passphrase: m.passphrase && typeof m.passphrase.hash === "string" ? m.passphrase : null,
+    generation: typeof m.generation === "number" ? m.generation : 0,
+    sessions: Array.isArray(m.sessions) ? m.sessions.filter((s) => s?.aud === "machines") : [],
   };
 }
 

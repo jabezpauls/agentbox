@@ -3,6 +3,7 @@ import http from "node:http";
 import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
 import type { DeviceFlow } from "./device.js";
+import { PassphraseError, clearMachines, setPassphrase } from "./machines/passphrase.js";
 import { hashPassword, passwordProblem } from "./password.js";
 import type { LoginLimiter } from "./ratelimit.js";
 import { emptyTotp, type Store } from "./store.js";
@@ -26,15 +27,30 @@ export interface AdminDeps {
   limiter?: LoginLimiter;
   /** App passcode attempts, which `unlock` clears too. */
   passcodes?: LoginLimiter;
+  /** Machines passphrase attempts, which `unlock` clears too. */
+  machinesLimiter?: LoginLimiter;
   now: () => number;
 }
 
-export type AdminCommand = "set-password" | "totp-reset" | "revoke-all" | "unlock" | "status";
+export type AdminCommand =
+  | "set-password"
+  | "totp-reset"
+  | "revoke-all"
+  | "unlock"
+  | "status"
+  | "machines-passphrase"
+  | "machines-off";
 
 export class AdminError extends Error {}
 
+/** What a command reads: a password, or the machines passphrase, from the host's stdin. */
+export interface AdminInput {
+  password?: string;
+  passphrase?: string;
+}
+
 /** Run one admin command against the store. Every change that decides who gets in ends every session. */
-export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: { password?: string } = {}): Promise<Record<string, unknown>> {
+export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: AdminInput = {}): Promise<Record<string, unknown>> {
   const { store, auth } = deps;
   switch (command) {
     case "set-password": {
@@ -68,7 +84,25 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: { 
     case "unlock": {
       deps.limiter?.reset();
       deps.passcodes?.reset();
+      deps.machinesLimiter?.reset();
       return { ok: true };
+    }
+    case "machines-passphrase": {
+      // Set while machines may still be off: `agentbox machines enable` sets
+      // it before the hostnames go live, so the machines origin never exists
+      // without one.
+      try {
+        const { endedSessions } = await setPassphrase({ store, cost: deps.config.bcryptCost, now: deps.now }, input.passphrase ?? "");
+        deps.machinesLimiter?.reset();
+        return { ok: true, endedMachinesSessions: endedSessions };
+      } catch (err) {
+        if (err instanceof PassphraseError) throw new AdminError(err.message);
+        throw err;
+      }
+    }
+    case "machines-off": {
+      const { endedSessions } = await clearMachines(store);
+      return { ok: true, endedMachinesSessions: endedSessions };
     }
     case "status": {
       return {
@@ -78,12 +112,28 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: { 
         recoveryCodesLeft: store.data.totp.recoveryCodes.length,
         sessions: auth.listSessions().length,
         tokens: auth.listTokens().length,
+        machines: {
+          on: deps.config.machinesHost !== null,
+          host: deps.config.machinesHost,
+          appsHost: deps.config.machineAppsHost,
+          passphraseSet: store.data.machines.passphrase !== null,
+          passphraseUpdatedAt: store.data.machines.passphrase?.updatedAt ?? null,
+          sessions: store.data.machines.sessions.length,
+        },
       };
     }
   }
 }
 
-const COMMANDS = new Set<AdminCommand>(["set-password", "totp-reset", "revoke-all", "unlock", "status"]);
+const COMMANDS = new Set<AdminCommand>([
+  "set-password",
+  "totp-reset",
+  "revoke-all",
+  "unlock",
+  "status",
+  "machines-passphrase",
+  "machines-off",
+]);
 
 /** Serve the admin commands on a Unix socket only the gate's own user can open. */
 export async function startAdminServer(socketPath: string, deps: AdminDeps): Promise<http.Server> {
@@ -104,9 +154,9 @@ export async function startAdminServer(socketPath: string, deps: AdminDeps): Pro
         res.end(JSON.stringify(body));
       };
       if (req.method !== "POST" || !COMMANDS.has(command)) return reply(404, { error: "unknown command" });
-      let input: { password?: string } = {};
+      let input: AdminInput = {};
       try {
-        input = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { password?: string }) : {};
+        input = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as AdminInput) : {};
       } catch {
         return reply(400, { error: "bad request" });
       }
