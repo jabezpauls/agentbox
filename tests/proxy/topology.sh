@@ -27,17 +27,27 @@ sed -i 's|^AGENTBOX_PASSWORD_HASH=.*|AGENTBOX_PASSWORD_HASH=$$2a$$14$$placeholde
 
 # Each mode on its own, and with Docker inside the sandbox
 # (docker-compose.docker.yml), which must leave all of the above as it was.
+# With machines on too: .env naming both machines hostnames.
+MENV="$(mktemp)"
+trap 'rm -f "$ENV" "$MENV"' EXIT
+cp "$ENV" "$MENV"
+printf 'AGENTBOX_MACHINES_HOST=machines.example.com\nAGENTBOX_MACHINE_APPS_HOST=mapps.example.com\n' >> "$MENV"
+
 for mode in standalone behind-proxy traefik traefik-passthrough; do
     for docker in "" docker; do
-        printf '== %s%s\n' "$mode" "${docker:+ + docker}"
-        files=(-f docker-compose.yml -f "docker-compose.$mode.yml")
-        [ -n "$docker" ] && files+=(-f docker-compose.docker.yml)
-        # $docker unquoted on purpose: empty, it is no argument at all.
-        # shellcheck disable=SC2086
-        if ! docker compose --env-file "$ENV" "${files[@]}" config --format json \
-            | python3 "$ROOT/tests/proxy/topology.py" "$mode" $docker | sed 's/^/  /'; then
-            FAILED=1
-        fi
+        for machines in "" machines; do
+            printf '== %s%s%s\n' "$mode" "${docker:+ + docker}" "${machines:+ + machines}"
+            files=(-f docker-compose.yml -f "docker-compose.$mode.yml")
+            [ -n "$docker" ] && files+=(-f docker-compose.docker.yml)
+            env="$ENV"
+            [ -n "$machines" ] && env="$MENV"
+            # $docker and $machines unquoted on purpose: empty, each is no argument at all.
+            # shellcheck disable=SC2086
+            if ! docker compose --env-file "$env" "${files[@]}" config --format json \
+                | python3 "$ROOT/tests/proxy/topology.py" "$mode" $docker $machines | sed 's/^/  /'; then
+                FAILED=1
+            fi
+        done
     done
 done
 

@@ -36,7 +36,9 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${AGENTBOX_EDGE_NETWORK:-edge-prod}
-      - traefik.tcp.routers.agentbox.rule=HostSNI(`${AGENTBOX_DOMAIN}`)
+      - traefik.tcp.routers.agentbox.rule=HostSNI(`${AGENTBOX_DOMAIN}`)${AGENTBOX_MACHINES_HOST:+ || HostSNI(`${AGENTBOX_MACHINES_HOST}`) || HostSNI(`${AGENTBOX_MACHINE_APPS_HOST}`)}
+      # With machines on, their two hostnames pass through to Caddy as well,
+      # which gets their certificates itself.
       - traefik.tcp.routers.agentbox.entrypoints=websecure
       - traefik.tcp.routers.agentbox.tls.passthrough=true
       - traefik.tcp.routers.agentbox.service=agentbox

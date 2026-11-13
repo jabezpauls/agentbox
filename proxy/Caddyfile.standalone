@@ -11,7 +11,11 @@
 	}
 }
 
-{$AGENTBOX_DOMAIN} {
+# The machines origin and the machine-apps origin, when machines are on
+# (./scripts/agentbox machines enable): served beside the domain, each with a
+# certificate of its own, every request to the gate, which tells them apart by
+# Host. Unset, they are empty and the site address is the domain alone.
+{$AGENTBOX_DOMAIN} {$AGENTBOX_MACHINES_HOST} {$AGENTBOX_MACHINE_APPS_HOST} {
 	encode zstd gzip
 
 	# The client address, as Caddy worked it out, in a header of its own. A

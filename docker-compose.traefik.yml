@@ -35,7 +35,9 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${AGENTBOX_EDGE_NETWORK:-edge-prod}
-      - traefik.http.routers.agentbox.rule=Host(`${AGENTBOX_DOMAIN}`)
+      - traefik.http.routers.agentbox.rule=Host(`${AGENTBOX_DOMAIN}`)${AGENTBOX_MACHINES_HOST:+ || Host(`${AGENTBOX_MACHINES_HOST}`) || Host(`${AGENTBOX_MACHINE_APPS_HOST}`)}
+      # With machines on (both hostnames, or neither), their two hosts route
+      # here too, each with a certificate from the resolver.
       - traefik.http.routers.agentbox.entrypoints=websecure
       - traefik.http.routers.agentbox.tls=true
       - traefik.http.routers.agentbox.tls.certresolver=${AGENTBOX_CERT_RESOLVER:-letsencrypt}
