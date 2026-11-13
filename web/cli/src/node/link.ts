@@ -166,7 +166,14 @@ export class NodeLink extends EventEmitter {
   }
 
   sendPolicy(policy: PolicySummary): void {
-    if (this.stateNow === "online" && this.ws?.readyState === WebSocket.OPEN) this.ws.send(encodeControl({ type: "policy", policy }));
+    this.sendControl({ type: "policy", policy });
+  }
+
+  /** Say `message` to the box while online; false when not online. */
+  sendControl(message: { type: string; [key: string]: unknown }): boolean {
+    if (this.stateNow !== "online" || this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(encodeControl(message));
+    return true;
   }
 
   /** Tell the box this machine is leaving; resolves whether it was told. */

@@ -15,6 +15,9 @@ import { HERDR_VERSION } from "./install.js";
 import { execStart } from "./service-linux.js";
 import { gatherSpecs } from "./specs.js";
 import { checkForUpdate, describeReport } from "./update.js";
+import { filesFor, pathRules, TRASH_DAYS } from "./files.js";
+import { Previews, writePreviewShim } from "./preview.js";
+import type { FilesService } from "@workbench/hostcore/files";
 
 /** The exit code of a node that replaced itself: not 0, so the service restarts it. */
 export const RESTART_EXIT = 75;
@@ -68,6 +71,36 @@ export async function runNode(o: RunOptions): Promise<number> {
   const herdrEnv: NodeJS.ProcessEnv = { ...process.env, PATH: [claude.shims, o.paths.bin, process.env.PATH ?? ""].join(path.delimiter) };
   delete herdrEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
+  // Files: the policy's folders, behind the lists the box can never get past (files.ts).
+  const rules = pathRules({ home: o.home, nodeDir: o.paths.dir });
+  let files: FilesService | null = null;
+  let filesKey = "";
+  let stopUploads: () => void = () => {};
+  const setFiles = (l: LoadedPolicy): void => {
+    const key = JSON.stringify(l.policy.files);
+    if (key === filesKey) return;
+    filesKey = key;
+    stopUploads();
+    files = filesFor(l.policy, o.paths, rules);
+    stopUploads = files ? files.startMaintenance() : () => {};
+  };
+  setFiles(policy);
+  // Trashed things are kept 7 days.
+  const sweepTrash = (): void => {
+    void files?.trash.expire(now() - TRASH_DAYS * 24 * 60 * 60_000).then(
+      (n) => n && o.log(`files: ${n} item(s) older than ${TRASH_DAYS} days removed from the trash`),
+      () => {},
+    );
+  };
+  sweepTrash();
+  const trashSweeper = setInterval(sweepTrash, 60 * 60_000);
+  trashSweeper.unref();
+
+  // Apps for the owner's Preview (preview.ts), and `agentbox-preview` to register them.
+  const previews = new Previews({ now });
+  previews.start();
+  writePreviewShim(claude.shims);
+
   const presence = new PresenceGate({ presence: creds.presence, machineId: creds.machineId, hours: () => policy.policy.presenceHours, now, log: o.log });
 
   // herdr, and what is built on its socket (a fresh one at each start).
@@ -83,6 +116,8 @@ export async function runNode(o: RunOptions): Promise<number> {
     policy: () => policy,
     presence,
     home: o.home,
+    files: () => files,
+    previews,
     log: o.log,
   });
   herdr?.on("log", (line: string) => o.log(line));
@@ -135,6 +170,15 @@ export async function runNode(o: RunOptions): Promise<number> {
     ...(o.link ?? {}),
   });
   link.on("log", (line: string) => o.log(line));
+  // The box's machine-apps registry follows this list: all of it, each time it changes and on every link up.
+  const sendApps = (): void => {
+    link.sendControl({ type: "apps", apps: previews.list().map((a) => ({ port: a.port, name: a.name })) });
+  };
+  previews.on("change", () => {
+    sendApps();
+    server.enforce();
+  });
+  link.on("welcome", sendApps);
   // Each stream the gate opens is a connection to the node's server.
   link.on("stream", (stream: import("node:stream").Duplex, open: import("@workbench/hostcore/link").StreamOpen) => server.accept(stream, open));
   link.on("control", (m: { type: string; token?: unknown }) => {
@@ -149,6 +193,8 @@ export async function runNode(o: RunOptions): Promise<number> {
   const stopWatching = watchPolicy(o.paths.policy, o.home, (l) => {
     policy = l;
     sayPolicy(l);
+    setFiles(l);
+    if (!l.policy.ports) previews.clear();
     // Tightened: what it no longer allows closes now.
     const closed = server.enforce();
     if (closed) o.log(`policy: closed ${closed} channel(s) it no longer allows`);
@@ -160,8 +206,23 @@ export async function runNode(o: RunOptions): Promise<number> {
   let finish: (code: number) => void = () => {};
   const done = new Promise<number>((r) => (finish = r));
 
-  const control = await startControl(o.paths.control, o.paths.controlSecret, async (command) => {
+  const control = await startControl(o.paths.control, o.paths.controlSecret, async (command, args) => {
     switch (command) {
+      case "preview": {
+        if (!policy.policy.ports) throw new Error("apps are off in this machine's policy.json (\"ports\": false)");
+        if (args.share === true) throw new Error("apps on a machine cannot be shared publicly yet");
+        const r = await previews.register(args.port, args.name);
+        if (!r.ok) throw new Error(r.error);
+        o.log(`preview: port ${r.app.port} registered as "${r.app.name}"`);
+        return { app: r.app, existed: r.existed, online: link.state === "online" };
+      }
+      case "preview-list":
+        return { apps: previews.list() };
+      case "preview-stop": {
+        const port = Number(args.port);
+        if (!previews.remove(port)) throw new Error(`no app is registered on port ${args.port}`);
+        return { removed: port };
+      }
       case "status":
         return {
           state: link.state,
@@ -249,6 +310,9 @@ export async function runNode(o: RunOptions): Promise<number> {
   link.start();
   const code = await done;
   clearInterval(enforcer);
+  clearInterval(trashSweeper);
+  stopUploads();
+  previews.stop();
   server.close();
   // herdr keeps running, its agents with it; the next node adopts it.
   herdr?.stop();

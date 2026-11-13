@@ -277,4 +277,63 @@ const passphrase = command({
   },
 });
 
-export const NODE_COMMANDS: Command[] = [join, run, status, pause, resume, leave, logs, passphrase];
+/**
+ * `agentbox node preview <port>`, which the node's `agentbox-preview` shim
+ * runs (an agent on this machine calls it as the box's agents do): register
+ * a port with the running node, for the owner's Preview.
+ */
+const preview = command({
+  path: ["node", "preview"],
+  summary: "show an app on this machine in the owner's Preview (agentbox-preview)",
+  usage: "<port> | open <port> | list | stop <port>",
+  details: [
+    "agentbox-preview <port> [--name n]   register a server already listening on <port>",
+    "agentbox-preview list                what is registered",
+    "agentbox-preview stop <port>         take it off the Preview",
+    "",
+    "Only registered ports are ever reached, on 127.0.0.1 or [::1]. A registration ends when",
+    "the port has not answered for 60 seconds, or when the node restarts. Apps on a machine are",
+    "private: the owner opens them from the machines page. `start -- <command>` is not",
+    "available on a machine yet: start the server yourself, then register its port.",
+  ].join("\n"),
+  operands: { min: 1, max: 2 },
+  json: true,
+  options: [{ name: "name", type: "string", value: "name", description: "what to call it (default: the port)" }],
+  async run(ctx, p) {
+    const np = paths(ctx);
+    const [verb, arg] = p.operands as [string, string | undefined];
+    const ask = async (command: "preview" | "preview-list" | "preview-stop", args: Record<string, unknown> = {}) => {
+      const r = await callControl(np.control, np.controlSecret, command, 15_000, args);
+      if (r === null) throw new CliError("the node is not running on this machine (`agentbox node status`)", EXIT.UNREACHABLE);
+      if (r.ok !== true) throw new CliError(String(r.error ?? "the node refused"));
+      return r;
+    };
+    if (verb === "list") {
+      const r = await ask("preview-list");
+      const apps = Array.isArray(r.apps) ? (r.apps as Array<{ port: number; name: string }>) : [];
+      if (ctx.json) return ctx.printJson({ apps });
+      if (apps.length === 0) ctx.out("No apps registered on this machine.\n");
+      for (const a of apps) ctx.out(`${a.port}\t${safeText(a.name)}\n`);
+      return;
+    }
+    if (verb === "start") throw new UsageError("`start` is not available on a machine yet: start the server yourself, then `agentbox-preview <port>`");
+    if (verb === "stop") {
+      if (!arg) throw new UsageError("stop needs a port");
+      await ask("preview-stop", { port: Number(arg) });
+      ctx.err(`Port ${arg} is off the Preview.\n`);
+      return;
+    }
+    const port = verb === "open" ? arg : verb;
+    if (!port || !/^\d{1,5}$/.test(port)) throw new UsageError("name a port: agentbox-preview <port>");
+    const name = str(p.options, "name");
+    const r = await ask("preview", { port: Number(port), ...(name === undefined ? {} : { name }) });
+    const app = r.app as { port: number; name: string };
+    if (ctx.json) return ctx.printJson({ app, online: r.online === true });
+    ctx.err(
+      `Port ${app.port} is in the owner's Preview as "${safeText(app.name)}" (the machines page, this machine, Preview).` +
+        `${r.online === true ? "" : " The machine is not linked to its box right now; it shows there once it is."}\n`,
+    );
+  },
+});
+
+export const NODE_COMMANDS: Command[] = [join, run, status, pause, resume, leave, logs, passphrase, preview];
