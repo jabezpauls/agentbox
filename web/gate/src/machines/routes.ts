@@ -7,6 +7,7 @@ import { MACHINES, MAIN } from "../hosts.js";
 import { loginMessage } from "../pages.js";
 import { machinesOriginOf } from "./headers.js";
 import { MACHINES_ASSETS, MACHINES_PAGE_CSP, renderMachinesShell, renderSignin } from "./pages.js";
+import { registerJoinRoutes, registerManageRoutes } from "./manage.js";
 import { requireMachinesSession } from "./session.js";
 
 /**
@@ -84,6 +85,9 @@ export async function registerMachines(app: FastifyInstance, core: GateCore): Pr
       .send();
   });
 
+  // A machine asking to join, on the box's origin (manage.ts).
+  registerJoinRoutes(app, core);
+
   // --- the machines origin ------------------------------------------------------
 
   await app.register(async (m) => {
@@ -111,9 +115,13 @@ export async function registerMachines(app: FastifyInstance, core: GateCore): Pr
       return payload;
     });
 
-    m.get("/", { config: { hosts: MACHINES, machines: "session" } }, async (_req, reply) =>
-      page(reply, renderMachinesShell({ host: names.machines })),
-    );
+    m.get("/", { config: { hosts: MACHINES, machines: "session" } }, async (_req, reply) => {
+      const { registry, links } = core.machines;
+      const machines = registry.all().map((r) => registry.view(r, links.isOnline(r.id)));
+      return page(reply, renderMachinesShell({ host: names.machines, machines }));
+    });
+
+    registerManageRoutes(m, core);
 
     // No side effects: the nonce is only looked at here, and taken by the post.
     m.get<{ Querystring: { n?: string } }>("/signin", { config: { hosts: MACHINES } }, async (req, reply) => {

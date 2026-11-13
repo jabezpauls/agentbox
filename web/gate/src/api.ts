@@ -44,7 +44,7 @@ import {
 const REMEMBER_SECONDS = 30 * 24 * 60 * 60;
 
 /** Routes a client without a session must be able to reach (and so exempt from the Origin check). */
-const NO_CSRF = new Set(["/_gate/device/start", "/_gate/device/poll"]);
+const NO_CSRF = new Set(["/_gate/device/start", "/_gate/device/poll", "/_gate/node/join/start", "/_gate/node/join/poll"]);
 
 declare module "fastify" {
   interface FastifyContextConfig {
