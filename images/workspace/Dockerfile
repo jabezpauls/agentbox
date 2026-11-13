@@ -23,6 +23,8 @@ COPY web/vscode-ext/package.json vscode-ext/
 COPY web/cli/package.json cli/
 RUN npm ci
 COPY web/ .
+# The CLI bundles a machine's agent instructions from beside web/.
+COPY images/machine/agents.md /images/machine/agents.md
 RUN npm run build && npm prune --omit=dev
 
 FROM debian:bookworm-slim
