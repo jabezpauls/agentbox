@@ -7,4 +7,13 @@
  *
  * Empty, the node cannot verify a release and refuses every update.
  */
-export const RELEASE_PUBLIC_KEYS: readonly string[] = [];
+export const RELEASE_PUBLIC_KEYS: readonly string[] = [
+  // current
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAQP6eEvWwcx5ptR56iFAJvDISpDYvy2oWOYNTH9KMUzw=
+-----END PUBLIC KEY-----`,
+  // next (rotation)
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEANhmTV3Z/SVIUjCBjFrK+nZpl3Y2ck7vRex7l5CixSDU=
+-----END PUBLIC KEY-----`,
+];
