@@ -10,6 +10,8 @@ export interface GateSession {
   remember?: boolean;
   expiresAt?: number;
   twoFactor?: boolean;
+  /** The machines origin, when the box has machines turned on. */
+  machines?: { url: string } | null;
 }
 
 /** Who is signed in, for Home's greeting and Settings. */

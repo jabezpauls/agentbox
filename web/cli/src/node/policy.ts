@@ -103,8 +103,8 @@ export function summarize(l: LoadedPolicy): PolicySummary {
 }
 
 /**
- * Watch the file (by polling, which sees a replace-by-rename as readily as an
- * edit) and call `onChange` with what it now says, within `intervalMs` of a
+ * Watch the file (by reading it again, which sees a replace-by-rename as
+ * readily as an edit) and call `onChange` with what it now says, within `intervalMs` of a
  * change. Returns a function that stops watching.
  */
 export function watchPolicy(file: string, home: string, onChange: (l: LoadedPolicy) => void, intervalMs = 1_000): () => void {
@@ -116,8 +116,11 @@ export function watchPolicy(file: string, home: string, onChange: (l: LoadedPoli
     last = s;
     onChange(now);
   };
-  fs.watchFile(file, { interval: intervalMs, persistent: false }, check);
-  return () => fs.unwatchFile(file, check);
+  // Read on a timer rather than by fs.watchFile, whose first stat races a
+  // change made just after it starts: a small file, read once a second.
+  const timer = setInterval(check, intervalMs);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** The first policy: written by `join` only when none exists. Returns whether it wrote one. */

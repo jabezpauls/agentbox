@@ -102,6 +102,54 @@ export interface ProxyOptions {
   serviceWorkerPrefix?: string;
   /** Headers the gate adds to the forwarded request, after its own filtering. */
   extraHeaders?: Record<string, string>;
+  /**
+   * Connect over this instead of TCP to the upstream: a machine's link,
+   * whose stream is the connection. A refusal with a `status` (StreamRefused)
+   * is answered with that status.
+   */
+  dial?: (cb: (err: Error | null, socket?: Duplex) => void) => void;
+  /** A last say over the request headers sent upstream, after everything else. */
+  requestHeaders?: (headers: OutgoingHttpHeaders) => OutgoingHttpHeaders;
+  /**
+   * The response headers rebuilt from the upstream's own, in place of the
+   * gate's usual filtering; `null` refuses the response, which is answered
+   * with a 502 instead (a machine's answers, machines/respond.ts).
+   */
+  rebuildResponse?: (upstream: IncomingMessage, upgrade: boolean) => Array<[string, string]> | null;
+  /** Header lines (each ending in CRLF) for a refused upgrade's answer. */
+  refusalHeaderLines?: string;
+}
+
+/** Where the request goes: TCP to the upstream, or the route's own dialer. */
+function target(upstream: Upstream, opts: ProxyOptions, agentFor: http.Agent | false): http.RequestOptions {
+  if (!opts.dial) return { host: upstream.host, port: upstream.port, agent: agentFor };
+  const dial = opts.dial;
+  return {
+    createConnection: (_o, oncreate) => {
+      dial((err, socket) => oncreate(err, socket as Duplex));
+      return undefined;
+    },
+  };
+}
+
+function requestHeadersFor(req: IncomingMessage, opts: ProxyOptions, upgrade: boolean): OutgoingHttpHeaders {
+  const h = { ...forwardRequestHeaders(req, opts.forwarded, upgrade), ...(opts.extraHeaders ?? {}) };
+  return opts.requestHeaders ? opts.requestHeaders(h) : h;
+}
+
+/** A refusal's own status (a dial that said no), or none. */
+function refusalStatus(err: unknown): number | null {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 600 ? status : null;
+}
+
+function refused(res: ServerResponse, status: number, message: string): void {
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  res.writeHead(status, flatten([["Content-Type", "text/plain; charset=utf-8"], ...SECURITY_HEADERS]));
+  res.end(`agentbox: ${message}\n`);
 }
 
 function connectionTokens(req: IncomingMessage): Set<string> {
@@ -208,15 +256,14 @@ export function badGateway(res: ServerResponse): void {
 /** Forward one HTTP request to `upstream` and stream its answer back. */
 export function proxyHttp(upstream: Upstream, req: IncomingMessage, res: ServerResponse, opts: ProxyOptions): void {
   const upReq = http.request({
-    host: upstream.host,
-    port: upstream.port,
+    ...target(upstream, opts, agent),
     method: req.method,
     path: opts.target,
-    headers: { ...forwardRequestHeaders(req, opts.forwarded), ...(opts.extraHeaders ?? {}) },
-    agent,
+    headers: requestHeadersFor(req, opts, false),
   });
 
-  const connectTimer = setTimeout(() => upReq.destroy(new Error("connect timeout")), CONNECT_TIMEOUT_MS);
+  // A dialer has its own deadline (a machine's stream may queue for room).
+  const connectTimer = setTimeout(() => upReq.destroy(new Error("connect timeout")), opts.dial ? 60_000 : CONNECT_TIMEOUT_MS);
   upReq.once("socket", (s) => {
     if (!s.connecting) clearTimeout(connectTimer);
     else s.once("connect", () => clearTimeout(connectTimer));
@@ -224,15 +271,28 @@ export function proxyHttp(upstream: Upstream, req: IncomingMessage, res: ServerR
 
   upReq.on("response", (upRes) => {
     clearTimeout(connectTimer);
-    let pairs = filterResponseHeaders(upRes, false, opts.serviceWorkerPrefix);
-    if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    let pairs: Array<[string, string]> | null;
+    if (opts.rebuildResponse) {
+      pairs = opts.rebuildResponse(upRes, false);
+    } else {
+      pairs = filterResponseHeaders(upRes, false, opts.serviceWorkerPrefix);
+      if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    }
+    if (pairs === null) {
+      upRes.resume();
+      upReq.destroy();
+      refused(res, 502, "that answer was refused (it is not one the box passes on).");
+      return;
+    }
     res.writeHead(upRes.statusCode ?? 502, reasonPhrase(upRes), flatten(pairs));
     pipeline(upRes, res, () => {});
   });
 
-  upReq.on("error", () => {
+  upReq.on("error", (err) => {
     clearTimeout(connectTimer);
-    badGateway(res);
+    const status = refusalStatus(err);
+    if (status !== null) refused(res, status, err.message);
+    else badGateway(res);
   });
 
   // The client going away ends the upstream exchange too, so a closed tab does
@@ -273,16 +333,14 @@ function statusBlock(res: IncomingMessage, pairs: Array<[string, string]>): stri
  */
 export function proxyUpgrade(upstream: Upstream, req: IncomingMessage, socket: Duplex, head: Buffer, opts: ProxyOptions): void {
   const upReq = http.request({
-    host: upstream.host,
-    port: upstream.port,
+    // A dedicated connection: once upgraded it belongs to this socket alone.
+    ...target(upstream, opts, false),
     method: req.method,
     path: opts.target,
-    headers: { ...forwardRequestHeaders(req, opts.forwarded, true), ...(opts.extraHeaders ?? {}) },
-    // A dedicated connection: once upgraded it belongs to this socket alone.
-    agent: false,
+    headers: requestHeadersFor(req, opts, true),
   });
 
-  const connectTimer = setTimeout(() => upReq.destroy(new Error("connect timeout")), CONNECT_TIMEOUT_MS);
+  const connectTimer = setTimeout(() => upReq.destroy(new Error("connect timeout")), opts.dial ? 60_000 : CONNECT_TIMEOUT_MS);
   let upgraded = false;
 
   upReq.on("upgrade", (upRes, upSocket, upHead) => {
@@ -292,8 +350,18 @@ export function proxyUpgrade(upstream: Upstream, req: IncomingMessage, socket: D
       upSocket.destroy();
       return;
     }
-    let pairs = filterResponseHeaders(upRes, true).filter(([n]) => n.toLowerCase() !== "content-security-policy");
-    if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    let pairs: Array<[string, string]> | null;
+    if (opts.rebuildResponse) {
+      pairs = opts.rebuildResponse(upRes, true);
+    } else {
+      pairs = filterResponseHeaders(upRes, true).filter(([n]) => n.toLowerCase() !== "content-security-policy");
+      if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    }
+    if (pairs === null) {
+      upSocket.destroy();
+      refuseUpgrade(socket, 502, "Bad Gateway", opts.refusalHeaderLines);
+      return;
+    }
     socket.write(statusBlock(upRes, pairs));
     if (upHead.length) socket.write(upHead);
     if (head.length) upSocket.write(head);
@@ -317,16 +385,29 @@ export function proxyUpgrade(upstream: Upstream, req: IncomingMessage, socket: D
     clearTimeout(connectTimer);
     // The body arrives de-chunked and hop-by-hop headers are already gone, so
     // the connection's close is what delimits it on this raw socket.
-    let pairs = filterResponseHeaders(upRes);
-    if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    let pairs: Array<[string, string]> | null;
+    if (opts.rebuildResponse) {
+      pairs = opts.rebuildResponse(upRes, false);
+    } else {
+      pairs = filterResponseHeaders(upRes);
+      if (opts.responseHeaders) pairs = opts.responseHeaders(pairs, upRes);
+    }
+    if (pairs === null) {
+      upRes.resume();
+      upReq.destroy();
+      refuseUpgrade(socket, 502, "Bad Gateway", opts.refusalHeaderLines);
+      return;
+    }
     pairs.push(["Connection", "close"]);
     socket.write(statusBlock(upRes, pairs));
     pipeline(upRes, socket, () => {});
   });
 
-  upReq.on("error", () => {
+  upReq.on("error", (err) => {
     clearTimeout(connectTimer);
-    refuseUpgrade(socket, 502, "Bad Gateway");
+    const status = refusalStatus(err);
+    if (status !== null) refuseUpgrade(socket, status, http.STATUS_CODES[status] ?? "Refused", opts.refusalHeaderLines);
+    else refuseUpgrade(socket, 502, "Bad Gateway", opts.refusalHeaderLines);
   });
   const abandon = (): void => {
     if (!upgraded) upReq.destroy();

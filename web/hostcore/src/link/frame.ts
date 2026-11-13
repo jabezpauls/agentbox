@@ -8,7 +8,7 @@
  *   …        payload   bytes for data; JSON for control (at most 64 KiB)
  *
  * The gate opens a stream per HTTP connection or WebSocket upgrade bound for
- * a machine (phase 4); the node never opens one. Control messages carry the
+ * a machine (stream.ts); the node never opens one. Control messages carry the
  * hello and the gate's answers (protocol.ts).
  */
 

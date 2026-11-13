@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { infoOf, type GateCore } from "../context.js";
 import { MACHINES, MAIN } from "../hosts.js";
+import { isClaudeTokenShape } from "./claude-token.js";
 import { JoinRefused } from "./joins.js";
+import { StreamRefused } from "./link.js";
 import { renderAdmin } from "./pages.js";
 import { MACHINES_PAGE_CSP } from "./pages.js";
 import { requireMachinesSession } from "./session.js";
@@ -15,7 +17,7 @@ import { requireMachinesSession } from "./session.js";
  * the code the machine shows into the machines origin's Admin page.
  *
  * On the machines origin, with a machines session: the Admin page, and the
- * registry's API the machines UI reads (phase 4) — the machines, the pending
+ * registry's API the machines UI reads — the machines, the pending
  * joins, approve (by typed code), deny, revoke, remove, the audit log.
  */
 
@@ -68,14 +70,116 @@ function page(reply: FastifyReply, html: string): FastifyReply {
 
 /** The machines origin (registered inside its hooks, machines/routes.ts). */
 export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
-  const { registry, joins, audit, links } = core.machines;
+  const { registry, joins, audit, links, router, claudeTokens } = core.machines;
   const session = { hosts: MACHINES, machines: "session" as const };
-  const list = () => registry.all().map((r) => registry.view(r, links.isOnline(r.id)));
+  const tokenGeneration = () => (claudeTokens.status().set ? claudeTokens.generation : null);
+  const list = () => registry.all().map((r) => registry.view(r, links.isOnline(r.id), tokenGeneration()));
 
   m.get("/admin", { config: session }, async (req, reply) => {
     requireMachinesSession(req);
     await joins.prune();
-    return page(reply, renderAdmin({ host: core.hosts?.machines ?? "", box: core.hosts?.main ?? "", machines: list(), joins: joins.pending(), audit: audit.list(100) }));
+    return page(
+      reply,
+      renderAdmin({
+        host: core.hosts?.machines ?? "",
+        box: core.hosts?.main ?? "",
+        machines: list(),
+        joins: joins.pending(),
+        audit: audit.list(100),
+        claudeToken: claudeTokens.status(),
+      }),
+    );
+  });
+
+  // --- the shared Claude Code token: write-only ------------------------------------
+
+  const pushAll = () => {
+    for (const r of registry.all()) if (r.state === "active") core.machines.pushClaudeToken(r.id);
+  };
+
+  // Whether one is set and when, never the token itself.
+  m.get("/_gate/machines/claude-token", { config: session }, async () => ({
+    ...claudeTokens.status(),
+    stale: list().filter((v) => v.claudeTokenStale).map((v) => ({ id: v.id, name: v.name })),
+  }));
+
+  m.post("/_gate/machines/claude-token", { config: session }, async (req, reply) => {
+    const token = body(req).token;
+    if (!isClaudeTokenShape(token)) {
+      return reply.code(400).send({ error: "bad_token", message: "That does not look like a token from `claude setup-token`." });
+    }
+    const replacing = claudeTokens.status().set;
+    await claudeTokens.set(token);
+    audit.record("claude-token", { ip: infoOf(req.raw).ip, detail: replacing ? "replaced" : "set" });
+    pushAll();
+    return { ok: true, ...claudeTokens.status() };
+  });
+
+  m.post("/_gate/machines/claude-token/remove", { config: session }, async (req) => {
+    await claudeTokens.remove();
+    audit.record("claude-token", { ip: infoOf(req.raw).ip, detail: "removed" });
+    pushAll();
+    return { ok: true, ...claudeTokens.status() };
+  });
+
+  m.post<{ Params: { id: string } }>("/_gate/machines/m/:id/opt-in", { config: session }, async (req, reply) => {
+    const rec = registry.get(req.params.id);
+    if (!rec || rec.state !== "active") return reply.code(404).send({ error: "not_found" });
+    const on = body(req).claudeToken === true;
+    await registry.optIn(rec, on);
+    audit.record("opt-in", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip, detail: on ? "shared Claude token: on" : "shared Claude token: off" });
+    core.machines.pushClaudeToken(rec.id);
+    return { ok: true, optIns: rec.optIns };
+  });
+
+  // --- presence: the machine checks the owner is there ------------------------------
+
+  const presenceError = (reply: FastifyReply, err: unknown) => {
+    if (err instanceof StreamRefused) return reply.code(err.status).send({ error: "unreachable", message: err.message });
+    throw err;
+  };
+
+  // A fresh challenge from the machine, with its salt: a side effect on the machine, so a POST.
+  m.post<{ Params: { id: string } }>("/_gate/machines/m/:id/presence/challenge", { config: session }, async (req, reply) => {
+    const s = requireMachinesSession(req);
+    const rec = registry.get(req.params.id);
+    if (!rec || rec.state !== "active") return reply.code(404).send({ error: "not_found" });
+    try {
+      const r = await router.ask(rec.id, s.id, "POST", "/presence/challenge");
+      // What the answer is bound to: this machines session and this machine.
+      return reply.code(r.status).send({ ...r.json, session: s.id, machine: rec.id });
+    } catch (err) {
+      return presenceError(reply, err);
+    }
+  });
+
+  m.post<{ Params: { id: string } }>("/_gate/machines/m/:id/presence", { config: session }, async (req, reply) => {
+    const s = requireMachinesSession(req);
+    const rec = registry.get(req.params.id);
+    if (!rec || rec.state !== "active") return reply.code(404).send({ error: "not_found" });
+    const b = body(req);
+    try {
+      const r = await router.ask(rec.id, s.id, "POST", "/presence/answer", { challenge: str(b.challenge), answer: str(b.answer) });
+      const grant = r.json.grant;
+      const expiresAt = r.json.expiresAt;
+      if (r.status === 200 && typeof grant === "string" && typeof expiresAt === "number") {
+        // Held here, presented on each stream for this session; never given to the page.
+        router.setGrant(s.id, rec.id, grant, expiresAt);
+        return { ok: true, expiresAt };
+      }
+      if (r.status !== 200) audit.record("presence", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip, detail: String(r.json.error ?? r.status) });
+      const { grant: _g, ...rest } = r.json;
+      void _g;
+      return reply.code(r.status === 200 ? 502 : r.status).send(rest);
+    } catch (err) {
+      return presenceError(reply, err);
+    }
+  });
+
+  m.get<{ Params: { id: string } }>("/_gate/machines/m/:id/presence", { config: session }, async (req) => {
+    const s = requireMachinesSession(req);
+    const expiresAt = router.grantExpiry(s.id, req.params.id);
+    return { granted: expiresAt !== null, expiresAt };
   });
 
   m.get("/_gate/machines/list", { config: session }, async () => ({ machines: list() }));
@@ -111,6 +215,7 @@ export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
     if (!rec) return reply.code(404).send({ error: "not_found" });
     audit.record("revoked", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip, detail: "by the owner" });
     links.revoke(rec.id);
+    router.forget(rec.id);
     console.log(`[gate] machine ${rec.name} revoked from ${infoOf(req.raw).ip}`);
     return { ok: true };
   });
@@ -121,6 +226,7 @@ export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
     // An active machine is revoked first, so it is told; then forgotten.
     if (rec.state === "active") return reply.code(409).send({ error: "active", message: "Revoke the machine before removing it." });
     links.disconnect(rec.id);
+    router.forget(rec.id);
     await registry.remove(rec.id);
     audit.record("removed", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip });
     return { ok: true };

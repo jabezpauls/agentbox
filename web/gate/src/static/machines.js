@@ -93,7 +93,32 @@
       });
     }
 
-    // Admin: deny, revoke, remove.
+    // Admin: the shared Claude token. Write-only: the field is cleared whatever happens.
+    var claude = document.getElementById("machines-claude-token");
+    if (claude) {
+      var claudeMessage = document.getElementById("claude-token-message");
+      claude.addEventListener("submit", function (event) {
+        event.preventDefault();
+        claudeMessage.hidden = true;
+        var field = claude.querySelector("input[name=token]");
+        var value = field.value.trim();
+        field.value = "";
+        post("/_gate/machines/claude-token", { token: value })
+          .then(function (res) {
+            if (res.ok) return location.reload();
+            return res.json().then(function (data) {
+              claudeMessage.textContent = data.message || "That did not work.";
+              claudeMessage.hidden = false;
+            });
+          })
+          .catch(function () {
+            claudeMessage.textContent = "The box did not answer. Try again.";
+            claudeMessage.hidden = false;
+          });
+      });
+    }
+
+    // Admin: deny, revoke, remove, opt in.
     var buttons = document.querySelectorAll("[data-machines-post]");
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].addEventListener("click", function (event) {

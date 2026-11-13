@@ -326,6 +326,8 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
       remember: session.remember,
       expiresAt: session.remember ? session.expiresAt : Math.min(session.expiresAt, session.lastSeenAt + IDLE_MS),
       twoFactor: twoFactorOn(),
+      // Where the Workbench links to (a new tab; never framed), when machines are on.
+      machines: core.hosts ? { url: `https://${core.hosts.machines}/` } : null,
     };
   });
 

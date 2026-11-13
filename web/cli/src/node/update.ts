@@ -45,6 +45,8 @@ const MAX_ASSET = 1024 * 1024 * 1024;
 export interface Installed {
   path: string;
   version: string | null;
+  /** Where the version is noted (Claude Code's `bin/claude.version`), rewritten on update. */
+  versionFile?: string;
 }
 
 export interface UpdateOptions {
@@ -215,6 +217,7 @@ async function updateTool(
   if (!idle) return "deferred";
   const tmp = await downloadVerified(fetcher, asset, installed.path, `${name} ${asset.version} for ${platform}`);
   replaceFile(tmp, installed.path, o.platform ?? process.platform);
+  if (installed.versionFile) fs.writeFileSync(installed.versionFile, `${asset.version}\n`, { mode: 0o600 });
   return "updated";
 }
 

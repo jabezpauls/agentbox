@@ -81,7 +81,7 @@ FAILED=0
 WORK="$(mktemp -d)"
 
 cleanup() {
-    docker rm -f -v "$PEBBLE" "$TRAEFIK_C" "$CADDY" "$GATE" "$ECHO" >/dev/null 2>&1 || true
+    docker rm -f -v "$PEBBLE" "$TRAEFIK_C" "$CADDY" "$GATE" "$ECHO" "$ID-fake-node" >/dev/null 2>&1 || true
     for n in "$NET_FRONT" "$NET_INTERNAL" "$NET_EDGE"; do docker network rm "$n" >/dev/null 2>&1 || true; done
     rm -rf "$WORK"
 }
@@ -859,7 +859,7 @@ else
     { [ "$STATUS" = 200 ] && [[ "$BODY" == *machines-root* ]]; } || fail "the Machines page: $STATUS"
     strict "the Machines page"
 
-    # Upgrades: refused from anywhere but the machines origin, and none served yet.
+    # Upgrades: refused from anywhere but the machines origin; at / there is none to serve.
     ws / -H "Host: $MACH_H" -H "Origin: $B_ORIGIN" -H "Cookie: $MCOOKIE"; u1="$STATUS"
     strict "a refused upgrade"
     ws / -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"; u2="$STATUS"
@@ -909,6 +909,64 @@ else
     else
         fail "sandbox-direct with a machines Host: $direct"
     fi
+
+    # The link, /_gate/node: a node token and nothing else, through the proxy only.
+    ws /_gate/node -H "Host: $MAIN_H"; l1="$STATUS"
+    ws /_gate/node -H "Host: $MAIN_H" -H "Authorization: Bearer $PTOKEN"; l2="$STATUS"
+    ws /_gate/node -H "Host: $MAIN_H" -H "Cookie: $MSESSION"; l3="$STATUS"
+    l4="$(docker exec "$ECHO" node -e "
+        const net = require('net');
+        const s = net.connect(7900, 'gate', () => s.write('GET /_gate/node HTTP/1.1\r\nHost: $MAIN_H\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer abn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n\r\n'));
+        let b = ''; s.on('data', (c) => { b += c; }); s.on('close', () => console.log(b.split(' ')[1] || 'none')); s.on('error', () => console.log('unreachable'));
+    ")"
+    if [ "$l1" = 401 ] && [ "$l2" = 401 ] && [ "$l3" = 401 ] && [ "$l4" = 421 ]; then
+        pass "the link takes a node token only: none, a person token or a main session -> 401; not through the proxy -> 421"
+    else
+        fail "/_gate/node: none $l1, person token $l2, main session $l3, sandbox-direct $l4"
+    fi
+
+    # A machine's answers, rebuilt by the gate: a node that serves HTML and plants cookies.
+    req POST /_gate/node/join/start -H "Host: $MAIN_H" -H 'Content-Type: application/json' \
+        --data '{"name":"bypass","platform":"linux","arch":"x64","hostname":"bypass"}'
+    JOINCODE="$(printf '%s' "$BODY" | sed -n 's/.*"joinCode":"\([^"]*\)".*/\1/p')"
+    JCODE="$(printf '%s' "$BODY" | sed -n 's/.*"userCode":"\([^"]*\)".*/\1/p')"
+    req POST /_gate/machines/joins/approve -H "Host: $MACH_H" -H "Origin: $M_ORIGIN" -H "Cookie: $MCOOKIE" \
+        -H 'Content-Type: application/json' --data "{\"code\":\"$JCODE\"}"
+    req POST /_gate/node/join/poll -H "Host: $MAIN_H" -H 'Content-Type: application/json' --data "{\"joinCode\":\"$JOINCODE\"}"
+    NTOKEN="$(printf '%s' "$BODY" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    MID="$(printf '%s' "$BODY" | sed -n 's/.*"machineId":"\([^"]*\)".*/\1/p')"
+    FAKE="$ID-fake-node"
+    # The token through the environment, not the command line.
+    NODE_TOKEN="$NTOKEN" docker run -d --name "$FAKE" --network "$NET_EDGE" -e NODE_TOKEN \
+        -v "$ROOT/tests/proxy/fake-node.mjs:/fake-node.mjs:ro" --entrypoint node "$GATE_IMAGE" \
+        /fake-node.mjs ws://proxy:8080 "$MAIN_H" >/dev/null
+    online=0
+    for _ in $(seq 1 50); do
+        req GET /_gate/machines/list -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"
+        [[ "$BODY" == *'"state":"online"'* ]] && { online=1; break; }
+        sleep 0.2
+    done
+    if [ "$online" = 1 ] && [ -n "$MID" ]; then
+        req GET "/m/$MID/html" -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"
+        h1="$STATUS"; b1="$BODY"
+        strict "a machine's refused HTML"
+        req GET "/m/$MID/cookie" -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"
+        if [ "$h1" = 502 ] && [[ "$b1" != *"<script>"* ]]; then
+            pass "a machine's HTML page becomes a 502"
+        else
+            fail "a machine's HTML: $h1 $b1"
+        fi
+        if [ "$STATUS" = 200 ] && [ "$BODY" = cookie-body ] && ! grep -qi '^set-cookie:' "$HEADERS" \
+            && [[ "$(header Content-Security-Policy)" == *"frame-ancestors 'none'"* ]] && grep -qi "^content-security-policy: sandbox; default-src 'none'" "$HEADERS"; then
+            pass "a machine's Set-Cookie is dropped, and its answer is sandboxed"
+        else
+            fail "a machine's cookie: $STATUS $(tr -d '\r' <"$HEADERS" | paste -sd'|' -)"
+        fi
+        strict "a machine's answer"
+    else
+        fail "the stand-in node did not come online: $(docker logs "$FAKE" 2>&1 | tail -n 5)"
+    fi
+    docker rm -f "$FAKE" >/dev/null 2>&1 || true
 fi
 WAIT_HOST=""
 

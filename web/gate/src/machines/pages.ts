@@ -1,5 +1,6 @@
 import { escapeHtml } from "../pages.js";
 import type { AuditEvent } from "./audit.js";
+import type { ClaudeTokenStatus } from "./claude-token.js";
 import type { JoinView } from "./joins.js";
 import type { MachineView } from "./registry.js";
 
@@ -24,6 +25,23 @@ export const MACHINES_PAGE_CSP = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
+].join("; ");
+
+/**
+ * The machines UI (web/app's second entry): its own files only, as the
+ * sign-in. Styles may be set inline (the terminal sets its own), script never.
+ */
+export const MACHINES_UI_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "worker-src 'none'",
 ].join("; ");
 
 /** Where the machines pages' files are served (machines host only). */
@@ -147,11 +165,13 @@ function policyLine(m: MachineView): string {
 
 function machineItem(m: MachineView, manage: boolean): string {
   const free = m.specs?.disks.map((d) => `${d.path}: ${gib(d.freeBytes)} free`).join(", ") ?? "";
+  const optIn = m.optIns.claudeToken;
   const actions = !manage
     ? ""
     : m.state === "revoked" || m.state === "left"
       ? `<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/remove" data-confirm="Remove ${escapeHtml(m.name)} from the list? Its token will be unknown from now on.">Remove</button>`
-      : `<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/revoke" data-confirm="Revoke ${escapeHtml(m.name)}? Its link ends now and it stops.">Revoke</button>`;
+      : `<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/opt-in" data-body="${escapeHtml(JSON.stringify({ claudeToken: !optIn }))}">${optIn ? "Stop sharing the Claude sign-in" : "Share the Claude sign-in"}</button>
+<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/revoke" data-confirm="Revoke ${escapeHtml(m.name)}? Its link ends now and it stops. If it had the shared Claude token, replace that token afterwards.">Revoke</button>`;
   return `<li class="machine" data-machine="${escapeHtml(m.id)}" data-state="${m.state}">
 <div class="machine-head"><strong>${escapeHtml(m.name)}</strong> <span class="machine-state is-${m.state}">${STATE_LABEL[m.state]}</span></div>
 <div class="gate-hint">${specsLine(m)}</div>
@@ -160,6 +180,8 @@ ${policyLine(m) ? `<div class="gate-hint">${policyLine(m)}</div>` : ""}
 <div class="gate-hint">last seen ${escapeHtml(when(m.lastSeenAt))}${m.lastIp ? ` from ${escapeHtml(m.lastIp)}` : ""} · id ${escapeHtml(m.id)}</div>
 ${m.duplicateAt ? `<div class="gate-msg is-error">A second link for this machine was refused at ${escapeHtml(when(m.duplicateAt))}: is its token copied elsewhere?</div>` : ""}
 ${m.upgradeNeeded ? `<div class="gate-msg is-error">Update needed: this machine's node is too old for the box.</div>` : ""}
+${manage && m.state !== "revoked" && m.state !== "left" ? `<div class="gate-hint">Shared Claude sign-in: ${optIn ? "on" : "off"}</div>` : ""}
+${manage && m.claudeTokenStale ? `<div class="gate-msg is-error">This machine has not had the current Claude token yet (it is offline); agents it runs still use the old one.</div>` : ""}
 ${actions}
 </li>`;
 }
@@ -169,7 +191,7 @@ function machineList(machines: MachineView[], manage: boolean): string {
   return `<ul class="machines">${machines.map((m) => machineItem(m, manage)).join("\n")}</ul>`;
 }
 
-/** The Machines page at `/`: the list, until the machines UI (phase 4) mounts here. */
+/** The Machines page at `/` when the machines UI is not built (a gate built alone): the list. */
 export function renderMachinesShell(v: { host: string; machines: MachineView[] }): string {
   return page(
     "Machines · agentbox",
@@ -192,6 +214,36 @@ export interface AdminView {
   machines: MachineView[];
   joins: JoinView[];
   audit: AuditEvent[];
+  claudeToken: ClaudeTokenStatus;
+}
+
+function claudeSection(v: AdminView): string {
+  const t = v.claudeToken;
+  const stale = v.machines.filter((m) => m.claudeTokenStale);
+  const state = t.set
+    ? `<p class="gate-sub">A token is set (since ${escapeHtml(when(t.setAt))}). It is never shown again; paste a new one to replace it.</p>`
+    : `<p class="gate-sub">No token is set. Machines that are not given one sign Claude Code in on their own (<code>/login</code> in the machine's terminal).</p>`;
+  return `<section class="gate-card" aria-labelledby="claude-title">
+<h2 id="claude-title" class="gate-title">Claude Code sign-in</h2>
+<p class="gate-hint">On any computer, run <code>claude setup-token</code> and paste the token here. It goes only to machines you share it with (below), and is read by Claude Code on each launch.</p>
+${state}
+<form class="gate-form" id="machines-claude-token" method="post" action="/_gate/machines/claude-token">
+<div class="field">
+<label class="field-label" for="claude-token">${t.set ? "Replace the token" : "Token"}</label>
+<input class="input" id="claude-token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+</div>
+<p class="gate-msg is-error" id="claude-token-message" role="alert" hidden></p>
+<button class="btn btn-primary gate-submit" type="submit">${t.set ? "Replace" : "Save"}</button>
+</form>
+${t.set ? `<p><button class="btn" type="button" data-machines-post="/_gate/machines/claude-token/remove" data-confirm="Remove the shared Claude token? Machines that have it are told to delete it.">Remove the token</button></p>` : ""}
+${
+  stale.length
+    ? `<p class="gate-msg is-error">Still on the old token (offline since it changed): ${stale.map((m) => escapeHtml(m.name)).join(", ")}. Agents running anywhere keep the token they started with until restarted.</p>`
+    : t.set
+      ? `<p class="gate-hint">Agents started before the token last changed keep the one they started with until restarted.</p>`
+      : ""
+}
+</section>`;
 }
 
 /** The Admin page: pending joins (approved by typing the code the machine shows), machines, the audit log. */
@@ -238,6 +290,7 @@ ${joins}
 <h2 id="list-title" class="gate-title">Machines</h2>
 ${machineList(v.machines, true)}
 </section>
+${claudeSection(v)}
 <section class="gate-card" aria-labelledby="audit-title">
 <h2 id="audit-title" class="gate-title">Audit log</h2>
 ${audit}

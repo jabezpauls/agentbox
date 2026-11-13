@@ -331,7 +331,12 @@ describe("the link", () => {
       { type: FrameType.close, stream: 7 },
       { type: FrameType.close, stream: 8 },
     ]);
-    await expect(hh.gate.core.machines.links.openStream(m.machineId, "http")).rejects.toBeInstanceOf(StreamRefused);
+    // The gate opens them, and a node is told of each.
+    const s = await hh.gate.core.machines.links.openStream(m.machineId, "http");
+    await until(() => conn.frames.length === 3);
+    expect(conn.frames[2]).toMatchObject({ type: FrameType.open });
+    s.destroy();
+    await expect(hh.gate.core.machines.links.openStream("nope", "http")).rejects.toBeInstanceOf(StreamRefused);
     await expect(hh.gate.core.machines.links.openStream("nope", "http")).rejects.toThrow(/offline/);
   });
 

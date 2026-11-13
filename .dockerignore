@@ -8,6 +8,8 @@
 docs
 *.md
 !images/workspace/welcome.md
+# Bundled into the CLI: agentbox's instructions for agents on a machine.
+!images/machine/agents.md
 .env
 node_modules
 **/node_modules

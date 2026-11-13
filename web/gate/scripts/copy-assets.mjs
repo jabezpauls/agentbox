@@ -3,6 +3,9 @@
 // stylesheet and script, plus the app's design tokens, UI font and icon, copied at
 // build time so the sign-in page and the app can never drift onto different
 // palettes. The runtime image carries dist/ alone.
+//
+// And the machines UI (web/app's second entry, `npm run build:machines -w
+// app`), served on the machines origin, when it has been built.
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -25,3 +28,12 @@ const inter = path.join(
   "inter-latin-wght-normal.woff2",
 );
 fs.copyFileSync(inter, path.join(out, "inter.woff2"));
+
+const machinesUi = path.resolve(pkg, "../app/dist-machines");
+if (fs.existsSync(path.join(machinesUi, "machines.html"))) {
+  const target = path.join(out, "machines-ui");
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.cpSync(machinesUi, target, { recursive: true });
+} else {
+  console.log("copy-assets: no machines UI built (web/app: npm run build:machines); the machines origin shows its plain list");
+}

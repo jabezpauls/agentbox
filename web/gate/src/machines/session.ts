@@ -60,7 +60,23 @@ export class MachinesSessions {
     return { id: s.id, record: s };
   }
 
-  async create(opts: { ip: string; userAgent: string }): Promise<{ secret: string; record: MachinesSessionRecord }> {
+  /** Whether the session with this handle is still live (a WebSocket it opened lasts only as long). */
+  liveById(id: string): boolean {
+    const s = this.list.find((x) => x.id === id);
+    return s !== undefined && this.isLive(s);
+  }
+
+  /** Use of the session that carried no cookie: traffic on a WebSocket it opened. */
+  touch(id: string): void {
+    const s = this.list.find((x) => x.id === id);
+    if (!s || !this.isLive(s)) return;
+    const t = this.now();
+    if (t - s.lastSeenAt < TOUCH_MS) return;
+    s.lastSeenAt = t;
+    this.store.saveSoon();
+  }
+
+  async create(opts:{ ip: string; userAgent: string }): Promise<{ secret: string; record: MachinesSessionRecord }> {
     const t = this.now();
     const secret = newSecret();
     const record: MachinesSessionRecord = {

@@ -47,6 +47,8 @@ export interface MachineView {
   /** The gate asked it to update (its protocol is too old). */
   upgradeNeeded: boolean;
   optIns: MachineRecord["optIns"];
+  /** Opted in to the shared Claude token, but holding an older one (or none) than the box has. */
+  claudeTokenStale: boolean;
 }
 
 export class Registry {
@@ -187,7 +189,18 @@ export class Registry {
     return rec;
   }
 
-  view(rec: MachineRecord, online: boolean): MachineView {
+  async optIn(rec: MachineRecord, claudeToken: boolean): Promise<void> {
+    rec.optIns = { ...rec.optIns, claudeToken };
+    await this.store.save();
+  }
+
+  /** What of the shared token it was sent: its generation, or `null` for none. */
+  delivered(rec: MachineRecord, generation: number | null): void {
+    rec.claudeTokenGeneration = generation;
+    this.store.saveSoon();
+  }
+
+  view(rec: MachineRecord, online: boolean, claudeGeneration: number | null = null): MachineView {
     const state: MachineView["state"] =
       rec.state === "revoked" ? "revoked" : rec.state === "left" ? "left" : online ? "online" : rec.pausedAt !== null ? "paused" : "offline";
     return {
@@ -204,6 +217,7 @@ export class Registry {
       duplicateAt: this.duplicates.get(rec.id) ?? null,
       upgradeNeeded: this.upgrades.has(rec.id),
       optIns: rec.optIns,
+      claudeTokenStale: rec.optIns.claudeToken && claudeGeneration !== null && (rec.claudeTokenGeneration ?? null) !== claudeGeneration,
     };
   }
 }

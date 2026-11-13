@@ -4,12 +4,15 @@ import { WebSocket } from "ws";
 import {
   decodeControl,
   decodeFrame,
+  decodeOpen,
   DUPLICATE_BACKOFF_MS,
   encodeControl,
   encodeFrame,
   FrameType,
   LINK_PATH,
   PROTOCOL_VERSION,
+  STREAM_WINDOW,
+  StreamTable,
   verifyRevoke,
   type ControlMessage,
   type Hello,
@@ -31,9 +34,11 @@ import { keepAlive, PING_MS } from "../keepalive.js";
  *   6, listens for it).
  *
  * Events: `state` (LinkState), `welcome` ({ machineId, name }), `revoked`,
- * `upgrade` ({ minimum }), `log` (a line for the node's log), and `open`
- * (stream id, payload) for the gate opening a stream — phase 4 hands those
- * to the node's HTTP server; with no listener, each is refused with a close.
+ * `upgrade` ({ minimum }), `log` (a line for the node's log), `control`
+ * (any other message from the gate, once welcomed: the shared Claude token),
+ * and `stream` (a LinkStream and its StreamOpen) for each stream the gate
+ * opens — run.ts hands those to the node's HTTP server; with no listener,
+ * each is refused with a close. Streams end with the link.
  */
 
 export type LinkState = "connecting" | "online" | "offline" | "paused" | "duplicate" | "upgrade" | "revoked" | "left" | "stopped";
@@ -233,6 +238,9 @@ export class NodeLink extends EventEmitter {
     this.ws = ws;
     let welcomed = false;
     let stopKeepAlive = (): void => {};
+    const streams = new StreamTable((f) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(f);
+    }, STREAM_WINDOW);
 
     ws.on("unexpected-response", (_req, res) => {
       // A 401, a captive portal, a proxy's page: a network failure.
@@ -305,16 +313,24 @@ export class NodeLink extends EventEmitter {
           this.set("upgrade");
           this.nextDelay = this.o.slowRetryMs;
           this.emit("upgrade", { minimum: m.minimum });
+        } else if (welcomed) {
+          this.emit("control", m);
         }
         return;
       }
       if (frame.type === FrameType.open) {
-        if (this.listenerCount("open") > 0) this.emit("open", frame.stream, frame.payload);
-        else ws.send(encodeFrame(FrameType.close, frame.stream));
+        if (!welcomed || this.listenerCount("stream") === 0 || streams.has(frame.stream)) {
+          ws.send(encodeFrame(FrameType.close, frame.stream));
+          return;
+        }
+        this.emit("stream", streams.open(frame.stream), decodeOpen(frame.payload));
+        return;
       }
+      if (!streams.receive(frame) && frame.type !== FrameType.close) ws.send(encodeFrame(FrameType.close, frame.stream));
     });
     ws.on("close", (code) => {
       stopKeepAlive();
+      streams.endAll("the link closed");
       if (this.ws !== ws) return;
       this.ws = null;
       if (!this.running || this.stateNow === "revoked") return;

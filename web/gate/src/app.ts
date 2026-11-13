@@ -18,6 +18,8 @@ import { LinkHub, type LinkOptions } from "./machines/link.js";
 import { Registry } from "./machines/registry.js";
 import { machinesHeaderLines, machinesOriginOf, machinesRequestRefusal, setMachinesHeaders } from "./machines/headers.js";
 import { registerMachines } from "./machines/routes.js";
+import { ClaudeTokens } from "./machines/claude-token.js";
+import { MachineRouter } from "./machines/router.js";
 import { MachinesSessions } from "./machines/session.js";
 import { Grants } from "./grants.js";
 import { createSandboxApi } from "./sandbox-api.js";
@@ -76,7 +78,7 @@ export interface GateDeps {
   lookup?: (host: string) => Promise<string[]>;
   timeouts?: Partial<GateTimeouts>;
   /** The machines link's timings (tests shorten them). */
-  link?: Pick<LinkOptions, "pingMs" | "missedPings" | "stalePongMs" | "helloTimeoutMs" | "minProtocol">;
+  link?: Pick<LinkOptions, "pingMs" | "missedPings" | "stalePongMs" | "helloTimeoutMs" | "minProtocol" | "budget">;
 }
 
 export interface Gate {
@@ -153,8 +155,11 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     // clears it, and every link ends with it (admin.ts).
     enabled: () => core.hosts !== null && store.data.machines.passphrase !== null,
     now,
+    // On every link that comes up: the shared Claude token, if it opted in.
+    onOnline: (id) => core.machines.pushClaudeToken(id),
     ...(deps.link ?? {}),
   });
+  const claudeTokens = new ClaudeTokens(config.dataDir, now);
   const core: GateCore = {
     config,
     store,
@@ -181,8 +186,23 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       joinStarts: new WindowLimiter(10, 60_000, now),
       joinPolls: new WindowLimiter(60, 60_000, now),
       codeGuesses: new WindowLimiter(10, 10 * 60_000, now),
+      router: null as unknown as MachineRouter,
+      claudeTokens,
+      pushClaudeToken: (id) => {
+        const rec = registry.get(id);
+        if (!rec || rec.state !== "active") return;
+        const token = rec.optIns.claudeToken ? claudeTokens.token() : null;
+        // Never given one and not to have one: nothing to say.
+        if (token === null && (rec.claudeTokenGeneration ?? null) === null) return;
+        // Opted out, or the token removed: it is told to hold none.
+        if (links.sendControl(id, { type: "claude-token", token, generation: claudeTokens.generation })) {
+          registry.delivered(rec, token === null ? null : claudeTokens.generation);
+        }
+      },
     },
   };
+  const machineRouter = new MachineRouter(core);
+  core.machines.router = machineRouter;
   const names = core.hosts;
   if (names) console.log(`[gate] machines are on: ${names.machines} and ${names.machineApps}, beside ${names.main}`);
   const grants = new Grants(store);
@@ -305,9 +325,13 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     const path = canonicalPath(target.path);
     const { query } = target;
     if (kind !== "main") {
-      // The machines origin is the gate's alone: its own routes, nothing forwarded.
+      // The machines origin is the gate's alone: its own routes, and a
+      // machine's own server over its link — nothing forwarded to the sandbox.
       const info = settle(req, kind);
-      if (!machinesFront(req, res, kind, info)) toGate(req, res);
+      if (machinesFront(req, res, kind, info)) return;
+      const m = MachineRouter.match(path);
+      if (kind === "machines" && m) machineRouter.http(req, res, m.machineId, m.rest, query, info);
+      else toGate(req, res);
       return;
     }
     if (isRefusedServiceWorker(req, path)) {
@@ -399,7 +423,11 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       if (!info.viaProxy) return refuseUpgrade(socket, 421, "Misdirected Request", extra);
       const refusal = machinesRequestRefusal(req, machinesOriginOf((names as NonNullable<typeof names>).machines), true);
       if (refusal) return refuseUpgrade(socket, refusal.status, "Forbidden", extra);
-      // No WebSocket is served on either machines origin yet.
+      const t = splitTarget(req.url ?? "");
+      if (!isRoutablePath(t.path)) return refuseUpgrade(socket, 400, "Bad Request", extra);
+      // A machine's own sockets (its terminal, its events), over its link; nothing else.
+      const m = kind === "machines" ? MachineRouter.match(canonicalPath(t.path)) : null;
+      if (m) return machineRouter.upgrade(req, socket, head, m.machineId, m.rest, t.query, info);
       return refuseUpgrade(socket, 404, "Not Found", extra);
     }
     const target = splitTarget(req.url ?? "");
@@ -496,6 +524,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     routes,
     close: async () => {
       clearInterval(pruner);
+      machineRouter.close();
       links.close();
       appGateway.close();
       clientIps.stop();
