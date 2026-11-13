@@ -32,6 +32,8 @@ await build({
   target: "node20",
   // ws's optional native speed-ups: absent, it falls back to JavaScript.
   external: ["bufferutil", "utf-8-validate"],
+  // agentbox's instructions for agents on a machine (images/machine/agents.md).
+  loader: { ".md": "text" },
   define: { __AGENTBOX_CLI_VERSION__: JSON.stringify(version) },
   banner: {
     js: [

@@ -56,6 +56,9 @@ export function unitText(command: string[]): string {
     `ExecStart=${command.map(quote).join(" ")}`,
     "Restart=on-failure",
     "RestartSec=5",
+    // herdr, and the agents in it, outlive a restart of the node (an
+    // update, a crash); the next node adopts it.
+    "KillMode=process",
     "",
     "[Install]",
     "WantedBy=default.target",

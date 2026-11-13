@@ -137,6 +137,8 @@ await build({
   // ws's optional native speed-ups: absent, it falls back to JavaScript. No
   // native add-on is ever loaded.
   external: ["bufferutil", "utf-8-validate"],
+  // agentbox's instructions for agents on a machine (images/machine/agents.md).
+  loader: { ".md": "text" },
   define: { __AGENTBOX_CLI_VERSION__: JSON.stringify(version), __AGENTBOX_STANDALONE__: "true" },
   legalComments: "none",
   logLevel: "warning",

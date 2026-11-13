@@ -10,6 +10,7 @@ import { safeText } from "../format.js";
 import { VERSION } from "../version.js";
 import { callControl } from "../node/control.js";
 import { readCredentials, writeCredentials } from "../node/credentials.js";
+import { claudePaths, installClaude } from "../node/claude.js";
 import { installHerdr } from "../node/install.js";
 import { joinMachine } from "../node/join.js";
 import { NodeLink } from "../node/link.js";
@@ -72,6 +73,7 @@ const join = command({
     { name: "name", type: "string", value: "name", description: "what the box calls this machine (default: the hostname)" },
     { name: "folder", type: "string", value: "dirs", description: "folders the box may use, comma-separated, each dir or dir:read (asked when absent)" },
     { name: "no-service", type: "boolean", description: "do not register a service; run `agentbox node run` yourself" },
+    { name: "no-claude", type: "boolean", description: "do not install Claude Code (about 280 MiB); agents can be started once it is there" },
   ],
   async run(ctx, p) {
     const box = normalizeBoxUrl(p.operands[0] as string);
@@ -93,6 +95,7 @@ const join = command({
           freeBytes,
           install: async () => {
             await installHerdr(np.bin, { platform: ctx.platform, arch: process.arch, from: ctx.env.AGENTBOX_NODE_HERDR_FROM || undefined, log: (s) => ctx.err(s) });
+            if (!bool(p.options, "no-claude")) await installClaude(claudePaths(np), { platform: ctx.platform, arch: process.arch, log: (s) => ctx.err(s) });
           },
           passphrase: () => askPassphrase(prompt, (s) => ctx.err(s)),
           enrol: (pass) => enrol(pass, ctx.now()),
@@ -167,7 +170,8 @@ const status = command({
       policyProblem: policy.problem,
       folder: np.dir,
       service: ctx.platform === "linux" ? serviceInstalled(ctx.env) : false,
-      herdrSocket: path.join(np.dir, "herdr.sock"),
+      herdrSocket: typeof live?.herdrSocket === "string" ? live.herdrSocket : null,
+      presenceLocked: typeof live?.presenceLocked === "number" ? live.presenceLocked : null,
     };
     if (ctx.json) return ctx.printJson(out);
     if (!creds) {
@@ -178,6 +182,8 @@ const status = command({
     ctx.out(`state: ${safeText(String(out.state))}${out.paused ? " (paused: `agentbox node resume`)" : ""}\n`);
     if (out.policyProblem) ctx.out(`policy: ${safeText(out.policyProblem)} — everything is denied\n`);
     ctx.out(`folder: ${np.dir}\nservice: ${out.service ? UNIT_NAME : "none"}\n`);
+    if (out.herdrSocket) ctx.out(`herdr: HERDR_SOCKET_PATH=${out.herdrSocket} herdr   (the agents the box sees)\n`);
+    if (out.presenceLocked) ctx.out(`presence: locked until ${new Date(out.presenceLocked).toISOString()} after wrong passphrases\n`);
   },
 });
 

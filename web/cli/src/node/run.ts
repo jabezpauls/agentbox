@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { SessionHub, TerminalStreams, type Viewer } from "@workbench/hostcore/herdr";
 import { CliError, EXIT } from "../errors.js";
+import { claudePaths, holdToken, installedClaude, prepareClaude } from "./claude.js";
+import { HerdrSupervisor, HERDR_SESSION } from "./herdr.js";
+import { PresenceGate } from "./presence.js";
+import { NodeServer } from "./server.js";
 import { callControl, startControl } from "./control.js";
 import { readCredentials, writeCredentials } from "./credentials.js";
 import { NodeLink, type NodeLinkOptions } from "./link.js";
@@ -16,8 +21,9 @@ export const RESTART_EXIT = 75;
 
 /**
  * `agentbox node run`: the node itself. Holds the link, watches the policy,
- * answers the local control socket. (Supervising herdr, the HTTP server the
- * link feeds and presence challenges come in phase 4.)
+ * answers the local control socket, supervises herdr, serves the streams the
+ * gate opens with its HTTP server (server.ts), answers presence challenges,
+ * and keeps Claude Code's shim, config and the shared token (claude.ts).
  *
  * Revoked — by the box's signed message only — it wipes `secrets/`, notes the
  * revocation in credentials.json, says so, and exits 0, so the service is not
@@ -35,7 +41,12 @@ export interface RunOptions {
   link?: Partial<Omit<NodeLinkOptions, "box" | "token" | "machineId" | "version" | "describe">>;
   /** Check for signed updates (tests turn it off). */
   checkUpdates?: boolean;
+  /** How often open channels are checked against the policy and presence. */
+  enforceMs?: number;
 }
+
+/** After a fresh herdr start, restored panes get a viewer this size for this long, so their programs resume. */
+const HEADLESS = { cols: 200, rows: 50, ms: 30_000 };
 
 export async function runNode(o: RunOptions): Promise<number> {
   const now = o.now ?? Date.now;
@@ -50,6 +61,62 @@ export async function runNode(o: RunOptions): Promise<number> {
   }
 
   let policy: LoadedPolicy = loadPolicy(o.paths.policy, o.home);
+
+  // Claude Code: its shim first on herdr's PATH, its own config, agents.md.
+  const claude = claudePaths(o.paths);
+  prepareClaude(claude, { home: o.home, machine: creds.name });
+  const herdrEnv: NodeJS.ProcessEnv = { ...process.env, PATH: [claude.shims, o.paths.bin, process.env.PATH ?? ""].join(path.delimiter) };
+  delete herdrEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+  const presence = new PresenceGate({ presence: creds.presence, machineId: creds.machineId, hours: () => policy.policy.presenceHours, now, log: o.log });
+
+  // herdr, and what is built on its socket (a fresh one at each start).
+  let hub: SessionHub | null = null;
+  let streams: TerminalStreams | null = null;
+  const herdrBin = path.join(o.paths.bin, process.platform === "win32" ? "herdr.exe" : "herdr");
+  const herdr = fs.existsSync(herdrBin) ? new HerdrSupervisor({ bin: herdrBin, dir: o.paths.dir, env: herdrEnv }) : null;
+  if (!herdr) o.log(`herdr is not installed (${herdrBin}); terminals and agents are unavailable until \`agentbox node join\` installs it`);
+  const server = new NodeServer({
+    herdrSocket: () => herdr?.socketPath ?? null,
+    hub: () => hub,
+    streams: () => streams,
+    policy: () => policy,
+    presence,
+    home: o.home,
+    log: o.log,
+  });
+  herdr?.on("log", (line: string) => o.log(line));
+  herdr?.on("down", () => {
+    hub?.stop();
+    hub = null;
+    streams?.stop();
+    streams = null;
+  });
+  herdr?.on("ready", (socket: string, info: { restored: boolean }) => {
+    hub?.stop();
+    streams?.stop();
+    const h = new SessionHub(socket);
+    hub = h;
+    streams = new TerminalStreams({ ...herdrEnv, HERDR_SOCKET_PATH: socket, HERDR_SESSION });
+    const own = streams;
+    const connect = (tries: number): void => {
+      h.start().then(
+        async () => {
+          if (!info.restored || hub !== h) return;
+          // Restored panes, with no browser yet: a headless viewer sized 200×50 for a while.
+          const snap = await h.snapshot().catch(() => null);
+          const quiet: Viewer = { send: () => {}, sendJson: () => {}, close: () => {} };
+          const held = (snap?.panes ?? []).map((p) => own.attach(p.pane_id, quiet, HEADLESS.cols, HEADLESS.rows));
+          if (held.length) o.log(`herdr: ${held.length} restored pane(s) attached headless at ${HEADLESS.cols}×${HEADLESS.rows}`);
+          setTimeout(() => held.forEach((a) => a.detach()), HEADLESS.ms).unref();
+        },
+        () => {
+          if (hub === h && tries > 0) setTimeout(() => connect(tries - 1), 1_000).unref();
+        },
+      );
+    };
+    connect(10);
+  });
   const sayPolicy = (l: LoadedPolicy): void => {
     if (l.problem) o.log(`policy: ${l.problem}; everything is denied until it is fixed`);
     else o.log(`policy: terminals ${l.policy.terminals ? "on" : "off"}, ${l.policy.files.length} folder(s), ports ${l.policy.ports ? "on" : "off"}${l.policy.paused ? ", paused" : ""}`);
@@ -68,12 +135,23 @@ export async function runNode(o: RunOptions): Promise<number> {
     ...(o.link ?? {}),
   });
   link.on("log", (line: string) => o.log(line));
+  // Each stream the gate opens is a connection to the node's server.
+  link.on("stream", (stream: import("node:stream").Duplex, open: import("@workbench/hostcore/link").StreamOpen) => server.accept(stream, open));
+  link.on("control", (m: { type: string; token?: unknown }) => {
+    if (m.type !== "claude-token") return;
+    const token = typeof m.token === "string" ? m.token : null;
+    holdToken(claude, token);
+    o.log(token ? "the box sent the shared Claude sign-in; new Claude Code sessions here use it" : "the box withdrew the shared Claude sign-in from this machine");
+  });
   link.on("state", (state: string) => o.log(`link: ${state}`));
   if (policy.policy.paused) link.pause();
 
   const stopWatching = watchPolicy(o.paths.policy, o.home, (l) => {
     policy = l;
     sayPolicy(l);
+    // Tightened: what it no longer allows closes now.
+    const closed = server.enforce();
+    if (closed) o.log(`policy: closed ${closed} channel(s) it no longer allows`);
     if (l.policy.paused && !link.isPaused) link.pause();
     else if (!l.policy.paused && link.isPaused) link.resume();
     else link.sendPolicy(summarize(l));
@@ -85,7 +163,18 @@ export async function runNode(o: RunOptions): Promise<number> {
   const control = await startControl(o.paths.control, o.paths.controlSecret, async (command) => {
     switch (command) {
       case "status":
-        return { state: link.state, box: creds.box, machineId: creds.machineId, name: creds.name, paused: link.isPaused, policyProblem: policy.problem, pid: process.pid };
+        return {
+          state: link.state,
+          box: creds.box,
+          machineId: creds.machineId,
+          name: creds.name,
+          paused: link.isPaused,
+          policyProblem: policy.problem,
+          pid: process.pid,
+          herdrSocket: herdr?.socketPath ?? null,
+          presenceLocked: presence.locked(),
+          channels: server.openChannels,
+        };
       case "pause":
         setPaused(o.paths.policy, true);
         link.pause();
@@ -121,17 +210,19 @@ export async function runNode(o: RunOptions): Promise<number> {
     if (checking || o.checkUpdates === false) return;
     checking = true;
     try {
-      const herdr = path.join(o.paths.bin, "herdr");
+      const herdrPath = herdrBin;
       const report = await checkForUpdate({
         policy: policy.policy.updates,
         running: o.version,
         // Only the standalone executable replaces itself; agentbox.mjs under Node does not.
         nodePath: execStart().length === 3 ? process.execPath : null,
-        ...(fs.existsSync(herdr) ? { herdr: { path: herdr, version: HERDR_VERSION } } : {}),
-        // herdr is not supervised by the node yet (phase 4): nothing of the node's runs in it.
-        idle: () => true,
+        ...(fs.existsSync(herdrPath) ? { herdr: { path: herdrPath, version: HERDR_VERSION } } : {}),
+        ...(installedClaude(claude) ? { claude: { path: claude.bin, version: installedClaude(claude), versionFile: claude.versionFile } } : {}),
+        // Agents live in herdr: herdr and Claude Code are replaced only while none runs.
+        idle: () => (herdr ? herdr.idle() : true),
       });
       o.log(`update: ${describeReport(report)}`);
+      if ((report.state === "current" || report.state === "updated") && report.tools.herdr === "updated") void herdr?.restart("updated");
       if (report.state === "updated" && report.restart) finish(RESTART_EXIT);
     } catch (err) {
       o.log(`update check failed: ${(err as Error).message}`);
@@ -145,8 +236,24 @@ export async function runNode(o: RunOptions): Promise<number> {
   const daily = setInterval(() => void checkUpdates(), 24 * 60 * 60_000);
   daily.unref();
 
+  // Every few seconds: grants that ended, and anything the policy closed meanwhile.
+  const enforcer = setInterval(() => server.enforce(), o.enforceMs ?? 5_000);
+  enforcer.unref();
+  if (herdr) {
+    herdr.start().catch((err: unknown) => {
+      o.log(`herdr did not start: ${(err as Error).message}; trying again`);
+      void herdr.restart("it did not start");
+    });
+  }
+
   link.start();
   const code = await done;
+  clearInterval(enforcer);
+  server.close();
+  // herdr keeps running, its agents with it; the next node adopts it.
+  herdr?.stop();
+  (hub as SessionHub | null)?.stop();
+  (streams as TerminalStreams | null)?.stop();
   clearTimeout(firstCheck);
   clearInterval(daily);
   link.stop(link.state === "revoked" ? "revoked" : "stopped");
