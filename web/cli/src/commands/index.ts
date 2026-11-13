@@ -7,6 +7,7 @@ import { AUTH_COMMANDS } from "./auth.js";
 import { FILES_COMMANDS } from "./files.js";
 import { FORWARD_COMMANDS } from "./forward.js";
 import { HERDR_COMMANDS } from "./herdr.js";
+import { NODE_COMMANDS } from "./node.js";
 import { MOUNT_COMMANDS } from "./mount.js";
 import { SSH_COMMANDS } from "./ssh.js";
 import { STATUS_COMMANDS } from "./status.js";
@@ -26,6 +27,7 @@ export const COMMANDS: Command[] = [
   ...APPS_COMMANDS,
   ...AGENT_COMMANDS,
   ...HERDR_COMMANDS,
+  ...NODE_COMMANDS,
   ...UPDATE_COMMANDS,
 ];
 
