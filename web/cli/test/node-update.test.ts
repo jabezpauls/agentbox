@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { signedUpdatesOnly } from "../src/commands/update.js";
 import { EXIT } from "../src/errors.js";
@@ -250,5 +252,49 @@ describe("the box-served update on a machine with a node", () => {
     fs.writeFileSync(path.join(local, "agentbox", "node", "credentials.json"), "{}");
     expect(signedUpdatesOnly({ LOCALAPPDATA: local }, "win32", false)).toMatch(/node/);
     expect(signedUpdatesOnly({ HOME: tmpDir() }, "linux", true)).toMatch(/standalone agentbox/);
+  });
+});
+
+describe("the release's manifest (scripts/machines-manifest.mjs)", () => {
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "machines-manifest.mjs");
+  const assets = (): string => {
+    const f = path.join(tmpDir("agentbox-assets-"), "assets.json");
+    const a = (file: string): { file: string; sha256: string; size: number } => ({ file, sha256: sha(Buffer.from(file)), size: 1 });
+    const platforms = { "linux-x64": { node: a("agentbox-linux-x64") }, "linux-arm64": { node: a("agentbox-linux-arm64") }, "win-x64": { node: a("agentbox.exe"), nodeGui: a("agentbox-node.exe") } };
+    fs.writeFileSync(f, JSON.stringify({ version: "v1.3.0", platforms }));
+    return f;
+  };
+  const make = (env: NodeJS.ProcessEnv, extra: string[] = []): { status: number | null; out: string; stderr: string } => {
+    const out = tmpDir("agentbox-manifest-");
+    const r = spawnSync(process.execPath, [script, "--tag", "v1.3.0", "--assets", assets(), "--out", out, ...extra], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, ...env },
+    });
+    return { status: r.status, out, stderr: r.stderr };
+  };
+
+  it("is signed with the key from the environment, and verifies as the node checks it", () => {
+    const pem = release.priv.export({ type: "pkcs8", format: "pem" }).toString();
+    const r = make({ MACHINES_SIGNING_KEY: pem, GITHUB_REPOSITORY: "jabezpauls/agentbox" }, ["--require-signature"]);
+    expect(r.status, r.stderr).toBe(0);
+    const bytes = fs.readFileSync(path.join(r.out, "machines-manifest.json"));
+    const sig = fs.readFileSync(path.join(r.out, "machines-manifest.json.sig"));
+    const m = verifyManifest(bytes, sig, [release.pub]);
+    expect(m.version).toBe("v1.3.0");
+    expect(m.platforms["linux-x64"]?.node.url).toBe("https://github.com/jabezpauls/agentbox/releases/download/v1.3.0/agentbox-linux-x64");
+    expect(m.platforms["linux-arm64"]?.herdr.url).toMatch(/herdr-linux-aarch64$/);
+    expect(m.platforms["win-x64"]?.nodeGui?.url).toMatch(/agentbox-node\.exe$/);
+    expect(Object.keys(m.platforms["win-x64"]?.herdr.files ?? {})).toContain("herdr.exe");
+    expect(m.platforms["win-x64"]?.claude).toMatchObject({ version: "2.1.311", url: "https://downloads.claude.ai/claude-code-releases/2.1.311/win32-x64/claude.exe" });
+    expect(() => verifyManifest(bytes, sig, [stranger.pub])).toThrow(UpdateRefused);
+  });
+
+  it("fails a release without the key, rather than ship it unsigned", () => {
+    const r = make({}, ["--require-signature"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/MACHINES_SIGNING_KEY is not set/);
+    expect(fs.existsSync(path.join(r.out, "machines-manifest.json.sig"))).toBe(false);
+    const rsa = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    expect(make({ MACHINES_SIGNING_KEY: rsa }, ["--require-signature"]).stderr).toMatch(/must be ed25519/);
   });
 });
