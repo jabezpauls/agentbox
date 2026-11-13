@@ -117,6 +117,8 @@ export async function startHarness(overrides: Partial<Config> = {}, deps: GateDe
     bcryptCost: COST,
     trustedProxies: [],
     publicUrl: null,
+    machinesHost: null,
+    machineAppsHost: null,
     upstreams: Object.fromEntries(
       names.filter((n) => n !== "data").map((n) => [n, { host: "127.0.0.1", port: echoes[n].port }]),
     ) as Config["upstreams"],
