@@ -11,8 +11,8 @@
   "files": ["dist/agentbox.mjs"],
   "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "node scripts/build.mjs", "e2e": "node e2e/run.mjs", "prepack": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs", "build:sea": "node scripts/build-sea.mjs", "e2e": "node e2e/run.mjs", "prepack": "node scripts/build.mjs",
     "test": "vitest run", "typecheck": "tsc -p tsconfig.json", "lint": "eslint src test e2e scripts"
   },
-  "devDependencies": { "esbuild": "^0.28", "ws": "^8", "@types/ws": "^8", "typescript": "^5.6", "vitest": "^2", "@types/node": "^22", "eslint": "^9", "typescript-eslint": "^8" }
+  "devDependencies": { "esbuild": "^0.28", "ws": "^8", "@types/ws": "^8", "typescript": "^5.6", "vitest": "^2", "@types/node": "^22", "eslint": "^9", "typescript-eslint": "^8", "postject": "1.0.0-alpha.6" }
 }
