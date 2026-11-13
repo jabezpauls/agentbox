@@ -37,6 +37,9 @@ export function registerJoinRoutes(app: FastifyInstance, core: GateCore): void {
   const { joins } = core.machines;
   app.post(JOIN_START_PATH, { config: { hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
+    // Through the proxy only, as the link the token is for: the sandbox
+    // reaching the gate's listener directly cannot put a machine in the list.
+    if (!info.viaProxy) return reply.code(421).send({ error: "misdirected", message: "misdirected request" });
     const wait = core.machines.joinStarts.take(info.key);
     if (wait !== null) return reply.code(429).header("retry-after", String(Math.ceil(wait / 1000))).send({ error: "slow_down", message: "too many joins from your address; wait a minute" });
     const b = body(req);
@@ -57,6 +60,7 @@ export function registerJoinRoutes(app: FastifyInstance, core: GateCore): void {
 
   app.post(JOIN_POLL_PATH, { config: { hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
+    if (!info.viaProxy) return reply.code(421).send({ error: "misdirected", message: "misdirected request" });
     if (core.machines.joinPolls.take(info.key) !== null) return reply.code(429).send({ error: "slow_down" });
     const result = await joins.poll(str(body(req).joinCode), info.ip);
     if (result.status === "approved") console.log(`[gate] machine "${result.name}" collected its node token from ${info.ip}`);

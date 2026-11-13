@@ -279,6 +279,9 @@ describe("the link", () => {
     h = await startHarness({ ...ON, trustedProxies: [] }, { link: FAST });
     await setPassphrase({ store: h.gate.core.store, cost: COST }, PASSPHRASE);
     expect(await connect(h, `abn_${"z".repeat(43)}`)).toEqual({ status: 421 });
+    // Nor may the sandbox ask to join, or poll, from inside: only through the proxy, as the link.
+    expect((await mainPost(h, "/_gate/node/join/start", { name: "x" })).status).toBe(421);
+    expect((await mainPost(h, "/_gate/node/join/poll", { joinCode: "x" })).status).toBe(421);
     await h.close();
     h = await startHarness({ publicUrl: `https://${MAIN}`, trustedProxies: ["127.0.0.1"] }, { link: FAST });
     expect(await connect(h, `abn_${"z".repeat(43)}`)).toEqual({ status: 404 });
