@@ -135,11 +135,85 @@ body {
   flex: 1;
 }
 
+.mx-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.mx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mx-spacer {
+  flex: 1;
+}
+
+.mx-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+
+.mx-files,
+.mx-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.mx-files-body {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 320px;
+}
+
+.mx-files-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mx-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mx-editor-text {
+  flex: 1;
+  min-height: 300px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  resize: none;
+}
+
+.mx-preview-frame {
+  flex: 1;
+  min-height: 420px;
+  width: 100%;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 6px;
+  background: #fff;
+}
+
 @media (max-width: 720px) {
   .mx-body {
     flex-direction: column;
   }
   .mx-side {
     width: auto;
+  }
+  .mx-files-body {
+    flex-direction: column;
   }
 }

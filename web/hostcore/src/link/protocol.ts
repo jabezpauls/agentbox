@@ -12,8 +12,9 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
  *              this machine's own gate can say it
  *
  * Afterwards the node may say `policy` (its policy summary changed), `pause`
- * (the owner paused it here; the link closes next) or `leave` (it is leaving).
- * Nothing else a node says does anything.
+ * (the owner paused it here; the link closes next), `leave` (it is leaving)
+ * or `apps` (its whole list of registered apps, `[{port, name}]`, at most 64:
+ * on every link up and every change). Nothing else a node says does anything.
  */
 
 export const PROTOCOL_VERSION = 1;

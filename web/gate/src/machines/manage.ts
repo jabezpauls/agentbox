@@ -184,6 +184,26 @@ export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
 
   m.get("/_gate/machines/list", { config: session }, async () => ({ machines: list() }));
 
+  // --- apps on a machine (`agentbox-preview`), on the machine-apps origin ------------
+
+  const appsOrigin = core.hosts ? `https://${core.hosts.machineApps}` : "";
+  m.get<{ Params: { id: string } }>("/_gate/machines/m/:id/apps", { config: session }, async (req, reply) => {
+    const rec = registry.get(req.params.id);
+    if (!rec || rec.state !== "active") return reply.code(404).send({ error: "not_found" });
+    return {
+      apps: core.machines.apps.forMachine(rec.id).map((a) => ({ id: a.id, port: a.port, name: a.name, registeredAt: a.registeredAt, url: `${appsOrigin}/${a.id}/` })),
+    };
+  });
+
+  // Opening one: a ticket for the machine-apps origin, which takes it for a grant (apps.ts). A POST: it mints.
+  m.post<{ Params: { id: string; app: string } }>("/_gate/machines/m/:id/apps/:app/open", { config: session }, async (req, reply) => {
+    const s = requireMachinesSession(req);
+    const app = core.machines.apps.get(req.params.app);
+    if (!app || app.machineId !== req.params.id || registry.get(app.machineId)?.state !== "active") return reply.code(404).send({ error: "not_found" });
+    const ticket = core.machines.appTickets.issue(s.id, app.id);
+    return { url: `${appsOrigin}/${app.id}/__agentbox/enter?t=${ticket}` };
+  });
+
   m.get("/_gate/machines/joins", { config: session }, async () => {
     await joins.prune();
     return { joins: joins.pending() };
@@ -216,6 +236,7 @@ export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
     audit.record("revoked", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip, detail: "by the owner" });
     links.revoke(rec.id);
     router.forget(rec.id);
+    core.machines.apps.forget(rec.id);
     console.log(`[gate] machine ${rec.name} revoked from ${infoOf(req.raw).ip}`);
     return { ok: true };
   });
@@ -227,6 +248,7 @@ export function registerManageRoutes(m: FastifyInstance, core: GateCore): void {
     if (rec.state === "active") return reply.code(409).send({ error: "active", message: "Revoke the machine before removing it." });
     links.disconnect(rec.id);
     router.forget(rec.id);
+    core.machines.apps.forget(rec.id);
     await registry.remove(rec.id);
     audit.record("removed", { machineId: rec.id, name: rec.name, ip: infoOf(req.raw).ip });
     return { ok: true };

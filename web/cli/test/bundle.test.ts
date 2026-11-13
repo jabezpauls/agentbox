@@ -47,6 +47,12 @@ describe("the bundle", () => {
     expect(out.stderr).toMatch(/no box named "none"/);
   });
 
+  it("carries the files API without Fastify or the zip library", () => {
+    const text = fs.readFileSync(bundle, "utf8");
+    expect(text).toContain("serveFiles");
+    expect(text).not.toMatch(/fastify|yazl/i);
+  });
+
   it("moves in step with the gate's version, which the box reports", () => {
     expect(pkg("package.json").version).toBe(pkg("../gate/package.json").version);
   });

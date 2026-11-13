@@ -2,10 +2,12 @@ import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
+import { serveFiles, type FilesService } from "@workbench/hostcore/files";
 import { heartbeat, HerdrError, isAllowed, request, serveTerminalSocket, type SessionHub, type TerminalStreams } from "@workbench/hostcore/herdr";
 import type { StreamOpen } from "@workbench/hostcore/link";
 import type { LoadedPolicy } from "./policy.js";
 import type { PresenceGate } from "./presence.js";
+import { connectLocal, type Previews } from "./preview.js";
 
 /**
  * The node's HTTP server. It listens on no port: the link hands it each
@@ -21,13 +23,23 @@ import type { PresenceGate } from "./presence.js";
  *   POST /api/rpc                        herdr RPC, allowlisted     │ `terminals` on,
  *   WS   /ws/events                      snapshot, then live events │ and a live grant
  *   WS   /ws/terminal                    pane streams               ┘
+ *   *    /api/files/…                    the files API (files/http.ts in hostcore): a folder
+ *                                        in the policy's `files`, and a live grant
+ *
+ * A stream the gate opens for an app (its open frame names a registered
+ * port) goes to a second server, which passes every request on it to that
+ * port on this machine's loopback (127.0.0.1, then [::1]) and nothing else,
+ * while `ports` is on; apps need no presence (the gate admits them on the
+ * machine-apps origin). Nothing else of the node is reachable on such a
+ * stream, and no other stream reaches an app.
  *
  * Every channel opened is tracked with its grant: when the policy tightens,
  * or a grant ends, `enforce` closes what is no longer allowed (run.ts calls
  * it on every policy change and every few seconds).
  *
- * A route for later phases (Files, Preview) is one more entry in `routes`
- * with its own policy check; `channel` tracks it the same way.
+ * A files request is tracked too, and closed when the policy's folders
+ * change at all (a folder made read-only mid-upload, say); an app's, when
+ * its registration ends.
  */
 
 export interface NodeServerOptions {
@@ -38,17 +50,24 @@ export interface NodeServerOptions {
   policy: () => LoadedPolicy;
   presence: PresenceGate;
   home: string;
+  /** The files service for the policy's folders now; `null` when it allows none. */
+  files?: () => FilesService | null;
+  previews?: Previews;
   log?: (line: string) => void;
 }
 
-/** What a channel needs to be allowed: herdr's (terminals, agents). */
-type Need = "terminals";
+/** What a channel needs to be allowed: herdr's (terminals, agents), the files API, an app. */
+type Need = "terminals" | "files" | "ports";
 
 interface Channel {
   need: Need;
   open: StreamOpen;
   close: () => void;
+  /** Still what it was opened under (the same folders; the app still registered). */
+  still?: () => boolean;
 }
+
+const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer"]);
 
 const MAX_BODY = 64 * 1024;
 
@@ -92,6 +111,8 @@ function refuseSocket(socket: Duplex, status: number, body: unknown): void {
 
 export class NodeServer {
   readonly server: http.Server;
+  /** Streams for an app: every request on one goes to its registered port. */
+  readonly appServer: http.Server;
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   private readonly opens = new WeakMap<Duplex, StreamOpen>();
   private readonly channels = new Set<Channel>();
@@ -106,12 +127,15 @@ export class NodeServer {
     });
     this.server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => this.upgrade(req, socket, head));
     this.server.on("clientError", (_err, socket: Duplex) => socket.destroy());
+    this.appServer = http.createServer({ requestTimeout: 0, headersTimeout: 30_000, keepAliveTimeout: 60_000 }, (req, res) => this.app(req, res));
+    this.appServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => this.appUpgrade(req, socket, head));
+    this.appServer.on("clientError", (_err, socket: Duplex) => socket.destroy());
   }
 
-  /** A stream from the link: a connection to this server. */
+  /** A stream from the link: a connection to this server (or, for an app, to the app's). */
   accept(stream: Duplex, open: StreamOpen): void {
     this.opens.set(stream, open);
-    this.server.emit("connection", stream);
+    (open.app === undefined ? this.server : this.appServer).emit("connection", stream);
   }
 
   private openOf(req: IncomingMessage): StreamOpen {
@@ -121,11 +145,16 @@ export class NodeServer {
   /** Why `need` is not allowed for this stream now, or `null`. */
   private refusal(need: Need, open: StreamOpen): { status: number; body: { error: string; message: string } } | null {
     const l = this.o.policy();
-    if (need === "terminals" && !l.policy.terminals) {
-      return {
-        status: 403,
-        body: { error: "terminals_off", message: l.problem ? `this machine's policy denies everything: ${l.problem}` : "terminals are off in this machine's policy.json" },
-      };
+    const denied = (error: string, what: string) => ({
+      status: 403,
+      body: { error, message: l.problem ? `this machine's policy denies everything: ${l.problem}` : what },
+    });
+    if (need === "terminals" && !l.policy.terminals) return denied("terminals_off", "terminals are off in this machine's policy.json");
+    if (need === "files" && l.policy.files.length === 0) return denied("files_off", "this machine's policy.json allows no folders");
+    if (need === "ports") {
+      if (!l.policy.ports) return denied("ports_off", "apps are off in this machine's policy.json (ports)");
+      // An app is admitted by the gate on the machine-apps origin, not by presence.
+      return null;
     }
     if (!this.o.presence.check(open.grant, open.session)) {
       return { status: 401, body: { error: "presence", message: "this machine wants proof that you are there: the machines passphrase" } };
@@ -137,7 +166,7 @@ export class NodeServer {
   enforce(): number {
     let n = 0;
     for (const ch of [...this.channels]) {
-      if (this.refusal(ch.need, ch.open) === null) continue;
+      if (this.refusal(ch.need, ch.open) === null && (ch.still?.() ?? true)) continue;
       this.channels.delete(ch);
       ch.close();
       n += 1;
@@ -146,8 +175,8 @@ export class NodeServer {
   }
 
   /** Track a channel for as long as `until` lasts; holds its grant from idling out. */
-  private channel(need: Need, open: StreamOpen, close: () => void, onEnd: (cb: () => void) => void): void {
-    const ch: Channel = { need, open, close };
+  private channel(need: Need, open: StreamOpen, close: () => void, onEnd: (cb: () => void) => void, still?: () => boolean): void {
+    const ch: Channel = still ? { need, open, close, still } : { need, open, close };
     this.channels.add(ch);
     const release = open.grant ? this.o.presence.hold(open.grant) : () => {};
     onEnd(() => {
@@ -175,7 +204,13 @@ export class NodeServer {
           homeRoot: this.o.home,
           sharing: false,
           publicUrl: null,
-          machine: { terminals: l.policy.terminals, problem: l.problem, presenceLocked: this.o.presence.locked() },
+          machine: {
+            terminals: l.policy.terminals,
+            files: l.policy.files.map((f) => ({ path: f.path, mode: f.mode })),
+            ports: l.policy.ports,
+            problem: l.problem,
+            presenceLocked: this.o.presence.locked(),
+          },
         });
       }
       case "POST /presence/challenge": {
@@ -226,9 +261,107 @@ export class NodeServer {
           return json(res, 502, { error: { code: "unreachable", message: (err as Error).message } });
         }
       }
-      default:
+      default: {
+        if (url.pathname === "/api/files" || url.pathname.startsWith("/api/files/")) return this.files(req, res, open);
         return json(res, 404, { error: "not found" });
+      }
     }
+  }
+
+  private async files(req: IncomingMessage, res: ServerResponse, open: StreamOpen): Promise<void> {
+    const no = this.refusal("files", open);
+    if (no) {
+      req.resume();
+      return json(res, no.status, no.body);
+    }
+    const svc = this.o.files?.() ?? null;
+    if (!svc) return json(res, 403, { error: "files_off", message: "this machine's policy.json allows no folders" });
+    this.channel(
+      "files",
+      open,
+      () => res.destroy(),
+      (cb) => res.once("close", cb),
+      () => this.o.files?.() === svc,
+    );
+    await serveFiles(svc, req, res);
+  }
+
+  /** The port an app stream is for, if it may be served now; else the refusal to send. */
+  private appPort(open: StreamOpen): { port: number } | { status: number; body: unknown } {
+    const no = this.refusal("ports", open);
+    if (no) return no;
+    const port = open.app;
+    if (port === undefined || !this.o.previews?.has(port)) return { status: 404, body: { error: "not_found", message: "no app is registered on that port here" } };
+    return { port };
+  }
+
+  /** A request for an app: passed on to its port as it came, its answer back as it comes (the gate applies the app policy). */
+  private app(req: IncomingMessage, res: ServerResponse): void {
+    const open = this.openOf(req);
+    const p = this.appPort(open);
+    if (!("port" in p)) {
+      req.resume();
+      return json(res, p.status, p.body);
+    }
+    const { port } = p;
+    const headers: Record<string, string | string[]> = {};
+    for (const [k, v] of Object.entries(req.headers)) if (v !== undefined && !HOP.has(k)) headers[k] = v;
+    if (req.headers["transfer-encoding"] !== undefined && req.headers["content-length"] === undefined) headers["transfer-encoding"] = "chunked";
+    connectLocal(port).then(
+      (sock) => {
+        if (res.destroyed) return void sock.destroy();
+        const up = http.request({ method: req.method, path: req.url ?? "/", headers, createConnection: () => sock }, (upRes) => {
+          const raw: string[] = [];
+          for (let i = 0; i + 1 < upRes.rawHeaders.length; i += 2) {
+            if (HOP.has((upRes.rawHeaders[i] as string).toLowerCase())) continue;
+            raw.push(upRes.rawHeaders[i] as string, upRes.rawHeaders[i + 1] as string);
+          }
+          // Never followed: a redirect goes back as it is, for the gate to keep inside the app.
+          res.writeHead(upRes.statusCode ?? 502, upRes.statusMessage, raw);
+          upRes.pipe(res);
+          upRes.on("error", () => res.destroy());
+        });
+        up.on("error", () => (res.headersSent ? res.destroy() : json(res, 502, { error: "app", message: `the app on port ${port} did not answer` })));
+        res.once("close", () => {
+          if (!res.writableFinished) up.destroy();
+        });
+        this.channel("ports", open, () => res.destroy(), (cb) => res.once("close", cb), () => this.o.previews?.has(port) ?? false);
+        req.pipe(up);
+      },
+      () => {
+        req.resume();
+        json(res, 502, { error: "app", message: `nothing answers on port ${port} here` });
+      },
+    );
+  }
+
+  /** An app's WebSocket (or any upgrade): its request head to the port, then bytes both ways. */
+  private appUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+    socket.on("error", () => socket.destroy());
+    const open = this.openOf(req);
+    const p = this.appPort(open);
+    if (!("port" in p)) return refuseSocket(socket, p.status, p.body);
+    const { port } = p;
+    connectLocal(port).then(
+      (up) => {
+        if (socket.destroyed) return void up.destroy();
+        let block = `${req.method ?? "GET"} ${req.url ?? "/"} HTTP/1.1\r\n`;
+        for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) block += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`;
+        up.write(`${block}\r\n`);
+        if (head.length) up.write(head);
+        const end = (): void => {
+          up.destroy();
+          socket.destroy();
+        };
+        up.on("error", end);
+        up.on("close", end);
+        socket.on("close", end);
+        this.channel("ports", open, end, (cb) => socket.once("close", cb), () => this.o.previews?.has(port) ?? false);
+        up.pipe(socket);
+        socket.pipe(up);
+      },
+      () => refuseSocket(socket, 502, { error: "app", message: `nothing answers on port ${port} here` }),
+    );
   }
 
   private upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -279,6 +412,7 @@ export class NodeServer {
     this.channels.clear();
     this.wss.close();
     this.server.close();
+    this.appServer.close();
   }
 }
 

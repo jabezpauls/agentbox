@@ -3,10 +3,14 @@ import { apiUrl } from "../api/base.ts";
 import { connectEvents } from "../api/events.ts";
 import { rpc, setApiBase } from "../api/client.ts";
 import { AgentList } from "../components/AgentList.tsx";
+import { Toasts } from "../components/Toasts.tsx";
+import { PromptHost } from "../components/ui/prompts.tsx";
 import { useApp } from "../store/app.ts";
 import { TerminalCell } from "../terminal/TerminalCell.tsx";
 import { useTheme } from "../theme/useTheme.ts";
 import { MachinesError, machinesApi, type MachineView } from "./api.ts";
+import { MachineFiles, useMachineRoots } from "./MachineFiles.tsx";
+import { MachinePreview } from "./MachinePreview.tsx";
 import { forgetPassphrase, heldPassphrase, holdPassphrase, presenceAnswer } from "./presence.ts";
 
 /**
@@ -202,8 +206,41 @@ function Workspaces({ selected, onSelect }: { selected: string | null; onSelect:
   );
 }
 
-function Machine({ id }: { id: string }) {
+type Tab = "terminal" | "files" | "preview";
+
+function Ready({ id, pane, onSelect }: { id: string; pane: string | null; onSelect: (pane: string) => void }) {
   const { resolved } = useTheme();
+  const { roots, ports } = useMachineRoots();
+  const [tab, setTab] = useState<Tab>("terminal");
+  const tabs: Array<[Tab, string]> = [
+    ["terminal", "Terminal"],
+    ["files", "Files"],
+    ["preview", "Preview"],
+  ];
+  return (
+    <>
+      <nav className="mx-tabs" role="tablist">
+        {tabs.map(([t, label]) => (
+          <button key={t} className={`btn btn-small${tab === t ? " btn-primary" : " btn-ghost"}`} type="button" role="tab" aria-selected={tab === t} id={`machine-tab-${t}`} onClick={() => setTab(t)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      {tab === "terminal" && (
+        <div className="mx-body">
+          <Workspaces selected={pane} onSelect={onSelect} />
+          <div className="mx-term">{pane ? <TerminalCell key={pane} paneId={pane} resolved={resolved} /> : <p className="mx-hint">Create a workspace, or pick a pane.</p>}</div>
+        </div>
+      )}
+      {tab === "files" && (roots === null ? <p className="mx-hint">Loading…</p> : <MachineFiles roots={roots} />)}
+      {tab === "preview" && <MachinePreview id={id} ports={ports} />}
+      <Toasts />
+      <PromptHost />
+    </>
+  );
+}
+
+function Machine({ id }: { id: string }) {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [machine, setMachine] = useState<MachineView | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -266,10 +303,7 @@ function Machine({ id }: { id: string }) {
       {phase.kind !== "ready" ? (
         <Presence id={id} phase={phase} onPhase={setPhase} />
       ) : (
-        <div className="mx-body">
-          <Workspaces selected={pane} onSelect={setSelected} />
-          <div className="mx-term">{pane ? <TerminalCell key={pane} paneId={pane} resolved={resolved} /> : <p className="mx-hint">Create a workspace, or pick a pane.</p>}</div>
-        </div>
+        <Ready id={id} pane={pane} onSelect={setSelected} />
       )}
     </main>
   );

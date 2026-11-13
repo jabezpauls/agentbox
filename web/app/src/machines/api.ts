@@ -22,6 +22,15 @@ export interface MachineView {
   upgradeNeeded: boolean;
 }
 
+/** An app a machine registered (`agentbox-preview`), on the machine-apps origin. */
+export interface MachineApp {
+  id: string;
+  port: number;
+  name: string;
+  registeredAt: number;
+  url: string;
+}
+
 export class MachinesError extends Error {
   constructor(
     readonly status: number,
@@ -55,5 +64,8 @@ export const machinesApi = {
   challenge: (id: string) =>
     call<{ challenge: string; salt: string; iterations: number; session: string; machine: string }>("POST", `/_gate/machines/m/${id}/presence/challenge`),
   prove: (id: string, challenge: string, answer: string) => call<{ ok: true; expiresAt: number }>("POST", `/_gate/machines/m/${id}/presence`, { challenge, answer }),
+  apps: (id: string) => call<{ apps: MachineApp[] }>("GET", `/_gate/machines/m/${id}/apps`).then((r) => r.apps),
+  /** A single-use link that opens the app (and grants it to this session). */
+  openApp: (id: string, app: string) => call<{ url: string }>("POST", `/_gate/machines/m/${id}/apps/${app}/open`).then((r) => r.url),
   signOut: () => fetch("/signout", { method: "POST", credentials: "same-origin" }),
 };

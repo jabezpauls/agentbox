@@ -6,7 +6,7 @@ import { HANDOFF_PATH, infoOf, type GateCore } from "../context.js";
 import { MACHINES, MAIN } from "../hosts.js";
 import { loginMessage } from "../pages.js";
 import { machinesOriginOf } from "./headers.js";
-import { MACHINES_ASSETS, MACHINES_PAGE_CSP, MACHINES_UI_CSP, renderMachinesShell, renderSignin } from "./pages.js";
+import { MACHINES_ASSETS, MACHINES_PAGE_CSP, machinesUiCsp, renderMachinesShell, renderSignin } from "./pages.js";
 import { registerJoinRoutes, registerManageRoutes } from "./manage.js";
 import { requireMachinesSession } from "./session.js";
 
@@ -136,7 +136,7 @@ export async function registerMachines(app: FastifyInstance, core: GateCore): Pr
       } catch {
         // Not built.
       }
-      if (html !== null) return reply.code(200).type("text/html; charset=utf-8").header("content-security-policy", MACHINES_UI_CSP).send(html);
+      if (html !== null) return reply.code(200).type("text/html; charset=utf-8").header("content-security-policy", machinesUiCsp(names.machineApps)).send(html);
       const { registry, links } = core.machines;
       const machines = registry.all().map((r) => registry.view(r, links.isOnline(r.id)));
       return page(reply, renderMachinesShell({ host: names.machines, machines }));

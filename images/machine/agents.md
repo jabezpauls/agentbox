@@ -4,8 +4,10 @@
 run here as the owner, with their files, their tools and their network. The
 owner watches your terminal from their browser, on agentbox's machines page.
 
-- **To show the owner an app** you started (a dev server, say), tell them the
-  port it listens on; they open it themselves.
+- **To show the owner an app** you started (a dev server, say), run
+  `agentbox-preview <port>` once it listens (on 127.0.0.1 or [::1]): it appears
+  in the owner's Preview on the machines page. `agentbox-preview list` and
+  `agentbox-preview stop <port>` manage them.
 - **Never make anything public.** Do not use tunnels (ngrok, cloudflared,
   localtunnel), external hosting, claude.ai Artifacts or similar to show a web
   app unless the owner explicitly asks for that.

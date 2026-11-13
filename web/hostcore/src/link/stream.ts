@@ -34,6 +34,12 @@ export interface StreamOpen {
   session: string | null;
   /** The presence grant the machine issued to that session, when there is one. */
   grant: string | null;
+  /**
+   * For an app on the machine-apps origin: the registered port it is for.
+   * Such a stream reaches that app and nothing else of the node's; any other
+   * stream never reaches an app.
+   */
+  app?: number;
 }
 
 export function encodeOpen(o: StreamOpen): Buffer {
@@ -49,7 +55,9 @@ export function decodeOpen(payload: Buffer): StreamOpen {
     // An empty or broken payload: nothing claimed.
   }
   const id = (s: unknown): string | null => (typeof s === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(s) ? s : null);
-  return { kind: v.kind === "upgrade" ? "upgrade" : "http", session: id(v.session), grant: id(v.grant) };
+  const out: StreamOpen = { kind: v.kind === "upgrade" ? "upgrade" : "http", session: id(v.session), grant: id(v.grant) };
+  if (typeof v.app === "number" && Number.isInteger(v.app) && v.app >= 1 && v.app <= 65535) out.app = v.app;
+  return out;
 }
 
 function windowPayload(n: number): Buffer {

@@ -80,12 +80,16 @@ export interface LinkOptions {
   budget?: StreamBudget;
   /** A machine's link is up (said ok): what it should be told now (the shared Claude token). */
   onOnline?: (machineId: string) => void;
+  /** A machine's apps (`agentbox-preview`): its whole list, or `null` when its link went down. */
+  onApps?: (machineId: string, apps: unknown) => void;
 }
 
 /** Who a stream is for: the machines session and its presence grant, which the node checks. */
 export interface StreamFor {
   session: string | null;
   grant: string | null;
+  /** For the machine-apps origin: the registered port the stream is for (the node checks it is registered). */
+  app?: number;
 }
 
 interface Live {
@@ -295,6 +299,7 @@ export class LinkHub {
       live.streams.endAll("machine offline");
       if (this.live.get(machineId) !== live) return;
       this.live.delete(machineId);
+      this.opts.onApps?.(machineId, null);
       const now = registry.get(machineId);
       if (!now) return;
       registry.seen(now);
@@ -317,6 +322,9 @@ export class LinkHub {
       }
       case "pause":
         registry.paused(rec);
+        return;
+      case "apps":
+        this.opts.onApps?.(live.machineId, m.apps);
         return;
       case "leave":
         void registry.left(rec.id).then(() => {
@@ -400,7 +408,7 @@ export class LinkHub {
     live.nextStream = id >= 0xffff_ffff ? 1 : id + 1;
     const stream = live.streams.open(id);
     stream.once("close", release);
-    live.ws.send(encodeFrame(FrameType.open, id, encodeOpen({ kind, session: who.session, grant: who.grant })));
+    live.ws.send(encodeFrame(FrameType.open, id, encodeOpen({ kind, session: who.session, grant: who.grant, ...(who.app === undefined ? {} : { app: who.app }) })));
     return stream;
   }
 

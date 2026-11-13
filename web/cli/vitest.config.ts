@@ -16,6 +16,8 @@ export default defineConfig({
     alias: {
       "@workbench/hostcore/link": fileURLToPath(new URL("../hostcore/src/link/index.ts", import.meta.url)),
       "@workbench/hostcore/herdr": fileURLToPath(new URL("../hostcore/src/herdr/index.ts", import.meta.url)),
+      "@workbench/hostcore/files": fileURLToPath(new URL("../hostcore/src/files/index.ts", import.meta.url)),
+      "@workbench/shared": fileURLToPath(new URL("../shared/src/index.ts", import.meta.url)),
     },
   },
   test: {
