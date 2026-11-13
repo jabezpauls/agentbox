@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { unpackVerified } from "./install.js";
 import { RELEASE_PUBLIC_KEYS } from "./release-keys.js";
 import {
   compareVersions,
@@ -211,10 +212,19 @@ async function updateTool(
 ): Promise<ComponentState> {
   if (!installed) return "none";
   if (installed.version === asset.version) return "current";
-  // herdr ships for Windows as a zip of several files, unpacked by the
-  // Windows node (phase 7).
-  if (asset.files) return "unsupported";
   if (!idle) return "deferred";
+  if (asset.files) {
+    // herdr for Windows: a zip, checked whole against the manifest, and each
+    // file in it against the manifest's pin before any replaces its old self.
+    const tmp = await downloadVerified(fetcher, asset, path.join(path.dirname(installed.path), "herdr.zip"), `${name} ${asset.version} for ${platform}`);
+    try {
+      unpackVerified(fs.readFileSync(tmp), asset.files, path.dirname(installed.path), `${name} ${asset.version} for ${platform}`, o.platform ?? process.platform);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+    if (installed.versionFile) fs.writeFileSync(installed.versionFile, `${asset.version}\n`, { mode: 0o600 });
+    return "updated";
+  }
   const tmp = await downloadVerified(fetcher, asset, installed.path, `${name} ${asset.version} for ${platform}`);
   replaceFile(tmp, installed.path, o.platform ?? process.platform);
   if (installed.versionFile) fs.writeFileSync(installed.versionFile, `${asset.version}\n`, { mode: 0o600 });

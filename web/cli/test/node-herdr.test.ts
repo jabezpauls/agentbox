@@ -50,7 +50,7 @@ describe.skipIf(!herdr)("the node's herdr", () => {
     const t = new HerdrSupervisor({ bin: herdr as string, dir, env });
     const adopted = next<[string, { restored: boolean }]>(t, "ready");
     await t.start();
-    expect(await adopted).toEqual([second, { restored: false }]);
+    expect(await adopted).toEqual([second, { restored: false, envPath: second }]);
     t.stop(true);
   }, 30_000);
 });

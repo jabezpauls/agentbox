@@ -23,8 +23,8 @@ import { ensurePrivateDir, writePrivate } from "./paths.js";
  *   every 30 s (a listener can die while the process lives), and after two
  *   failed checks in a row it is restarted.
  *
- * Events: `ready` (socket path, `{ restored }` — true when this start was a
- * fresh server, which restores the saved session), `down` (it went away;
+ * Events: `ready` (its address, `{ restored, envPath }` — restored is true when this start was a
+ * fresh server, which restores the saved session; envPath is its HERDR_SOCKET_PATH), `down` (it went away;
  * a restart follows), `log` (a line).
  */
 
@@ -34,6 +34,16 @@ export const FAILED_CHECKS = 2;
 const READY_MS = 15_000;
 /** sun_path holds 108 bytes on Linux (104 on macOS); leave room for herdr's own `-client` sibling. */
 const MAX_SOCKET_PATH = 96;
+
+/**
+ * Where a client reaches herdr whose `HERDR_SOCKET_PATH` is `socket`: the
+ * socket itself, or on Windows the named pipe `\\.\pipe\` + that path
+ * verbatim (herdr leaves a marker file at the path; connecting to the file
+ * fails with ENOTSOCK — machines spike, question 1).
+ */
+export function herdrAddress(socket: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? `\\\\.\\pipe\\${socket}` : socket;
+}
 
 export interface HerdrOptions {
   /** The herdr executable (the node's verified `bin/herdr`). */
@@ -68,8 +78,13 @@ export class HerdrSupervisor extends EventEmitter {
     this.stateFile = path.join(o.dir, "state", "herdr.json");
   }
 
-  /** The control socket now, or `null` while herdr is starting. */
+  /** Where herdr's control socket is reached now (on Windows, its pipe), or `null` while herdr is starting. */
   get socketPath(): string | null {
+    return this.socket === null ? null : herdrAddress(this.socket);
+  }
+
+  /** `HERDR_SOCKET_PATH` for herdr's own CLI (`terminal session control`), or `null`. */
+  get envPath(): string | null {
     return this.socket;
   }
 
@@ -79,7 +94,7 @@ export class HerdrSupervisor extends EventEmitter {
 
   private async answers(socket: string): Promise<boolean> {
     try {
-      const pong = await request<{ version?: string }>(socket, "ping", {}, { timeoutMs: 5_000 });
+      const pong = await request<{ version?: string }>(herdrAddress(socket), "ping", {}, { timeoutMs: 5_000 });
       return pong.version === (this.o.version ?? HERDR_VERSION);
     } catch {
       return false;
@@ -90,7 +105,8 @@ export class HerdrSupervisor extends EventEmitter {
   private freshSocket(): string {
     const name = `herdr-${randomBytes(4).toString("hex")}.sock`;
     const inNode = path.join(this.o.dir, name);
-    if (Buffer.byteLength(inNode) <= MAX_SOCKET_PATH) return inNode;
+    // A pipe's name has no such limit.
+    if (process.platform === "win32" || Buffer.byteLength(inNode) <= MAX_SOCKET_PATH) return inNode;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentbox-node-"));
     fs.chmodSync(dir, 0o700);
     return path.join(dir, name);
@@ -103,7 +119,7 @@ export class HerdrSupervisor extends EventEmitter {
       this.socket = saved.socket;
       this.pid = saved.pid;
       this.log(`herdr: kept the running server (pid ${saved.pid})`);
-      this.emit("ready", saved.socket, { restored: false });
+      this.emit("ready", herdrAddress(saved.socket), { restored: false, envPath: saved.socket });
     } else {
       if (saved) this.kill(saved.pid);
       await this.spawnServer();
@@ -179,7 +195,7 @@ export class HerdrSupervisor extends EventEmitter {
     this.failures = 0;
     this.backoff = 1_000;
     this.log(`herdr ${this.o.version ?? HERDR_VERSION} started (pid ${this.pid ?? "?"})`);
-    this.emit("ready", socket, { restored: true });
+    this.emit("ready", herdrAddress(socket), { restored: true, envPath: socket });
   }
 
   private watch(): void {
@@ -233,7 +249,7 @@ export class HerdrSupervisor extends EventEmitter {
   async idle(): Promise<boolean> {
     if (!this.socket) return true;
     try {
-      const r = await request<{ snapshot: { agents?: unknown[] } }>(this.socket, "session.snapshot", {}, { timeoutMs: 5_000 });
+      const r = await request<{ snapshot: { agents?: unknown[] } }>(herdrAddress(this.socket), "session.snapshot", {}, { timeoutMs: 5_000 });
       return (r.snapshot.agents ?? []).length === 0;
     } catch {
       return false;

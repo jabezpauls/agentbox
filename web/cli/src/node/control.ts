@@ -5,10 +5,15 @@ import { writePrivate } from "./paths.js";
 
 /**
  * The node's local control channel, for `status`, `pause`, `resume`, `leave`
- * and `agentbox-preview` (`preview`, `preview-list`, `preview-stop`): a Unix socket in the node's `0700`
- * folder — never TCP. Each request also carries a random secret from a
- * `0600` file beside it, which is what guards a Windows named pipe (whose
- * ACL Node cannot set) and costs nothing here.
+ * and `agentbox-preview` (`preview`, `preview-list`, `preview-stop`) — never
+ * TCP. Each request carries a random secret from an owner-only file in the
+ * node's folder, made afresh at each start.
+ *
+ * - Linux and macOS: a Unix socket in the node's `0700` folder (`control.sock`).
+ * - Windows: a named pipe. Its ACL is Windows' default, which Node cannot
+ *   change, and its name is global, so it gets a fresh random name at each
+ *   start, written to `control.pipe` in the node's folder, and the secret is
+ *   what keeps anyone else out (machines spike, question 1).
  *
  * One JSON line each way: `{"secret","command","args"}` → `{"ok", …}`.
  */
@@ -22,12 +27,31 @@ export interface ControlServer {
   close(): void;
 }
 
-export async function startControl(socketPath: string, secretFile: string, handle: ControlHandler): Promise<ControlServer> {
+const PIPE_NAME = /^\\\\\.\\pipe\\agentbox-node-[0-9a-f]{32}$/;
+
+/** Where a client connects: the socket, or on Windows the pipe whose name the file holds (`null`: no node). */
+function address(socketPath: string, platform: NodeJS.Platform): string | null {
+  if (platform !== "win32") return socketPath;
+  try {
+    const name = fs.readFileSync(socketPath, "utf8").trim();
+    return PIPE_NAME.test(name) ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Listen at `socketPath` (on Windows, the file naming the pipe). The secret
+ * is written before anything listens, so no request is ever answered without
+ * one.
+ */
+export async function startControl(socketPath: string, secretFile: string, handle: ControlHandler, platform: NodeJS.Platform = process.platform): Promise<ControlServer> {
   const secret = randomBytes(32).toString("base64url");
   writePrivate(secretFile, secret);
   const want = Buffer.from(secret);
-  // A socket left by a crashed run would make listen() fail.
+  // A socket (or pipe name) left by a crashed run would make listen() fail, or point nowhere.
   fs.rmSync(socketPath, { force: true });
+  const listenAt = platform === "win32" ? `\\\\.\\pipe\\agentbox-node-${randomBytes(16).toString("hex")}` : socketPath;
   const server = net.createServer((sock) => {
     let buf = "";
     sock.setTimeout(10_000, () => sock.destroy());
@@ -58,12 +82,13 @@ export async function startControl(socketPath: string, secretFile: string, handl
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(socketPath, () => {
+    server.listen(listenAt, () => {
       server.off("error", reject);
       resolve();
     });
   });
-  if (process.platform !== "win32") fs.chmodSync(socketPath, 0o600);
+  if (platform === "win32") writePrivate(socketPath, `${listenAt}\n`);
+  else fs.chmodSync(socketPath, 0o600);
   return {
     close: () => {
       server.close();
@@ -79,6 +104,7 @@ export function callControl(
   command: ControlCommand,
   timeoutMs = 10_000,
   args: Record<string, unknown> = {},
+  platform: NodeJS.Platform = process.platform,
 ): Promise<Record<string, unknown> | null> {
   let secret: string;
   try {
@@ -86,8 +112,10 @@ export function callControl(
   } catch {
     return Promise.resolve(null);
   }
+  const at = address(socketPath, platform);
+  if (at === null) return Promise.resolve(null);
   return new Promise((resolve) => {
-    const sock = net.connect(socketPath);
+    const sock = net.connect(at);
     let buf = "";
     const timer = setTimeout(() => {
       sock.destroy();

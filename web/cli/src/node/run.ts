@@ -4,6 +4,8 @@ import { SessionHub, TerminalStreams, type Viewer } from "@workbench/hostcore/he
 import { CliError, EXIT } from "../errors.js";
 import { claudePaths, holdToken, installedClaude, prepareClaude } from "./claude.js";
 import { HerdrSupervisor, HERDR_SESSION } from "./herdr.js";
+import { withPath, windowsShell } from "./proc.js";
+import { GUI_EXE } from "./service-windows.js";
 import { PresenceGate } from "./presence.js";
 import { NodeServer } from "./server.js";
 import { callControl, startControl } from "./control.js";
@@ -11,11 +13,11 @@ import { readCredentials, writeCredentials } from "./credentials.js";
 import { NodeLink, type NodeLinkOptions } from "./link.js";
 import type { NodePaths } from "./paths.js";
 import { loadPolicy, setPaused, summarize, watchPolicy, type LoadedPolicy } from "./policy.js";
-import { HERDR_VERSION } from "./install.js";
+import { herdrDir, herdrPath, HERDR_VERSION } from "./install.js";
 import { execStart } from "./service-linux.js";
 import { gatherSpecs } from "./specs.js";
 import { checkForUpdate, describeReport } from "./update.js";
-import { filesFor, pathRules, TRASH_DAYS } from "./files.js";
+import { filesFor, pathRules, TRASH_DAYS, windowsDocuments } from "./files.js";
 import { Previews, writePreviewShim } from "./preview.js";
 import type { FilesService } from "@workbench/hostcore/files";
 
@@ -68,11 +70,15 @@ export async function runNode(o: RunOptions): Promise<number> {
   // Claude Code: its shim first on herdr's PATH, its own config, agents.md.
   const claude = claudePaths(o.paths);
   prepareClaude(claude, { home: o.home, machine: creds.name });
-  const herdrEnv: NodeJS.ProcessEnv = { ...process.env, PATH: [claude.shims, o.paths.bin, process.env.PATH ?? ""].join(path.delimiter) };
+  // On Windows herdr is in bin\herdr\ (its own CLI streams the terminals, by
+  // name), and its panes run PowerShell: pwsh when it is there.
+  const win = process.platform === "win32";
+  const herdrEnv: NodeJS.ProcessEnv = withPath(process.env, [claude.shims, o.paths.bin, ...(win ? [herdrDir(o.paths.bin)] : [])]);
+  if (win && !herdrEnv.SHELL) herdrEnv.SHELL = windowsShell(herdrEnv);
   delete herdrEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
   // Files: the policy's folders, behind the lists the box can never get past (files.ts).
-  const rules = pathRules({ home: o.home, nodeDir: o.paths.dir });
+  const rules = pathRules({ home: o.home, nodeDir: o.paths.dir, ...(win ? { documents: windowsDocuments() } : {}) });
   let files: FilesService | null = null;
   let filesKey = "";
   let stopUploads: () => void = () => {};
@@ -106,7 +112,7 @@ export async function runNode(o: RunOptions): Promise<number> {
   // herdr, and what is built on its socket (a fresh one at each start).
   let hub: SessionHub | null = null;
   let streams: TerminalStreams | null = null;
-  const herdrBin = path.join(o.paths.bin, process.platform === "win32" ? "herdr.exe" : "herdr");
+  const herdrBin = herdrPath(o.paths.bin);
   const herdr = fs.existsSync(herdrBin) ? new HerdrSupervisor({ bin: herdrBin, dir: o.paths.dir, env: herdrEnv }) : null;
   if (!herdr) o.log(`herdr is not installed (${herdrBin}); terminals and agents are unavailable until \`agentbox node join\` installs it`);
   const server = new NodeServer({
@@ -127,12 +133,12 @@ export async function runNode(o: RunOptions): Promise<number> {
     streams?.stop();
     streams = null;
   });
-  herdr?.on("ready", (socket: string, info: { restored: boolean }) => {
+  herdr?.on("ready", (socket: string, info: { restored: boolean; envPath: string }) => {
     hub?.stop();
     streams?.stop();
     const h = new SessionHub(socket);
     hub = h;
-    streams = new TerminalStreams({ ...herdrEnv, HERDR_SOCKET_PATH: socket, HERDR_SESSION });
+    streams = new TerminalStreams({ ...herdrEnv, HERDR_SOCKET_PATH: info.envPath, HERDR_SESSION });
     const own = streams;
     const connect = (tries: number): void => {
       h.start().then(
@@ -232,7 +238,7 @@ export async function runNode(o: RunOptions): Promise<number> {
           paused: link.isPaused,
           policyProblem: policy.problem,
           pid: process.pid,
-          herdrSocket: herdr?.socketPath ?? null,
+          herdrSocket: herdr?.envPath ?? null,
           presenceLocked: presence.locked(),
           channels: server.openChannels,
         };
@@ -271,13 +277,16 @@ export async function runNode(o: RunOptions): Promise<number> {
     if (checking || o.checkUpdates === false) return;
     checking = true;
     try {
-      const herdrPath = herdrBin;
+      const standalone = execStart().length === 3;
+      const gui = path.join(path.dirname(process.execPath), GUI_EXE);
       const report = await checkForUpdate({
         policy: policy.policy.updates,
         running: o.version,
         // Only the standalone executable replaces itself; agentbox.mjs under Node does not.
-        nodePath: execStart().length === 3 ? process.execPath : null,
-        ...(fs.existsSync(herdrPath) ? { herdr: { path: herdrPath, version: HERDR_VERSION } } : {}),
+        nodePath: standalone ? process.execPath : null,
+        // Windows: the windowless copy beside it, which the sign-in entry starts.
+        ...(win && standalone && fs.existsSync(gui) ? { nodeGuiPath: gui } : {}),
+        ...(fs.existsSync(herdrBin) ? { herdr: { path: herdrBin, version: HERDR_VERSION } } : {}),
         ...(installedClaude(claude) ? { claude: { path: claude.bin, version: installedClaude(claude), versionFile: claude.versionFile } } : {}),
         // Agents live in herdr: herdr and Claude Code are replaced only while none runs.
         idle: () => (herdr ? herdr.idle() : true),

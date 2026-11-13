@@ -22,7 +22,7 @@ export interface Runner {
 
 export const runCommand: Runner = (cmd, args) =>
   new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 30_000 }, (err, stdout, stderr) => {
+    execFile(cmd, args, { timeout: 30_000, windowsHide: true }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as { code?: unknown }).code === "number" ? ((err as { code: number }).code) : 127) : 0;
       resolve({ code, stdout: String(stdout), stderr: String(stderr) });
     });

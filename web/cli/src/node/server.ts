@@ -7,6 +7,7 @@ import { heartbeat, HerdrError, isAllowed, request, serveTerminalSocket, type Se
 import type { StreamOpen } from "@workbench/hostcore/link";
 import type { LoadedPolicy } from "./policy.js";
 import type { PresenceGate } from "./presence.js";
+import { toApiPath } from "./files.js";
 import { connectLocal, type Previews } from "./preview.js";
 
 /**
@@ -206,7 +207,7 @@ export class NodeServer {
           publicUrl: null,
           machine: {
             terminals: l.policy.terminals,
-            files: l.policy.files.map((f) => ({ path: f.path, mode: f.mode })),
+            files: l.policy.files.map((f) => ({ path: toApiPath(f.path), mode: f.mode })),
             ports: l.policy.ports,
             problem: l.problem,
             presenceLocked: this.o.presence.locked(),

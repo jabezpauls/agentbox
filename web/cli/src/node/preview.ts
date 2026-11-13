@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import net from "node:net";
 import path from "node:path";
+import { cmdQuote } from "./claude.js";
 import { writePrivate } from "./paths.js";
 import { execStart } from "./service-linux.js";
 
@@ -154,9 +155,21 @@ function shQuote(s: string): string {
 /**
  * `agentbox-preview`, first on PATH inside the node's herdr (beside the
  * `claude` shim): this very program's `node preview`, which asks the running
- * node over its control socket.
+ * node over its control socket. On Windows, `agentbox-preview.cmd`.
  */
-export function writePreviewShim(shims: string, command: string[] = execStart().slice(0, -2)): string {
+export function writePreviewShim(shims: string, command: string[] = execStart().slice(0, -2), platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") {
+    const file = path.join(shims, "agentbox-preview.cmd");
+    const text = [
+      "@echo off",
+      "rem agentbox: show an app on this machine in the owner's Preview. Written by the node.",
+      `${command.map(cmdQuote).join(" ")} node preview %*`,
+      "exit /b %ERRORLEVEL%",
+      "",
+    ].join("\r\n");
+    writePrivate(file, text, 0o700);
+    return file;
+  }
   const file = path.join(shims, "agentbox-preview");
   writePrivate(
     file,
