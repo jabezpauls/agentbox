@@ -53,7 +53,7 @@ export async function moveTree(src: string, dst: string, scratchDir: string): Pr
     if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
   }
   await fsp.mkdir(fsPath(scratchDir), { recursive: true });
-  const tmp = scratchName(scratchDir, "move");
+  const tmp = scratchName(await scratchFor(scratchDir, dst), "move");
   try {
     await copyTree(src, tmp);
     await noClobberRename(tmp, dst);
@@ -62,6 +62,49 @@ export async function moveTree(src: string, dst: string, scratchDir: string): Pr
     throw err;
   }
   await removeTree(src);
+}
+
+/**
+ * Where to build something that ends up at `dst`: `scratchDir` when it is on
+ * the same volume as `dst`'s folder, so the last step is a rename; else
+ * beside `dst` itself. (A machine keeps its scratch space in the node's own
+ * folder, which on Windows may be on another drive than a folder it serves.)
+ */
+export async function scratchFor(scratchDir: string, dst: string): Promise<string> {
+  const [a, b] = await Promise.all([fsp.stat(fsPath(scratchDir)).catch(() => null), fsp.stat(fsPath(path.dirname(dst))).catch(() => null)]);
+  return a && b && a.dev !== b.dev ? path.dirname(dst) : scratchDir;
+}
+
+/**
+ * Put the file `src` at `dst` in one step: renamed when they share a volume;
+ * otherwise copied beside `dst`, flushed to disk, renamed into place, and
+ * only then removed from `src`. Without `clobber`, `dst` must not exist
+ * ({@link noClobberRename}); with it, whatever is there is replaced.
+ */
+export async function placeFile(src: string, dst: string, clobber: boolean): Promise<void> {
+  try {
+    if (clobber) await fsp.rename(fsPath(src), fsPath(dst));
+    else await noClobberRename(src, dst);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+  }
+  const tmp = scratchName(path.dirname(dst), "place");
+  try {
+    await fsp.copyFile(fsPath(src), fsPath(tmp), constants.COPYFILE_EXCL);
+    const fh = await fsp.open(fsPath(tmp), "r+");
+    try {
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+    if (clobber) await fsp.rename(fsPath(tmp), fsPath(dst));
+    else await noClobberRename(tmp, dst);
+  } catch (err) {
+    await fsp.rm(fsPath(tmp), { force: true }).catch(() => {});
+    throw err;
+  }
+  await fsp.rm(fsPath(src), { force: true });
 }
 
 /**

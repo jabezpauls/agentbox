@@ -8,7 +8,7 @@ import type { FileEntry, UploadSession } from "@workbench/shared";
 import { describe } from "./entries.js";
 import { fsPath } from "./names.js";
 import { fsError, FilesError, type Root, type Roots } from "./roots.js";
-import { noClobberRename, removeTree } from "./tree.js";
+import { placeFile, removeTree } from "./tree.js";
 import type { Trash } from "./trash.js";
 
 /**
@@ -215,7 +215,7 @@ export class Uploads {
         await this.trash.put(dest.root, dest.abs, dest.fs);
       }
       try {
-        await noClobberRename(part, dest.fs);
+        await placeFile(part, dest.fs, false);
       } catch (err) {
         throw fsError(err, dest.abs);
       }
