@@ -338,7 +338,8 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       return;
     }
     if (r.kind === "node") {
-      if (names === null) plain(res, 404, "not found");
+      // With machines off, the path is the gate's like any other, as it always was.
+      if (names === null) toGate(req, res);
       else plain(res, 426, "a machine's link is a WebSocket", { upgrade: "websocket" });
       return;
     }
