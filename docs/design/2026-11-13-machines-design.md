@@ -577,11 +577,17 @@ No WSL, no admin.
   (Claude Code uses PowerShell without it); none is installed.
 - **Smart App Control**: Windows 11 with it on blocks unsigned executables,
   which the node and herdr are (injecting the SEA breaks `node.exe`'s
-  signature; herdr ships unsigned). Measured by hand with the owner; the decision (Authenticode
-  signing, or documenting Smart App Control as unsupported) is made before the
-  Windows phase.
-- **Paths**: `/`-style in the API; drives as roots; the path rules in "Files
-  on a machine".
+  signature; herdr ships unsigned). Decided for v1: no signing; the
+  executables are unsigned, and a PC where Smart App Control blocks them is
+  unsupported for now (`join` and docs/security.md say so).
+- **Paths**: `/`-style in the API (`C:\Users\o\code` is `/C:/Users/o/code`,
+  `D:\` is `/D:`); drives as roots; the path rules in "Files on a machine".
+  The node's folder is on the profile's drive, a folder it serves may be on
+  another: what the files API stages there (an upload, a save) is copied
+  beside its destination and renamed there when the two are on different
+  volumes. The write-deny list follows Documents where Windows says it is
+  (OneDrive moves it, PowerShell's profiles with it), and a link or junction
+  resolving to a network share is neither shown nor written.
 
 ## Testing
 

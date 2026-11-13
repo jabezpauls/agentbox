@@ -14,7 +14,7 @@ import path from "node:path";
  *   agents.md          agentbox's instructions for agents here
  *   bin/               herdr, Claude Code (verified)
  *   state/             trash, upload state, the local log
- *   control.sock       the local control socket (control.ts)
+ *   control.sock       the local control socket (control.ts); control.pipe on Windows
  *   control.secret     what each control request carries
  */
 
@@ -40,7 +40,7 @@ export function nodeDir(env: NodeJS.ProcessEnv = process.env, home: string = os.
   return path.join(base, "agentbox", "node");
 }
 
-export function nodePaths(dir: string): NodePaths {
+export function nodePaths(dir: string, platform: NodeJS.Platform = process.platform): NodePaths {
   return {
     dir,
     policy: path.join(dir, "policy.json"),
@@ -48,7 +48,8 @@ export function nodePaths(dir: string): NodePaths {
     secrets: path.join(dir, "secrets"),
     bin: path.join(dir, "bin"),
     state: path.join(dir, "state"),
-    control: path.join(dir, "control.sock"),
+    // On Windows, the file naming the control pipe (control.ts).
+    control: path.join(dir, platform === "win32" ? "control.pipe" : "control.sock"),
     controlSecret: path.join(dir, "control.secret"),
   };
 }

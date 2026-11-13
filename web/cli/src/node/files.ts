@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -37,11 +38,17 @@ export interface PathRulesOptions {
   nodeDir: string;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  /**
+   * Windows: the Documents folder where it really is (OneDrive moves it, and
+   * PowerShell's profiles with it), from {@link windowsDocuments}.
+   */
+  documents?: string[];
   /** Resolve each entry through links (off in tests of another platform's lists). */
   resolve?: boolean;
 }
 
 export interface PathRules {
+  platform: NodeJS.Platform;
   caseInsensitive: boolean;
   hidden: string[];
   writeDenied: string[];
@@ -62,7 +69,7 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
   const H = o.home;
   const N = o.nodeDir;
   const j = (...parts: string[]): string => P.join(...parts);
-  const nodeSecrets = ["credentials.json", "secrets", "claude", "control.secret", "control.sock", "state"].map((f) => j(N, f));
+  const nodeSecrets = ["credentials.json", "secrets", "claude", "control.secret", "control.sock", "control.pipe", "state"].map((f) => j(N, f));
   // Folders on PATH inside home: a program put there runs the next time anything is run by that name.
   const ci = platform === "win32" || platform === "darwin";
   const fold = (p: string): string => (ci ? P.normalize(p).toLowerCase() : P.normalize(p));
@@ -74,6 +81,11 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
   if (platform === "win32") {
     const A = env.APPDATA && P.isAbsolute(env.APPDATA) ? env.APPDATA : j(H, "AppData", "Roaming");
     const L = env.LOCALAPPDATA && P.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : j(H, "AppData", "Local");
+    // PowerShell reads its profiles from Documents, wherever that is: the
+    // home folder's, the one Windows names (OneDrive's, when it backs it up),
+    // and each OneDrive's own.
+    const oneDrives = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter((d): d is string => !!d && P.isAbsolute(d));
+    const docs = [...new Set([j(H, "Documents"), ...(o.documents ?? []).filter((d) => P.isAbsolute(d)), ...oneDrives.map((d) => j(d, "Documents"))])];
     return {
       hidden: [
         j(H, ".ssh"),
@@ -86,6 +98,8 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
         j(A, "Microsoft", "Credentials"),
         j(L, "Microsoft", "Credentials"),
         j(A, "Microsoft", "Protect"),
+        j(A, "Microsoft", "Vault"),
+        j(L, "Microsoft", "Vault"),
         j(L, "Google", "Chrome", "User Data"),
         j(L, "Microsoft", "Edge", "User Data"),
         j(L, "BraveSoftware"),
@@ -98,8 +112,7 @@ export function pathLists(o: PathRulesOptions): { hidden: string[]; writeDenied:
       writeDenied: [
         N,
         ...onPath,
-        j(H, "Documents", "PowerShell"),
-        j(H, "Documents", "WindowsPowerShell"),
+        ...docs.flatMap((d) => [j(d, "PowerShell"), j(d, "WindowsPowerShell")]),
         j(A, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"),
         j(H, ".gitconfig"),
         j(H, ".config", "git"),
@@ -232,14 +245,73 @@ export function pathRules(o: PathRulesOptions): PathRules {
     }
     return false;
   };
+  // A link or junction that resolves to a network share (or any `\\` path):
+  // never shown, never written, wherever it sits.
+  const remote = (p: string): boolean => platform === "win32" && (p.startsWith("\\\\") || p.startsWith("//"));
   return {
+    platform,
     caseInsensitive,
     hidden,
     writeDenied,
-    isHidden: (p) => under(p, hiddenF),
-    isWriteDenied: (p) => under(p, deniedF) || gitRuns(p),
+    isHidden: (p) => remote(p) || under(p, hiddenF),
+    isWriteDenied: (p) => remote(p) || under(p, deniedF) || gitRuns(p),
     refusePath: (input) => (platform === "win32" ? refuseWindowsPath(input) : null),
   };
+}
+
+/**
+ * A Windows path as the files API spells it: `/`-style, the drive its first
+ * component (`C:\Users\o` is `/C:/Users/o`, `D:\` is `/D:`). Anything else,
+ * and every path elsewhere, is unchanged.
+ */
+export function toApiPath(hostPath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return hostPath;
+  const m = /^([A-Za-z]):(?:\\(.*))?$/.exec(hostPath);
+  if (!m) return hostPath;
+  const rest = (m[2] ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+  return rest ? `/${m[1]}:/${rest}` : `/${m[1]}:`;
+}
+
+/**
+ * The API's `/C:/Users/o` as Windows spells it (`C:\Users\o`; `/D:` is
+ * `D:\`). Other forms keep their meaning with `\` for `/` — a `//server`
+ * path is still a UNC path, and refused as one; `~` is left to the roots.
+ */
+export function toHostPath(apiPath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return apiPath;
+  if (apiPath === "~" || apiPath.startsWith("~/")) return apiPath;
+  const m = /^\/([A-Za-z]):(?:\/(.*))?$/.exec(apiPath);
+  if (m) return `${m[1]}:\\${(m[2] ?? "").replace(/\//g, "\\")}`;
+  return apiPath.replace(/\//g, "\\");
+}
+
+/**
+ * Where Windows keeps this user's Documents (OneDrive moves it): the shell
+ * folder `Personal` from the registry, with its `%VARIABLES%` expanded.
+ * Empty when it cannot be read.
+ */
+export function windowsDocuments(env: NodeJS.ProcessEnv = process.env): string[] {
+  const out: string[] = [];
+  for (const key of ["User Shell Folders", "Shell Folders"]) {
+    try {
+      const text = execFileSync("reg.exe", ["query", `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\${key}`, "/v", "Personal"], {
+        encoding: "utf8",
+        timeout: 10_000,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const raw = /Personal\s+REG_(?:EXPAND_)?SZ\s+(.+)/.exec(text)?.[1]?.trim();
+      if (!raw) continue;
+      const expanded = raw.replace(/%([^%]+)%/g, (whole, name: string) => {
+        const hit = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
+        return hit ? (env[hit] as string) : whole;
+      });
+      if (!expanded.includes("%") && path.win32.isAbsolute(expanded)) out.push(expanded);
+    } catch {
+      // Not there, or no reg.exe: the home folder's Documents is listed anyway.
+    }
+  }
+  return [...new Set(out)];
 }
 
 /** A root's id: the same for the same folder, policy edit after policy edit (the trash names it). */
@@ -261,6 +333,7 @@ export function filesFor(policy: Policy, paths: NodePaths, rules: PathRules): Fi
     isHidden: rules.isHidden,
     isWriteDenied: rules.isWriteDenied,
     refusePath: rules.refusePath,
+    ...(rules.platform === "win32" ? { apiPaths: { toHost: (p: string) => toHostPath(p, "win32"), toApi: (p: string) => toApiPath(p, "win32") } } : {}),
   });
 }
 

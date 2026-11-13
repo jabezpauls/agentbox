@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { PolicySummary } from "@workbench/hostcore/link";
 import { CliError } from "../errors.js";
+import { refuseWindowsPath, toApiPath } from "./files.js";
 import { writePrivate } from "./paths.js";
 
 /**
@@ -42,13 +43,25 @@ function broken(problem: string): LoadedPolicy {
 }
 
 /** `~` and `~/…` are the home folder; every folder must then be absolute. */
-function expand(p: string, home: string): string {
+function expand(p: string, home: string, P: path.PlatformPath): string {
   if (p === "~") return home;
-  if (p.startsWith("~/")) return path.join(home, p.slice(2));
+  if (p.startsWith("~/") || (P === path.win32 && p.startsWith("~\\"))) return P.join(home, p.slice(2));
   return p;
 }
 
-export function parsePolicy(text: string, home: string): LoadedPolicy {
+/**
+ * On Windows a folder is a local drive's (`D:\` is a whole drive): never a
+ * network share, a device path, or one Windows would read as another.
+ */
+function windowsFolderProblem(p: string, full: string): string | null {
+  const refused = refuseWindowsPath(full);
+  if (refused) return `policy.json: "${p}": ${refused}`;
+  if (!/^[A-Za-z]:\\/.test(full)) return `policy.json: "${p}" is not a folder on a drive (like C:\\Users\\you\\code or D:\\)`;
+  return null;
+}
+
+export function parsePolicy(text: string, home: string, platform: NodeJS.Platform = process.platform): LoadedPolicy {
+  const P = platform === "win32" ? path.win32 : path.posix;
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -79,9 +92,13 @@ export function parsePolicy(text: string, home: string): LoadedPolicy {
       const e = (f ?? {}) as Record<string, unknown>;
       if (typeof e.path !== "string" || e.path === "") return broken('policy.json: every "files" entry needs a "path"');
       if (e.mode !== "read" && e.mode !== "write") return broken(`policy.json: "${e.path}" needs a "mode" of "read" or "write"`);
-      const full = expand(e.path, home);
-      if (!path.isAbsolute(full)) return broken(`policy.json: "${e.path}" is not an absolute folder (or ~/…)`);
-      policy.files.push({ path: path.normalize(full), mode: e.mode });
+      const full = expand(e.path, home, P);
+      if (!P.isAbsolute(full)) return broken(`policy.json: "${e.path}" is not an absolute folder (or ~/…)`);
+      if (platform === "win32") {
+        const problem = windowsFolderProblem(e.path, P.normalize(full));
+        if (problem) return broken(problem);
+      }
+      policy.files.push({ path: P.normalize(full), mode: e.mode });
     }
   }
   return { policy, problem: null };
@@ -98,8 +115,9 @@ export function loadPolicy(file: string, home: string): LoadedPolicy {
   return parsePolicy(text, home);
 }
 
-export function summarize(l: LoadedPolicy): PolicySummary {
-  return { ...l.policy, files: l.policy.files.map((f) => ({ ...f })), problem: l.problem };
+/** What the box is told, its folders as the files API spells them (`/C:/Users/…` from Windows). */
+export function summarize(l: LoadedPolicy, platform: NodeJS.Platform = process.platform): PolicySummary {
+  return { ...l.policy, files: l.policy.files.map((f) => ({ ...f, path: toApiPath(f.path, platform) })), problem: l.problem };
 }
 
 /**

@@ -441,6 +441,22 @@ every `Host` as the box's, as it always has, and every machines route is a
 image; `tests/proxy/topology.py` that only the gate and the proxy are told the
 hostnames.
 
+**A machine on Windows** (no admin, no WSL) has two limits of its own,
+which `agentbox node join` states before it does anything:
+
+- **A PC that other people also sign in to is not supported.** Named pipes
+  have global names and Windows' default ACL, which Node cannot change: the
+  node's control pipe gets a fresh random name at each start and every
+  request on it carries a secret from an owner-only file in the node's
+  folder, but herdr's own API pipe could be taken first by another local
+  user (the node gives it a fresh random name at each start and checks it
+  answers with the pinned version, which narrows that, not closes it).
+- **The executables are not code-signed**: `agentbox.exe`,
+  `agentbox-node.exe` and herdr's `herdr.exe`, `conpty.dll` and
+  `OpenConsole.exe`. Each is checked against a SHA-256 pinned in, or signed
+  into, the release before it is used; but Windows cannot tell that, and if
+  Smart App Control blocks them, that is not supported for now.
+
 ### SSH
 
 The `ssh` service runs OpenSSH's sshd in the sandbox as the sandbox user

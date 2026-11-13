@@ -3,7 +3,7 @@
 // reached from here, so the node's bundle carries neither.
 
 export { FilesService } from "./service.js";
-export type { FilesOptions } from "./service.js";
+export type { ApiPaths, FilesOptions } from "./service.js";
 export { FilesError, Roots, within } from "./roots.js";
 export type { RootConfig, RootMode, RootsOptions } from "./roots.js";
 export { serveFiles } from "./http.js";

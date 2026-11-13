@@ -160,6 +160,29 @@ async function search(files: FilesService, q: Map<string, string[]>): Promise<Fi
   return out;
 }
 
+/** The request fields that name a path. */
+const PATH_IN = new Set(["path", "from", "to"]);
+/** The answer fields that report one (a symlink's `target` is its text, not a path here). */
+const PATH_OUT = new Set(["path", "originalPath"]);
+
+function pathsIn(b: Record<string, unknown>, map: (p: string) => string): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...b };
+  for (const k of PATH_IN) if (typeof out[k] === "string") out[k] = map(out[k] as string);
+  if (Array.isArray(out.paths)) out.paths = (out.paths as unknown[]).map((p) => (typeof p === "string" ? map(p) : p));
+  return out;
+}
+
+function pathsOut(v: unknown, map: (p: string) => string): unknown {
+  if (Array.isArray(v)) return v.map((x) => pathsOut(x, map));
+  if (typeof v !== "object" || v === null) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (k === "missing" && Array.isArray(x)) out[k] = x.map((p) => (typeof p === "string" ? map(p) : p));
+    else out[k] = PATH_OUT.has(k) && typeof x === "string" ? map(x) : typeof x === "object" ? pathsOut(x, map) : x;
+  }
+  return out;
+}
+
 const TRASH_ITEM = /^\/api\/files\/trash\/([0-9a-f]{24})(\/restore)?$/;
 const UPLOAD = /^\/api\/files\/uploads\/([0-9a-f]{32})(\/finish)?$/;
 
@@ -174,6 +197,17 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
   const method = req.method ?? "GET";
   const q = parseQuery(url);
   const { roots, ops, trash, uploads } = files;
+  // Paths as the API spells them, in and out (a machine on Windows: `/C:/…`).
+  const codec = files.apiPaths;
+  if (codec) {
+    const p = q.get("path");
+    if (p) q.set("path", p.map((v) => codec.toHost(v)));
+  }
+  const body = async (r: IncomingMessage, max: number): Promise<Record<string, unknown>> => {
+    const b = await readBody(r, max);
+    return codec ? (pathsIn(b, codec.toHost) as Record<string, unknown>) : b;
+  };
+  const reply = (r: ServerResponse, status: number, v: unknown): void => send(r, status, codec ? pathsOut(v, codec.toApi) : v);
   try {
     const route = `${method} ${pathname}`;
     switch (route) {
@@ -181,7 +215,7 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
         const dir = await roots.target(one(q, "path") ?? "");
         const st = await fsp.stat(fsPath(dir.real));
         if (!st.isDirectory()) throw new FilesError(409, `${dir.abs} is not a directory`, "not-a-directory");
-        send(
+        reply(
           res,
           200,
           await listDirectory(roots, dir, {
@@ -195,7 +229,7 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
       }
       case "GET /api/files/stat": {
         const ref = await roots.entry(one(q, "path") ?? "");
-        send(res, 200, await describe(ref.abs, ref.fs, await roots.realRoot(ref.root)));
+        reply(res, 200, await describe(ref.abs, ref.fs, await roots.realRoot(ref.root)));
         return true;
       }
       case "GET /api/files/raw":
@@ -203,35 +237,35 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
         await raw(files, req, res, q);
         return true;
       case "GET /api/files/zip":
-        send(res, 501, { error: "folders cannot be downloaded as a zip from a machine yet; download its files one by one", code: "unsupported" });
+        reply(res, 501, { error: "folders cannot be downloaded as a zip from a machine yet; download its files one by one", code: "unsupported" });
         return true;
       case "GET /api/files/search":
-        send(res, 200, await search(files, q));
+        reply(res, 200, await search(files, q));
         return true;
       case "POST /api/files/write":
-        send(res, 200, await ops.write((await readBody(req, MAX_WRITE_JSON)) as Parameters<typeof ops.write>[0]));
+        reply(res, 200, await ops.write((await body(req, MAX_WRITE_JSON)) as Parameters<typeof ops.write>[0]));
         return true;
       case "POST /api/files/mkdir":
-        send(res, 200, await ops.mkdir(await readBody(req, MAX_JSON)));
+        reply(res, 200, await ops.mkdir(await body(req, MAX_JSON)));
         return true;
       case "POST /api/files/move":
-        send(res, 200, await ops.move((await readBody(req, MAX_JSON)) as Parameters<typeof ops.move>[0]));
+        reply(res, 200, await ops.move((await body(req, MAX_JSON)) as Parameters<typeof ops.move>[0]));
         return true;
       case "POST /api/files/copy":
-        send(res, 200, await ops.copy((await readBody(req, MAX_JSON)) as Parameters<typeof ops.copy>[0]));
+        reply(res, 200, await ops.copy((await body(req, MAX_JSON)) as Parameters<typeof ops.copy>[0]));
         return true;
       case "POST /api/files/trash":
-        send(res, 200, await trash.trash((await readBody(req, MAX_JSON)).paths));
+        reply(res, 200, await trash.trash((await body(req, MAX_JSON)).paths));
         return true;
       case "GET /api/files/trash":
-        send(res, 200, await trash.list());
+        reply(res, 200, await trash.list());
         return true;
       case "DELETE /api/files/trash":
-        send(res, 200, { removed: await trash.empty() });
+        reply(res, 200, { removed: await trash.empty() });
         return true;
       case "POST /api/files/uploads": {
-        const session = await uploads.start((await readBody(req, MAX_JSON)) as { path?: unknown; size?: unknown; overwrite?: unknown });
-        send(res, 200, { uploadId: session.id, ...session });
+        const session = await uploads.start((await body(req, MAX_JSON)) as { path?: unknown; size?: unknown; overwrite?: unknown });
+        reply(res, 200, { uploadId: session.id, ...session });
         return true;
       }
     }
@@ -239,7 +273,7 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
     if (t) {
       const id = t[1] as string;
       if (t[2] && method === "POST") {
-        send(res, 200, await trash.restore(id, (await readBody(req, MAX_JSON)).to));
+        reply(res, 200, await trash.restore(id, (await body(req, MAX_JSON)).to));
         return true;
       }
       if (!t[2] && method === "DELETE") {
@@ -253,12 +287,12 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
     if (u) {
       const id = u[1] as string;
       if (u[2] && method === "POST") {
-        send(res, 200, await uploads.finish(id));
+        reply(res, 200, await uploads.finish(id));
         return true;
       }
       if (!u[2]) {
         if (method === "GET") {
-          send(res, 200, await uploads.get(id));
+          reply(res, 200, await uploads.get(id));
           return true;
         }
         if (method === "DELETE") {
@@ -273,12 +307,12 @@ export async function serveFiles(files: FilesService, req: IncomingMessage, res:
           const done = await uploads.put(id, one(q, "offset"), req, Number.isFinite(length) ? length : null);
           // A refusal before the body was read: the connection cannot carry another request.
           if (!req.readableEnded) res.setHeader("connection", "close");
-          send(res, 200, done);
+          reply(res, 200, done);
           return true;
         }
       }
     }
-    send(res, 404, { error: "not found" });
+    reply(res, 404, { error: "not found" });
   } catch (err) {
     if (!req.readableEnded) res.setHeader("connection", "close");
     if (res.headersSent) res.destroy();

@@ -57,7 +57,7 @@ export function claudePaths(p: NodePaths, platform: NodeJS.Platform = process.pl
     versionFile: path.join(p.bin, "claude.version"),
     config: path.join(p.dir, "claude"),
     shims: path.join(p.dir, "shims"),
-    shim: path.join(p.dir, "shims", "claude"),
+    shim: path.join(p.dir, "shims", platform === "win32" ? "claude.cmd" : "claude"),
     agents: path.join(p.dir, "agents.md"),
     token: path.join(p.secrets, "claude-token"),
   };
@@ -89,7 +89,39 @@ function shQuote(s: string): string {
 /** Subcommands that take no session flags: run as they are. */
 const PLAIN = ["mcp", "config", "doctor", "update", "install", "setup-token", "migrate-installer", "plugin", "-v", "--version", "-h", "--help"];
 
-export function shimText(c: ClaudePaths): string {
+/** A path inside a batch file's double quotes: `%` is the only character there that still means something. */
+export function cmdQuote(s: string): string {
+  return `"${s.replace(/%/g, "%%")}"`;
+}
+
+/** The same shim for Windows, as `claude.cmd` (PowerShell and cmd both run it as `claude`). */
+function cmdShimText(c: ClaudePaths): string {
+  return [
+    "@echo off",
+    "rem agentbox: Claude Code on this machine. Written by the node; rewritten at",
+    "rem every start. Reads the shared sign-in (when this machine was given it) at",
+    "rem each launch, for this process only.",
+    "setlocal",
+    `set ${cmdQuote(`CLAUDE_CONFIG_DIR=${c.config}`)}`,
+    'set "DISABLE_UPDATES=1"',
+    'set "CLAUDE_CODE_OAUTH_TOKEN="',
+    `if exist ${cmdQuote(c.token)} set /p CLAUDE_CODE_OAUTH_TOKEN=<${cmdQuote(c.token)}`,
+    `if not exist ${cmdQuote(c.bin)} (`,
+    "  echo agentbox: Claude Code is not installed on this machine yet ^(it is installed by `agentbox node join`^). 1>&2",
+    "  exit /b 127",
+    ")",
+    `for %%a in (${PLAIN.join(" ")}) do if /i "%~1"=="%%a" goto plain`,
+    `${cmdQuote(c.bin)} --append-system-prompt-file ${cmdQuote(c.agents)} %*`,
+    "exit /b %ERRORLEVEL%",
+    ":plain",
+    `${cmdQuote(c.bin)} %*`,
+    "exit /b %ERRORLEVEL%",
+    "",
+  ].join("\r\n");
+}
+
+export function shimText(c: ClaudePaths, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return cmdShimText(c);
   return `#!/bin/sh
 # agentbox: Claude Code on this machine. Written by the node; rewritten at
 # every start. Reads the shared sign-in (when this machine was given it) at
@@ -113,11 +145,11 @@ exec ${shQuote(c.bin)} --append-system-prompt-file ${shQuote(c.agents)} "$@"
 }
 
 /** The shim, agents.md and the config seed, as `node run` writes them at each start. */
-export function prepareClaude(c: ClaudePaths, o: { home: string; machine: string }): void {
+export function prepareClaude(c: ClaudePaths, o: { home: string; machine: string }, platform: NodeJS.Platform = process.platform): void {
   seedClaudeConfig(c, o.home);
   writePrivate(c.agents, agentsText(o.machine));
   ensurePrivateDir(c.shims);
-  writePrivate(c.shim, shimText(c), 0o700);
+  writePrivate(c.shim, shimText(c, platform), 0o700);
 }
 
 /** The shared token the gate pushed: written, or (null) removed. */

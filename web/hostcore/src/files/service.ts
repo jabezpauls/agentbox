@@ -5,8 +5,23 @@ import { Roots, type RootsOptions } from "./roots.js";
 import { Trash } from "./trash.js";
 import { Uploads } from "./uploads.js";
 
+/**
+ * How paths are spelled in the API, when not as on this host: a machine on
+ * Windows says `/C:/Users/o/code` in the API (`/`-style, the drive its first
+ * component) for `C:\Users\o\code` on disk. The plain-http routes (http.ts)
+ * apply it to every path a request names and every path an answer reports;
+ * the box passes none.
+ */
+export interface ApiPaths {
+  /** A path as the API spelled it, as this host spells it (anything else unchanged). */
+  toHost(apiPath: string): string;
+  /** A path as this host spells it, as the API spells it. */
+  toApi(hostPath: string): string;
+}
+
 /** The roots and their predicates ({@link RootsOptions}), and a few knobs. */
 export interface FilesOptions extends RootsOptions {
+  apiPaths?: ApiPaths;
   /** Chunk cap override (tests). */
   maxChunk?: number;
   gitTtlMs?: number;
@@ -27,6 +42,7 @@ export class FilesService {
   readonly uploads: Uploads;
   readonly ops: FileOps;
   readonly fd: string | null | undefined;
+  readonly apiPaths: ApiPaths | undefined;
   /** Sorted directory names, shared by the listing and WebDAV. */
   readonly listings = new ListingCache();
 
@@ -43,6 +59,7 @@ export class FilesService {
     this.uploads = new Uploads(this.roots, this.trash, opts.maxChunk === undefined ? {} : { maxChunk: opts.maxChunk });
     this.ops = new FileOps(this.roots, this.trash);
     this.fd = opts.fd;
+    this.apiPaths = opts.apiPaths;
   }
 
   /** Sweep abandoned uploads now and hourly; returns a stop. */

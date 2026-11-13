@@ -176,7 +176,7 @@ class PaneStream {
         "--rows",
         String(this.rows),
       ],
-      { env: this.env, stdio: ["pipe", "pipe", "pipe"] },
+      { env: this.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     if (child.stdout) {
       readline.createInterface({ input: child.stdout }).on("line", (line) => this.onLine(line));

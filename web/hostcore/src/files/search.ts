@@ -86,7 +86,7 @@ function runFd(bin: string, dir: string, query: string, max: number, timeoutMs: 
   if (query.includes("/")) args.push("--full-path");
   args.push("--", query, dir);
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     const chunks: Buffer[] = [];
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
     child.stdout.on("data", (c: Buffer) => chunks.push(c));

@@ -5,7 +5,7 @@ import { describe } from "./entries.js";
 import { fsPath } from "./names.js";
 import { fsError, FilesError, within, type NewRef, type Roots } from "./roots.js";
 import type { Trash } from "./trash.js";
-import { copyTree, moveTree, noClobberRename, removeTree, scratchName } from "./tree.js";
+import { copyTree, moveTree, noClobberRename, removeTree, scratchFor, scratchName } from "./tree.js";
 
 /** The largest text `write` accepts: it is for small files typed in the app. */
 export const MAX_WRITE = 1024 * 1024;
@@ -46,7 +46,7 @@ export class FileOps {
       // the file keeps its mode (a script stays executable).
       const dir = this.scratch(dest);
       await fsp.mkdir(dir, { recursive: true });
-      const tmp = scratchName(dir, "write");
+      const tmp = scratchName(await scratchFor(dir, dest.fs), "write");
       await fsp.writeFile(tmp, data);
       if (existing?.isFile()) await fsp.chmod(tmp, existing.mode & 0o7777);
       try {
@@ -116,7 +116,7 @@ export class FileOps {
     await this.roots.ensureParent(dest);
     const dir = this.scratch(dest);
     await fsp.mkdir(dir, { recursive: true });
-    const tmp = scratchName(dir, "copy");
+    const tmp = scratchName(await scratchFor(dir, dest.fs), "copy");
     try {
       await copyTree(src.fs, tmp);
       await noClobberRename(tmp, dest.fs);

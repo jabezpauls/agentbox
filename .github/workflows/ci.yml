@@ -262,6 +262,34 @@ jobs:
           docker run --rm -v "$PWD/web/cli/dist/sea:/sea:ro" debian:bookworm-slim \
             sh -c '! command -v node && /sea/agentbox-linux-x64 --help' | grep -q 'Usage: agentbox <command>'
 
+  windows:
+    # A machine on Windows: the standalone agentbox.exe and agentbox-node.exe,
+    # built as the release builds them, against a protocol stub of the gate's
+    # link (the gate does not run on Windows): join with the sign-in entry,
+    # herdr on its named pipe, a PowerShell terminal, Files across drives and
+    # its refusals, and leave removing the entry. Never the real Claude Code.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The SEA blob is made by the Node it runs in: the one the executables carry.
+          node-version: 24.22.3
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Build the win-x64 executables
+        working-directory: web
+        env:
+          AGENTBOX_VERSION: ci-1
+        run: |
+          npm run build -w hostcore
+          npm run build:sea -w cli -- --targets win-x64
+      - name: The node on Windows, end to end
+        working-directory: web/cli
+        run: node e2e/windows.mjs
+
   fidelity:
     # Real apps under /a/<id>/ in all three engines: a create-vite React app
     # started by agentbox-preview and plainly, browser storage, an app's own

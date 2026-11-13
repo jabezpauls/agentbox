@@ -42,6 +42,7 @@ export function runGit(
       // same repository would otherwise see "index.lock exists" at random.
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C", GIT_TERMINAL_PROMPT: "0" },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     const chunks: Buffer[] = [];
     let size = 0;

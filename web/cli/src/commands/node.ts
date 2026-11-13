@@ -20,6 +20,7 @@ import { Prompter } from "../node/prompt.js";
 import { loadPolicy, setPaused, summarize, type FileMode } from "../node/policy.js";
 import { runNode } from "../node/run.js";
 import { execStart, installService, removeService, serviceInstalled, UNIT_NAME } from "../node/service-linux.js";
+import * as win from "../node/service-windows.js";
 import { freeBytes, gatherSpecs } from "../node/specs.js";
 import { sleep } from "../device.js";
 import { command, type Command } from "./types.js";
@@ -30,10 +31,12 @@ import { command, type Command } from "./types.js";
  */
 
 function paths(ctx: Context): NodePaths {
-  return nodePaths(nodeDir(ctx.env, ctx.env.HOME || os.homedir(), ctx.platform));
+  return nodePaths(nodeDir(ctx.env, home(ctx), ctx.platform), ctx.platform);
 }
 
 function home(ctx: Context): string {
+  // Windows: the profile folder (a HOME from Git Bash may be spelled otherwise).
+  if (ctx.platform === "win32") return ctx.env.USERPROFILE || os.homedir();
   return ctx.env.HOME || os.homedir();
 }
 
@@ -44,7 +47,7 @@ export function parseFolders(raw: string, homeDir: string): Array<{ path: string
     const m = /^(.*?)(?::(read|write))?$/.exec(part) as RegExpExecArray;
     let p = m[1] as string;
     if (p === "~") p = homeDir;
-    else if (p.startsWith("~/")) p = path.join(homeDir, p.slice(2));
+    else if (p.startsWith("~/") || (path.sep === "\\" && p.startsWith("~\\"))) p = path.join(homeDir, p.slice(2));
     p = path.resolve(p);
     if (p === path.resolve(homeDir)) throw new UsageError("not the whole home folder: name the project folders the box may use");
     out.push({ path: p, mode: (m[2] as FileMode | undefined) ?? "write" });
@@ -68,7 +71,7 @@ const join = command({
   details:
     "Installs what the node runs (verified), asks for the machines passphrase here, shows a code to type\n" +
     "on the box's machines Admin page, writes policy.json if there is none, and starts the node as a\n" +
-    "systemd user service.",
+    "systemd user service (on Windows, a sign-in entry for your user; no admin).",
   options: [
     { name: "name", type: "string", value: "name", description: "what the box calls this machine (default: the hostname)" },
     { name: "folder", type: "string", value: "dirs", description: "folders the box may use, comma-separated, each dir or dir:read (asked when absent)" },
@@ -80,7 +83,19 @@ const join = command({
     const np = paths(ctx);
     const prompt = new Prompter(ctx.io.stdin, ctx.io.stderr);
     const folderArg = str(p.options, "folder");
-    const noService = bool(p.options, "no-service") || ctx.platform !== "linux";
+    const noService = bool(p.options, "no-service") || (ctx.platform !== "linux" && ctx.platform !== "win32");
+    const registerService = async (): Promise<void> => {
+      if (ctx.platform === "win32") {
+        const g = win.guiExecutable();
+        if ("problem" in g) throw new Error(g.problem);
+        await win.installService({ gui: g.gui });
+        ctx.err(`Registered the sign-in entry ${win.RUN_KEY}\\${win.RUN_VALUE}; the node runs while you are signed in (log: ${win.logFile(np)}).\n`);
+        return;
+      }
+      const r = await installService({ command: execStart(), env: ctx.env });
+      ctx.err(`Registered ${UNIT_NAME} (${r.unitFile}).\n`);
+      if (r.note) ctx.err(`${r.note}\n`);
+    };
     try {
       await joinMachine(
         { box, name: str(p.options, "name") ?? os.hostname(), folders: folderArg !== undefined ? parseFolders(folderArg, home(ctx)) : null },
@@ -109,9 +124,7 @@ const join = command({
             ? null
             : async () => {
                 try {
-                  const r = await installService({ command: execStart(), env: ctx.env });
-                  ctx.err(`Registered ${UNIT_NAME} (${r.unitFile}).\n`);
-                  if (r.note) ctx.err(`${r.note}\n`);
+                  await registerService();
                 } catch (err) {
                   throw new CliError(`${(err as Error).message}\nThe machine is joined; start it with \`agentbox node run\`.`);
                 }
@@ -169,7 +182,7 @@ const status = command({
       paused: policy.policy.paused,
       policyProblem: policy.problem,
       folder: np.dir,
-      service: ctx.platform === "linux" ? serviceInstalled(ctx.env) : false,
+      service: ctx.platform === "linux" ? serviceInstalled(ctx.env) : ctx.platform === "win32" ? (await win.readRunEntry()) !== null : false,
       herdrSocket: typeof live?.herdrSocket === "string" ? live.herdrSocket : null,
       presenceLocked: typeof live?.presenceLocked === "number" ? live.presenceLocked : null,
     };
@@ -181,7 +194,8 @@ const status = command({
     ctx.out(`${safeText(out.name ?? "")} (machine ${safeText(out.machineId ?? "")}) at ${safeText(out.box ?? "")}\n`);
     ctx.out(`state: ${safeText(String(out.state))}${out.paused ? " (paused: `agentbox node resume`)" : ""}\n`);
     if (out.policyProblem) ctx.out(`policy: ${safeText(out.policyProblem)} — everything is denied\n`);
-    ctx.out(`folder: ${np.dir}\nservice: ${out.service ? UNIT_NAME : "none"}\n`);
+    const serviceName = ctx.platform === "win32" ? `${win.RUN_KEY}\\${win.RUN_VALUE}` : UNIT_NAME;
+    ctx.out(`folder: ${np.dir}\nservice: ${out.service ? serviceName : "none"}\n`);
     if (out.herdrSocket) ctx.out(`herdr: HERDR_SOCKET_PATH=${out.herdrSocket} herdr   (the agents the box sees)\n`);
     if (out.presenceLocked) ctx.out(`presence: locked until ${new Date(out.presenceLocked).toISOString()} after wrong passphrases\n`);
   },
@@ -230,6 +244,7 @@ const leave = command({
       link.stop();
     }
     if (ctx.platform === "linux") await removeService({ env: ctx.env });
+    if (ctx.platform === "win32") await win.removeService({ paths: np });
     fs.rmSync(np.secrets, { recursive: true, force: true });
     fs.rmSync(np.credentials, { force: true });
     fs.rmSync(np.controlSecret, { force: true });
@@ -240,14 +255,15 @@ const leave = command({
 
 const logs = command({
   path: ["node", "logs"],
-  summary: "the node's log (from the journal)",
+  summary: "the node's log (from the journal; on Windows, state\\node.log)",
   usage: "",
   ownsInterrupt: true,
   options: [{ name: "follow", short: "f", type: "boolean", description: "keep printing new lines" }],
   async run(ctx, p) {
+    if (ctx.platform === "win32") return tailLog(ctx, win.logFile(paths(ctx)), bool(p.options, "follow"));
     const args = ["--user", "-u", UNIT_NAME, "-n", "200", "--no-pager", ...(bool(p.options, "follow") ? ["-f"] : [])];
     return new Promise<number>((resolve) => {
-      const child = spawn("journalctl", args, { stdio: "inherit" });
+      const child = spawn("journalctl", args, { stdio: "inherit", windowsHide: true });
       child.on("error", () => {
         ctx.err("journalctl is not available here; run `agentbox node run` in a terminal to see the log.\n");
         resolve(EXIT.FAILURE);
@@ -255,6 +271,56 @@ const logs = command({
       child.on("exit", (code) => resolve(code ?? EXIT.OK));
       ctx.abort.signal.addEventListener("abort", () => child.kill("SIGINT"), { once: true });
     });
+  },
+});
+
+/** The last 200 lines of the log, and with `follow` what is added (from the start of a rotated one). */
+async function tailLog(ctx: Context, file: string, follow: boolean): Promise<number> {
+  let at = 0;
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    at = Buffer.byteLength(text);
+    ctx.out(`${text.split("\n").slice(-201).join("\n")}`);
+  } catch {
+    if (!follow) {
+      ctx.err(`There is no log yet (${file}); the node writes it when it runs as a service.\n`);
+      return EXIT.NOT_FOUND;
+    }
+  }
+  while (follow && !ctx.abort.signal.aborted) {
+    await sleep(1_000, ctx.abort.signal).catch(() => {});
+    let size = 0;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      continue;
+    }
+    if (size < at) at = 0;
+    if (size === at) continue;
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(size - at);
+      fs.readSync(fd, buf, 0, buf.length, at);
+      ctx.out(buf.toString("utf8"));
+      at = size;
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  return EXIT.OK;
+}
+
+/**
+ * `agentbox node supervise`, which the Windows sign-in entry runs (as the
+ * windowless agentbox-node.exe): keeps `agentbox.exe node run` running.
+ */
+const supervise = command({
+  path: ["node", "supervise"],
+  summary: "keep the node running, with its log in state\\node.log (Windows' sign-in entry runs this)",
+  usage: "",
+  ownsInterrupt: true,
+  async run(ctx) {
+    return win.supervise({ paths: paths(ctx), command: win.runCommandLine(), signal: ctx.abort.signal });
   },
 });
 
@@ -336,4 +402,4 @@ const preview = command({
   },
 });
 
-export const NODE_COMMANDS: Command[] = [join, run, status, pause, resume, leave, logs, passphrase, preview];
+export const NODE_COMMANDS: Command[] = [join, run, supervise, status, pause, resume, leave, logs, passphrase, preview];

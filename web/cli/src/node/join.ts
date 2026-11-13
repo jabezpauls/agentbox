@@ -25,7 +25,15 @@ import { writeInitialPolicy, type FileMode } from "./policy.js";
 
 /** herdr and Claude Code, with room to spare. */
 export const MIN_FREE_BYTES = 512 * 1024 * 1024;
-export const SUPPORTED_PLATFORMS = new Set(["linux"]);
+export const SUPPORTED_PLATFORMS = new Set(["linux", "win32"]);
+
+/** What `join` says on Windows before anything else (the design, "Windows"). */
+export const WINDOWS_NOTES =
+  "On Windows:\n" +
+  "  - A PC that other people also sign in to is not supported: another local user could take the name\n" +
+  "    of the node's herdr pipe first. Join only a PC that is yours alone.\n" +
+  "  - agentbox.exe, agentbox-node.exe and herdr are not code-signed. If Smart App Control blocks them,\n" +
+  "    that is not supported for now.\n\n";
 
 export interface JoinOptions {
   box: string;
@@ -76,7 +84,8 @@ export async function joinMachine(o: JoinOptions, s: JoinSteps): Promise<Credent
   const rejoin = existing && existing.box === o.box && existing.revokedAt === undefined ? existing : null;
 
   // 1. What can be checked here.
-  if (!SUPPORTED_PLATFORMS.has(s.platform)) throw new CliError(`machines on ${s.platform} are not supported yet (Linux only, for now)`);
+  if (!SUPPORTED_PLATFORMS.has(s.platform)) throw new CliError(`machines on ${s.platform} are not supported yet (Linux and Windows, for now)`);
+  if (s.platform === "win32") s.err(WINDOWS_NOTES);
   try {
     ensurePrivateDir(s.paths.dir);
     fs.accessSync(s.paths.dir, fs.constants.W_OK);

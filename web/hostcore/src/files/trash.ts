@@ -149,8 +149,17 @@ export class Trash {
       if (err instanceof FilesError) throw err;
     }
     try {
-      if (dest.root.id === root.id) await noClobberRename(path.join(home, "item"), dest.fs);
-      else await moveTree(path.join(home, "item"), dest.fs, path.join(this.roots.stateDir(dest.root), "uploads"));
+      const item = path.join(home, "item");
+      const scratch = path.join(this.roots.stateDir(dest.root), "uploads");
+      if (dest.root.id !== root.id) await moveTree(item, dest.fs, scratch);
+      else {
+        // Its own root's trash, but maybe on another volume (a machine's
+        // trash is in the node's folder): then a copy, as between roots.
+        await noClobberRename(item, dest.fs).catch((err: unknown) => {
+          if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+          return moveTree(item, dest.fs, scratch);
+        });
+      }
     } catch (err) {
       throw fsError(err, dest.abs);
     }
