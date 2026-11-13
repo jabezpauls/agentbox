@@ -24,7 +24,8 @@
 	request_header -X-Agentbox-Client-IP
 
 	# The original Host passes through unchanged — so the proxy in front must
-	# forward it too — and Caddy sets X-Forwarded-For, -Proto and -Host itself.
+	# forward it too, for the machines hostnames as well when machines are on
+	# (the gate tells the three apart by Host) — and Caddy sets X-Forwarded-For, -Proto and -Host itself.
 	# WebSocket upgrades and streamed responses pass through as they are.
 	reverse_proxy gate:7900 {
 		header_up X-Agentbox-Client-IP {client_ip}

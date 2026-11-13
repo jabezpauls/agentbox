@@ -4,6 +4,9 @@ import type { AppRegistry } from "./apps.js";
 import type { Auth, Subject } from "./auth.js";
 import type { Config } from "./config.js";
 import type { DeviceFlow } from "./device.js";
+import type { HostKind, HostNames } from "./hosts.js";
+import type { Handoffs } from "./machines/handoff.js";
+import type { MachinesSessions } from "./machines/session.js";
 import type { PasswordChecker } from "./password.js";
 import type { LoginLimiter, WindowLimiter } from "./ratelimit.js";
 import type { Store } from "./store.js";
@@ -20,6 +23,8 @@ export interface RequestInfo {
   /** The scheme the browser used, when the proxy says; `http` otherwise. */
   proto: string;
   host: string;
+  /** The origin the request is for (hosts.ts); always `main` while machines are off. */
+  hostKind: HostKind;
 }
 
 const infos = new WeakMap<IncomingMessage, RequestInfo>();
@@ -61,6 +66,12 @@ export interface GateCore {
   authenticate(req: IncomingMessage): Subject | null;
   /** The app registry. */
   apps: AppRegistry;
+  /** The three hostnames, or `null` while machines are off. */
+  hosts: HostNames | null;
+  /** Machines passphrase attempts: the sign-in limits, with a budget of their own. */
+  machinesLimiter: LoginLimiter;
+  machinesSessions: MachinesSessions;
+  handoffs: Handoffs;
 }
 
 /** Compare two strings in time that does not depend on where they differ. */
@@ -70,12 +81,16 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
+/** The main origin's start of the machines sign-in, the one gate page `/login` may return to. */
+export const HANDOFF_PATH = "/_gate/machines/handoff";
+
 /**
  * Where to send someone after signing in. Only a path on this box, and never
- * back into the gate's own pages: anything else — another host, a
+ * back into the gate's own pages — but for the machines handoff, exactly,
+ * when machines are on (`handoff`): anything else — another host, a
  * protocol-relative `//evil`, a path the guard would refuse — becomes `/`.
  */
-export function safeNext(raw: unknown): string {
+export function safeNext(raw: unknown, opts: { handoff?: boolean } = {}): string {
   if (typeof raw !== "string" || raw === "" || raw.length > 2048) return "/";
   // Printable ASCII only: a browser percent-encodes everything else, and this
   // ends up in a Location header, where a raw control or non-ASCII character
@@ -86,6 +101,7 @@ export function safeNext(raw: unknown): string {
   // The strict form, without the WebDAV mount's exemption: that is for
   // filenames on their way to the bridge, not for a place to be sent.
   if (!isStrictPath(path)) return "/";
+  if (opts.handoff && raw === HANDOFF_PATH) return raw;
   if (underSegment(path, "/login") || underSegment(path, "/_gate")) return "/";
   return raw;
 }

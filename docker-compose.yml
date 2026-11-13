@@ -261,10 +261,16 @@ services:
       AGENTBOX_SHARING: ${AGENTBOX_SHARING:-on}
       # Ports never served as apps, beyond agentbox's own.
       AGENTBOX_INFRA_PORTS: ${AGENTBOX_INFRA_PORTS:-}
+      # Machines: both hostnames, or neither and the feature is off
+      # (./scripts/agentbox machines enable|disable).
+      AGENTBOX_MACHINES_HOST: ${AGENTBOX_MACHINES_HOST:-}
+      AGENTBOX_MACHINE_APPS_HOST: ${AGENTBOX_MACHINE_APPS_HOST:-}
     volumes:
       - gate:/data
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7900/login').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      # As the box's own host: with machines on, the gate answers 421 to a Host
+      # that is not one of its three.
+      test: ["CMD", "node", "-e", "require('http').get({ host: '127.0.0.1', port: 7900, path: '/login', headers: { host: (process.env.AGENTBOX_PUBLIC_URL || 'localhost').split('//').pop().split('/')[0] } }, (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -305,6 +311,10 @@ services:
       # AGENTBOX_CLIENT_IP_HEADER, an older key that meant something else and
       # may still be in .env.
       AGENTBOX_REAL_IP_HEADER: ${AGENTBOX_REAL_IP_HEADER:-}
+      # Machines' two hostnames, served beside the domain when set (empty, they
+      # add nothing to the Caddyfile's site address).
+      AGENTBOX_MACHINES_HOST: ${AGENTBOX_MACHINES_HOST:-}
+      AGENTBOX_MACHINE_APPS_HOST: ${AGENTBOX_MACHINE_APPS_HOST:-}
     volumes:
       - ./proxy/trust:/etc/caddy/trust:ro
       - caddy_data:/data

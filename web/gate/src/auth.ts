@@ -107,6 +107,8 @@ export class Auth {
 
   isLive(s: SessionRecord): boolean {
     const t = this.now();
+    // The box's audience only: anything else in this list is not a session here.
+    if (s.aud !== undefined && s.aud !== "main") return false;
     if (t >= s.expiresAt) return false;
     return s.remember || t - s.lastSeenAt < IDLE_MS;
   }
@@ -160,6 +162,7 @@ export class Auth {
     const t = this.now();
     const secret = newSecret();
     const session: SessionRecord = {
+      aud: "main",
       id: newId(),
       hash: digest(secret),
       createdAt: t,
@@ -198,6 +201,10 @@ export class Auth {
   async endSessions(keep?: string): Promise<number> {
     const before = this.store.data.sessions.length;
     this.store.data.sessions = this.store.data.sessions.filter((s) => s.id === keep);
+    // Whatever ends every other session — a password or two-factor change,
+    // revoke-all — ends every machines session too: each was opened with a
+    // main session, and none is ever the one kept.
+    this.store.data.machines.sessions = [];
     // Everything but `keep`, not just what was still listed: a session that
     // went idle and was pruned may still have a terminal open.
     this.announce({ kind: "session", allBut: keep ?? null });

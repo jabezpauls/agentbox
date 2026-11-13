@@ -170,6 +170,7 @@ client() {
         "$NODE_IMAGE" node /harness.mjs signins "$@"
 }
 
+# start_gate [docker create args...] — extra environment, say.
 start_gate() {
     docker rm -f -v "$GATE" >/dev/null 2>&1 || true
     # As compose runs it: read-only, no capabilities, on `front` (to hear the
@@ -177,15 +178,20 @@ start_gate() {
     docker create --name "$GATE" --network "$NET_FRONT" --network-alias gate \
         --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
         -e AGENTBOX_USER="$USER_NAME" -e AGENTBOX_PASSWORD_HASH="$HASH" -e GATE_TRUSTED_PROXIES=proxy \
-        "$GATE_IMAGE" >/dev/null
+        "$@" "$GATE_IMAGE" >/dev/null
     # Compose names a service on every network it joins; so does this.
     docker network connect --alias gate "$NET_INTERNAL" "$GATE"
     docker start "$GATE" >/dev/null
 }
 
+# wait_for <url>: until it answers 200, as the Host in WAIT_HOST when that is
+# set (with machines on, the gate answers 421 to any other).
+WAIT_HOST=""
 wait_for() {
+    local as=()
+    [ -n "$WAIT_HOST" ] && as=(-H "Host: $WAIT_HOST")
     for _ in $(seq 1 100); do
-        [ "$(curl -s -o /dev/null -w '%{http_code}' "$1" || true)" = 200 ] && return 0
+        [ "$(curl -s -o /dev/null -w '%{http_code}' "${as[@]}" "$1" || true)" = 200 ] && return 0
         sleep 0.2
     done
     return 1
@@ -449,6 +455,17 @@ for CADDYFILE in $CADDYFILES; do
         { [ "$STATUS" = 101 ] && [[ "$ECHOED" != *'"authorization"'* ]]; } || fail "device token WebSocket: $STATUS $ECHOED"
     else
         fail "device login issued no token: $BODY"
+    fi
+
+    # --- machines, off: none of their routes exists, and their hostname is just
+    # another name for the box, as every Host was before ---------------------------
+    req GET /_gate/machines/handoff -H "Cookie: $SESSION" -H 'Accept: application/json'
+    m_off="$STATUS"
+    req GET /signin -H 'Host: machines.example.test' -H 'Accept: application/json'
+    if [ "$m_off" = 404 ] && [ "$STATUS" = 401 ] && [ -z "$(header Cross-Origin-Resource-Policy)" ]; then
+        pass "machines off: the handoff is a 404 and a machines Host is the box's, as before"
+    else
+        fail "machines off: handoff $m_off, machines Host $STATUS"
     fi
 
     # --- the WebDAV mount and the editor channel ---------------------------------
@@ -758,6 +775,143 @@ for CADDYFILE in $CADDYFILES; do
     fi
 done
 
+# --- machines on: the machines origin's rules, through the proxy -------------
+# behind-proxy's Caddy forwards every Host, so each of the three can be asked
+# for by name; the gate tells them apart.
+printf '\n== machines on (proxy/Caddyfile.behind-proxy)\n'
+MAIN_H="box.example.test"
+MACH_H="machines.example.test"
+APPS_H="mapps.example.test"
+M_ORIGIN="https://$MACH_H"
+B_ORIGIN="https://$MAIN_H"
+MPASS="bypass machines passphrase"
+start_gate -e AGENTBOX_PUBLIC_URL="$B_ORIGIN" -e AGENTBOX_MACHINES_HOST="$MACH_H" -e AGENTBOX_MACHINE_APPS_HOST="$APPS_H"
+WAIT_HOST="$MAIN_H"
+if ! start_caddy "$ROOT/proxy/Caddyfile.behind-proxy" proxied-off; then
+    fail "caddy or the gate did not start with machines on"; docker logs "$GATE" >&2
+else
+    # The passphrase on stdin, as `agentbox machines enable` hands it over.
+    printf '%s\n' "$MPASS" | docker exec -i "$GATE" agentbox-gate machines-passphrase >/dev/null \
+        || fail "the gate's CLI did not take the machines passphrase"
+
+    req GET /login -H "Host: evil.example.test"
+    s1="$STATUS"
+    req GET /login -H "Host: 127.0.0.1:$PORT"
+    if [ "$s1" = 421 ] && [ "$STATUS" = 421 ]; then pass "a Host that is none of the three is misdirected (421)"; else fail "other hosts: $s1 $STATUS"; fi
+
+    req POST /_gate/login -H "Host: $MAIN_H" -H "Origin: $B_ORIGIN" -H 'Content-Type: application/json' \
+        --data "{\"username\":\"$USER_NAME\",\"password\":\"$PASSWORD\"}"
+    MSESSION="$(grep -i '^set-cookie: __Host-agentbox=' "$HEADERS" | head -n1 | sed 's/^[^:]*: //; s/;.*//' | tr -d '\r')"
+    { [ "$STATUS" = 200 ] && [ -n "$MSESSION" ]; } || fail "main sign-in with machines on: $STATUS $BODY"
+    before="$(hits)"
+
+    req GET /_gate/machines/handoff -H "Host: $MAIN_H" -H "Cookie: $MSESSION"
+    NONCE="$(header Location | sed -n "s|^$M_ORIGIN/signin?n=\([A-Za-z0-9_-]\{43\}\)\$|\1|p")"
+    if [ "$STATUS" = 302 ] && [ -n "$NONCE" ] && [ "$(header Referrer-Policy)" = no-referrer ]; then
+        pass "the box's handoff sends a signed-in tab to the machines sign-in with a nonce"
+    else
+        fail "handoff: $STATUS $(header Location)"
+    fi
+
+    # Every response on the machines origin: unframable, same-origin only, no CORS.
+    strict() {
+        if [ "$(header Cross-Origin-Resource-Policy)" = same-origin ] && [ "$(header Cross-Origin-Opener-Policy)" = same-origin ] \
+            && [ "$(header X-Content-Type-Options)" = nosniff ] && [[ "$(header Content-Security-Policy)" == *"frame-ancestors 'none'"* ]] \
+            && [ "$(header Origin-Agent-Cluster)" = '?1' ] && [ "$(header Referrer-Policy)" = no-referrer ] \
+            && ! grep -qi '^access-control-' "$HEADERS"; then
+            :
+        else
+            fail "$1 lacks the machines origin's headers: $(tr -d '\r' <"$HEADERS" | paste -sd'|' -)"
+        fi
+    }
+    req GET "/signin?n=$NONCE" -H "Host: $MACH_H"
+    { [ "$STATUS" = 200 ] && [[ "$BODY" == *"$NONCE"* ]]; } || fail "the sign-in page: $STATUS"
+    strict "the sign-in page"
+    req GET /nothing-here -H "Host: $MACH_H"
+    strict "a 404"
+    req GET / -H "Host: $MACH_H" -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate'
+    { [ "$STATUS" = 302 ] && [ "$(header Location)" = "$B_ORIGIN/_gate/machines/handoff" ]; } || fail "no machines session: $STATUS $(header Location)"
+    strict "a redirect"
+
+    # Writes from the box's origin (the same site), another site, or none: refused.
+    ok=1
+    for o in "Origin: $B_ORIGIN" "Origin: https://evil.example" "Origin: null" "X-No-Origin: 1"; do
+        req POST /signin -H "Host: $MACH_H" -H "$o" -H 'Sec-Fetch-Site: same-site' -H 'Content-Type: application/json' \
+            --data "{\"nonce\":\"$NONCE\",\"passphrase\":\"$MPASS\"}"
+        [ "$STATUS" = 403 ] || { fail "a write with '$o' -> $STATUS"; ok=0; }
+        strict "a refused write"
+    done
+    req OPTIONS /signin -H "Host: $MACH_H" -H "Origin: $B_ORIGIN" -H 'Access-Control-Request-Method: POST'
+    [ "$STATUS" = 403 ] || { fail "a preflight -> $STATUS"; ok=0; }
+    strict "a refused preflight"
+    [ "$ok" = 1 ] && pass "cross-origin and same-site writes are refused, each with the strict headers"
+
+    req POST /signin -H "Host: $MACH_H" -H "Origin: $M_ORIGIN" -H 'Sec-Fetch-Site: same-origin' -H 'Content-Type: application/json' \
+        --data "{\"nonce\":\"$NONCE\",\"passphrase\":\"$MPASS\"}"
+    MSET="$(grep -i '^set-cookie: __Host-agentbox-machines=' "$HEADERS" | head -n1 | tr -d '\r')"
+    MCOOKIE="$(printf '%s' "$MSET" | sed 's/^[^:]*: //; s/;.*//')"
+    if [ "$STATUS" = 200 ] && [ -n "$MCOOKIE" ] && [[ "$MSET" == *SameSite=Strict* ]] && [[ "$MSET" == *HttpOnly* ]] && [[ "$MSET" == *Secure* ]]; then
+        pass "the passphrase, with the nonce, opens a machines session (__Host-, Strict)"
+    else
+        fail "machines sign-in: $STATUS $BODY"
+    fi
+    req GET / -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"
+    { [ "$STATUS" = 200 ] && [[ "$BODY" == *machines-root* ]]; } || fail "the Machines page: $STATUS"
+    strict "the Machines page"
+
+    # Upgrades: refused from anywhere but the machines origin, and none served yet.
+    ws / -H "Host: $MACH_H" -H "Origin: $B_ORIGIN" -H "Cookie: $MCOOKIE"; u1="$STATUS"
+    strict "a refused upgrade"
+    ws / -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"; u2="$STATUS"
+    ws / -H "Host: $MACH_H" -H "Origin: $M_ORIGIN" -H "Cookie: $MCOOKIE"; u3="$STATUS"
+    if [ "$u1" = 403 ] && [ "$u2" = 403 ] && [ "$u3" = 404 ]; then
+        pass "WebSocket upgrades from the box's origin, or with no origin, are refused"
+    else
+        fail "machines upgrades: $u1 $u2 $u3"
+    fi
+
+    # The box's credentials, or a node's, open nothing there.
+    req POST /_gate/device/start -H "Host: $MAIN_H" -H 'Content-Type: application/json' --data '{"name":"bypass-machines"}'
+    DEVICE="$(printf '%s' "$BODY" | sed -n 's/.*"deviceCode":"\([^"]*\)".*/\1/p')"
+    USERCODE="$(printf '%s' "$BODY" | sed -n 's/.*"userCode":"\([^"]*\)".*/\1/p')"
+    req POST /_gate/device/approve -H "Host: $MAIN_H" -H "Cookie: $MSESSION" -H "Origin: $B_ORIGIN" -H 'Content-Type: application/json' \
+        --data "{\"userCode\":\"$USERCODE\",\"password\":\"$PASSWORD\"}"
+    req POST /_gate/device/poll -H "Host: $MAIN_H" -H 'Content-Type: application/json' --data "{\"deviceCode\":\"$DEVICE\"}"
+    PTOKEN="$(printf '%s' "$BODY" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    [ -n "$PTOKEN" ] || fail "no person token to try: $BODY"
+    ok=1
+    for c in "Cookie: $MSESSION" "Authorization: Bearer $PTOKEN" "Authorization: Bearer abn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "Cookie: __Host-agentbox-machines=${MSESSION#*=}"; do
+        req GET /_gate/machines/session -H "Host: $MACH_H" -H "$c"
+        [ "$STATUS" = 401 ] || { fail "'${c%%:*}' on the machines origin -> $STATUS"; ok=0; }
+    done
+    [ "$ok" = 1 ] && pass "a main session, a person token and a node token are refused on the machines origin"
+
+    # The machines cookie never reaches the sandbox, and the machines origin forwards nothing.
+    req GET /api/health -H "Host: $MAIN_H" -H "Cookie: $MSESSION; $MCOOKIE; theme=dark"
+    if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"cookie":"theme=dark"'* ]] && [[ "$BODY" != *agentbox-machines* ]]; then
+        pass "the machines cookie is never forwarded to the sandbox"
+    else
+        fail "cookies forwarded: $STATUS $BODY"
+    fi
+    req GET /api/health -H "Host: $MACH_H" -H "Cookie: $MCOOKIE"
+    [ "$STATUS" = 404 ] || fail "the machines origin answered a sandbox path: $STATUS"
+    [ "$(( $(hits) - before ))" = 1 ] || fail "the sandbox saw $(( $(hits) - before )) requests; only the box's own /api/health should have reached it"
+
+    # Straight from the sandbox to the gate's listener: a machines Host is 421.
+    direct="$(docker exec "$ECHO" node -e "
+        const http = require('http');
+        const one = (host) => new Promise((r) => http.get({ host: 'gate', port: 7900, path: '/signin', headers: { host, origin: 'https://' + host } }, (res) => { res.resume(); r(res.statusCode); }).on('error', () => r('unreachable')));
+        Promise.all([one('$MACH_H'), one('$APPS_H')]).then((s) => console.log(s.join(' ')));
+    ")"
+    if [ "$direct" = "421 421" ]; then
+        pass "the sandbox reaching the gate directly with a machines Host gets 421"
+    else
+        fail "sandbox-direct with a machines Host: $direct"
+    fi
+fi
+WAIT_HOST=""
+
 if [ "$RUN_TRAEFIK" = 1 ]; then
     printf '\n== traefik mode, behind Cloudflare (a real Traefik, a stand-in Cloudflare edge)\n'
     start_gate
@@ -876,6 +1030,9 @@ EOF
     while IFS= read -r l; do
         l="${l//\$\{AGENTBOX_DOMAIN\}/$DOMAIN_T}"
         l="${l//\$\{AGENTBOX_EDGE_NETWORK:-edge-prod\}/$NET_EDGE}"
+        # Machines off, as Compose renders it: the rule's machines hostnames,
+        # the rest of the line, interpolate to nothing.
+        l="${l%%\$\{AGENTBOX_MACHINES_HOST:+*}"
         labels+=(--label "$l")
     done < <(sed -n 's/^ *- \(traefik\..*\)$/\1/p' "$ROOT/docker-compose.traefik-passthrough.yml")
     [ "${#labels[@]}" -gt 8 ] || fail "no traefik labels found in docker-compose.traefik-passthrough.yml"

@@ -8,7 +8,14 @@ export const SESSION_COOKIE = "__Host-agentbox";
 /** An app grant (Phase C), path-scoped to one app. Reserved and stripped from the start. */
 export const APP_GRANT_COOKIE = "__Secure-agentbox-app";
 
-const OURS = [SESSION_COOKIE, APP_GRANT_COOKIE].map((n) => n.toLowerCase());
+/**
+ * The machines origin's session (machines/session.ts): host-only on the
+ * machines host, so the box never sees it; stripped all the same if it ever
+ * arrives.
+ */
+export const MACHINES_COOKIE = "__Host-agentbox-machines";
+
+const OURS = [SESSION_COOKIE, APP_GRANT_COOKIE, MACHINES_COOKIE].map((n) => n.toLowerCase());
 
 /**
  * True for a cookie name the gate owns. Compared case-insensitively: browsers
@@ -54,4 +61,17 @@ export function sessionCookie(secret: string, maxAgeSeconds: number | null): str
 
 export function clearedSessionCookie(): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+/**
+ * The machines session: `Strict`, so no navigation from another site carries
+ * it, and a browser session's cookie (the session itself ends in the store
+ * after 12 hours at most).
+ */
+export function machinesCookie(secret: string): string {
+  return `${MACHINES_COOKIE}=${secret}; Path=/; HttpOnly; Secure; SameSite=Strict`;
+}
+
+export function clearedMachinesCookie(): string {
+  return `${MACHINES_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 }

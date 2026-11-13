@@ -397,6 +397,50 @@ anything a process in the sandbox could not reach already.
 image; the fidelity suite (`npm run fidelity -w app`) proves the policy in
 Chromium, Firefox and WebKit with real apps.
 
+### Machines (off unless both hostnames are set)
+
+Machines (`docs/design/2026-11-13-machines-design.md`) are your own computers,
+opened from a second origin the gate serves alone. Off by default: without
+both `AGENTBOX_MACHINES_HOST` and `AGENTBOX_MACHINE_APPS_HOST`, the gate treats
+every `Host` as the box's, as it always has, and every machines route is a
+`404`. With them (`sudo ./scripts/agentbox machines enable --machines-host …
+--apps-host …`):
+
+- **Hosts.** A request names the box (the host of `AGENTBOX_PUBLIC_URL`), the
+  machines host or the machine-apps host, or it is answered `421`. Every gate
+  route is tagged with the hosts it serves; an untagged route serves none.
+  The machines hosts are answered only through the proxy: the sandbox
+  reaching the gate's listener with a machines `Host` gets `421`. Nothing on
+  either is forwarded to the sandbox.
+- **Signing in** needs a live main session **and** the machines passphrase.
+  The box's `GET /_gate/machines/handoff` issues a nonce (random, single use,
+  60 s, bound to that main session) and sends the tab to the machines
+  origin's `/signin`, which takes the nonce back with the passphrase. The
+  passphrase is set on the host only, piped to the gate's CLI on stdin, kept
+  as bcrypt (cost 14), never the sign-in password, and never typed on the
+  box's origin — the sandbox can read what is typed there. Its attempts are
+  rate-limited like sign-ins, on a budget of their own.
+- **The machines session** is a cookie of its own (`__Host-agentbox-machines`,
+  `Secure`, `HttpOnly`, `SameSite=Strict`), kept apart from the box's
+  sessions, 12 hours at most and 30 minutes idle. It ends on signing out of
+  machines, a change of the password, two-factor or the machines passphrase,
+  `gate revoke-all`, and `machines disable`. A main session, a device token
+  or anything in `Authorization` opens nothing there.
+- **The machines origin's rules.** The box and the machines host are usually
+  the same site, so script on the box's origin can send the machines cookie.
+  So nothing but GET/HEAD — and no WebSocket — is taken unless `Origin` is
+  exactly `https://<machines host>` (and `Sec-Fetch-Site`, when sent, is
+  `same-origin`); no GET has side effects; service workers' scripts are
+  refused; and every response carries `Cross-Origin-Resource-Policy:
+  same-origin`, `Cross-Origin-Opener-Policy: same-origin`,
+  `Origin-Agent-Cluster: ?1`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`, a CSP with `frame-ancestors 'none'`, and no
+  `Access-Control-Allow-*`.
+
+`tests/proxy/gate-bypass.sh` proves these through the real proxy and gate
+image; `tests/proxy/topology.py` that only the gate and the proxy are told the
+hostnames.
+
 ### SSH
 
 The `ssh` service runs OpenSSH's sshd in the sandbox as the sandbox user

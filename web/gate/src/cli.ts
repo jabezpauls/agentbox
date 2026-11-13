@@ -15,6 +15,10 @@ Run inside the gate container; on the host, ./scripts/agentbox wraps it.
   revoke-all     end every session and revoke every device token
   unlock         clear sign-in rate limits and lockouts
   status         what is configured
+  machines-passphrase
+                 set the machines passphrase (read from stdin); ends every
+                 machines session (on the host: ./scripts/agentbox machines enable)
+  machines-off   forget the machines passphrase and end every machines session
   hash-password  print a bcrypt hash of the password on stdin
 
 Commands go to the running gate, which owns the store. --offline edits the
@@ -22,7 +26,7 @@ store directly instead, for a stack whose gate is stopped
 (docker compose run --rm --no-deps gate agentbox-gate --offline ...); it
 refuses while any gate holds the store.`;
 
-const KNOWN: AdminCommand[] = ["set-password", "totp-reset", "revoke-all", "unlock", "status"];
+const KNOWN: AdminCommand[] = ["set-password", "totp-reset", "revoke-all", "unlock", "status", "machines-passphrase", "machines-off"];
 
 export interface CliIo {
   config: Config;
@@ -45,7 +49,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<string> {
     return await hashPassword(password, config.bcryptCost);
   }
   if (!KNOWN.includes(command as AdminCommand)) throw new AdminError(`unknown command: ${command}\n\n${USAGE}`);
-  const input = command === "set-password" ? { password: await io.readPassword() } : {};
+  const input =
+    command === "set-password"
+      ? { password: await io.readPassword() }
+      : command === "machines-passphrase"
+        ? { passphrase: await io.readPassword() }
+        : {};
 
   let out: Record<string, unknown>;
   if (offline) {
@@ -90,7 +99,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<string> {
 
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
-    throw new AdminError("pipe the password on stdin, e.g. ./scripts/agentbox passwd on the host");
+    throw new AdminError("pipe it on stdin, e.g. ./scripts/agentbox passwd (or machines enable) on the host");
   }
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);

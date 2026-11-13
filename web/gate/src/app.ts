@@ -8,8 +8,13 @@ import { AppRegistry } from "./apps.js";
 import { Auth, type Ended, type Subject } from "./auth.js";
 import { ClientIpResolver, limitKey, normalizeIp } from "./client-ip.js";
 import type { Config } from "./config.js";
-import { peekInfo, setInfo, type GateCore, type RequestInfo } from "./context.js";
+import { infoOf, peekInfo, setInfo, type GateCore, type RequestInfo } from "./context.js";
 import { DeviceFlow } from "./device.js";
+import { classifyHost, enforceRouteHosts, hostNames, type HostKind, type TaggedRoute } from "./hosts.js";
+import { Handoffs } from "./machines/handoff.js";
+import { machinesHeaderLines, machinesOriginOf, machinesRequestRefusal, setMachinesHeaders } from "./machines/headers.js";
+import { registerMachines } from "./machines/routes.js";
+import { MachinesSessions } from "./machines/session.js";
 import { Grants } from "./grants.js";
 import { createSandboxApi } from "./sandbox-api.js";
 import { isSafeMethod, isSameOriginRequest, originMatchesHost } from "./origin.js";
@@ -77,6 +82,8 @@ export interface Gate {
   apps: AppGateway;
   /** The session or device token a request carries, if any. */
   authenticate(req: IncomingMessage): Subject | null;
+  /** Every route the gate registered, with the hosts it serves. */
+  routes: TaggedRoute[];
   close(): Promise<void>;
 }
 
@@ -145,7 +152,13 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     now,
     authenticate: (req) => auth.authenticate(req, peekInfo(req)?.ip ?? normalizeIp(req.socket.remoteAddress ?? "")),
     apps: new AppRegistry(store, { infraPorts: config.infraPorts, sharing: config.sharing, now }),
+    hosts: hostNames(config),
+    machinesLimiter: new LoginLimiter(deps.limits ?? LOGIN_LIMITS, now),
+    machinesSessions: new MachinesSessions(store, now),
+    handoffs: new Handoffs(now),
   };
+  const names = core.hosts;
+  if (names) console.log(`[gate] machines are on: ${names.machines} and ${names.machineApps}, beside ${names.main}`);
   const grants = new Grants(store);
   const appGateway = new AppGateway({
     core,
@@ -164,7 +177,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
   });
   const sandboxServer = createSandboxApi(core.apps, clientIps);
 
-  function settle(req: IncomingMessage): RequestInfo {
+  function settle(req: IncomingMessage, hostKind: HostKind): RequestInfo {
     const who = clientIps.resolve(req);
     const claimedProto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0]?.trim();
     const info: RequestInfo = {
@@ -173,6 +186,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       viaProxy: who.viaProxy,
       proto: who.viaProxy && (claimedProto === "https" || claimedProto === "http") ? claimedProto : "http",
       host: String(req.headers.host ?? ""),
+      hostKind,
     };
     setInfo(req, info);
     return info;
@@ -223,7 +237,38 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     (fastifyHandler as (req: IncomingMessage, res: ServerResponse) => void)(req, res);
   }
 
+  /**
+   * The machines origins, before anything else: through the proxy only, and
+   * under the machines origin's rules and headers whatever answers. True when
+   * the request has been answered here.
+   */
+  function machinesFront(req: IncomingMessage, res: ServerResponse, kind: HostKind, info: RequestInfo): boolean {
+    setMachinesHeaders(res);
+    if (!info.viaProxy) {
+      plain(res, 421, "misdirected request");
+      return true;
+    }
+    const refusal = machinesRequestRefusal(req, machinesOriginOf((names as NonNullable<typeof names>).machines), false);
+    if (refusal) {
+      plain(res, refusal.status, refusal.message);
+      return true;
+    }
+    // Nothing is served on the machine-apps origin yet.
+    if (kind === "machine-apps") {
+      plain(res, 404, "not found");
+      return true;
+    }
+    return false;
+  }
+
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // With machines on, a request names one of the three hosts or none.
+    const kind = classifyHost(req.headers.host, names);
+    if (kind === null) {
+      plain(res, 421, "misdirected request");
+      return;
+    }
+    if (kind !== "main") setMachinesHeaders(res);
     const target = splitTarget(req.url ?? "");
     if (!isRoutablePath(target.path)) {
       plain(res, 400, "bad path");
@@ -233,11 +278,17 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     // path forwarded — sees the one canonical spelling.
     const path = canonicalPath(target.path);
     const { query } = target;
+    if (kind !== "main") {
+      // The machines origin is the gate's alone: its own routes, nothing forwarded.
+      const info = settle(req, kind);
+      if (!machinesFront(req, res, kind, info)) toGate(req, res);
+      return;
+    }
     if (isRefusedServiceWorker(req, path)) {
       plain(res, 403, "service workers are not allowed here");
       return;
     }
-    const info = settle(req);
+    const info = settle(req, kind);
     const r = route(path, query);
 
     if (r.kind === "gate") {
@@ -308,11 +359,22 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
 
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     socket.on("error", () => socket.destroy());
+    const kind = classifyHost(req.headers.host, names);
+    if (kind === null) return refuseUpgrade(socket, 421, "Misdirected Request");
+    if (kind !== "main") {
+      const extra = machinesHeaderLines();
+      const info = settle(req, kind);
+      if (!info.viaProxy) return refuseUpgrade(socket, 421, "Misdirected Request", extra);
+      const refusal = machinesRequestRefusal(req, machinesOriginOf((names as NonNullable<typeof names>).machines), true);
+      if (refusal) return refuseUpgrade(socket, refusal.status, "Forbidden", extra);
+      // No WebSocket is served on either machines origin yet.
+      return refuseUpgrade(socket, 404, "Not Found", extra);
+    }
     const target = splitTarget(req.url ?? "");
     if (!isRoutablePath(target.path)) return refuseUpgrade(socket, 400, "Bad Request");
     const path = canonicalPath(target.path);
     const { query } = target;
-    const info = settle(req);
+    const info = settle(req, kind);
     const r = route(path, query);
     if (r.kind === "app") return appGateway.upgrade(req, socket, head, r, info);
     if (r.kind === "tunnel") return tunnel(req, socket, head, query, info);
@@ -377,12 +439,16 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       return server;
     },
   });
+  // Before any route: every route is tagged with its hosts, and serves only those.
+  const routes = enforceRouteHosts(app, (req) => infoOf(req).hostKind);
   await registerApi(app, core);
+  await registerMachines(app, core);
   await app.ready();
 
   const pruner = setInterval(() => {
     void auth.prune().catch(() => {});
     void devices.prune().catch(() => {});
+    void core.machinesSessions.prune().catch(() => {});
   }, PRUNE_MS);
   pruner.unref();
 
@@ -393,6 +459,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     core,
     apps: appGateway,
     authenticate: core.authenticate,
+    routes,
     close: async () => {
       clearInterval(pruner);
       appGateway.close();

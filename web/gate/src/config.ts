@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { machinesHostsFrom } from "./hosts.js";
 import type { UpstreamName } from "./routes.js";
 
 export interface Upstream {
@@ -31,6 +32,13 @@ export interface Config {
   trustedProxies: string[];
   /** The origin people browse to, for links the gate hands out; `null` derives it per request. */
   publicUrl: string | null;
+  /**
+   * The machines origin's and the machine-apps origin's hostnames
+   * (`AGENTBOX_MACHINES_HOST`, `AGENTBOX_MACHINE_APPS_HOST`): both, or neither,
+   * and then machines are off and every machines route answers 404.
+   */
+  machinesHost: string | null;
+  machineAppsHost: string | null;
   upstreams: Record<UpstreamName, Upstream>;
   /**
    * The bridge's data plane: apps and tunnels, and nothing else. A listener of
@@ -112,6 +120,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appsPort,
     ...portList(env.AGENTBOX_INFRA_PORTS),
   ]);
+  const publicUrl = (env.AGENTBOX_PUBLIC_URL || null)?.replace(/\/+$/, "") ?? null;
   return {
     host: env.GATE_HOST || "0.0.0.0",
     port: gatePort,
@@ -126,7 +135,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
-    publicUrl: (env.AGENTBOX_PUBLIC_URL || null)?.replace(/\/+$/, "") ?? null,
+    publicUrl,
+    ...machinesHostsFrom(env, publicUrl),
     upstreams,
     dataPlane,
     appsHost: env.GATE_APPS_HOST || "0.0.0.0",

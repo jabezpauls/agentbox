@@ -1,9 +1,12 @@
 """Check one compose mode's wiring; reads `docker compose config --format json` on stdin.
 
-    topology.py <mode> [docker]
+    topology.py <mode> [docker] [machines]
 
 With `docker`, the config includes docker-compose.docker.yml (Docker inside the
-sandbox), and the engine's container is checked too.
+sandbox), and the engine's container is checked too. With `machines`, .env
+names the two machines hostnames (machines.example.com, mapps.example.com):
+they are routed to the proxy, and to the gate alone, and nothing about the
+sandbox's paths to the gate changes. Without it, nothing names them at all.
 
 Prints one line per check, "ok <what>" or "FAIL <what>", and exits non-zero if
 any check fails or the config cannot be read. See topology.sh.
@@ -12,7 +15,10 @@ import json
 import sys
 
 mode = sys.argv[1]
-docker = sys.argv[2:] == ["docker"]
+flags = set(sys.argv[2:])
+docker = "docker" in flags
+machines = "machines" in flags
+MACHINES_HOSTS = ["machines.example.com", "mapps.example.com"]
 cfg = json.load(sys.stdin)
 svc = cfg["services"]
 nets = {name: set((s.get("networks") or {}).keys()) for name, s in svc.items()}
@@ -139,5 +145,18 @@ else:
     check(holders == sorted(SANDBOX + ["docker"]), "only the sandbox and the engine mount the socket (%s)" % holders)
     # environment is a mapping, merged across files: the Workbench keeps its own.
     check((svc["workbench"].get("environment") or {}).get("AGENTBOX_GATE_APPS_URL"), "the Workbench keeps its own environment")
+# Machines: the gate's surface alone. Only the gate and the proxy are told the
+# hostnames; the sandbox's way to the gate is what it was (no new network, no
+# new environment); the Traefik routers name them only when they are set.
+def env_of(name):
+    return svc[name].get("environment") or {}
+holders = sorted(n for n in svc if any(k.startswith("AGENTBOX_MACHINE") and env_of(n)[k] for k in env_of(n)))
+check(holders == (["gate", "proxy"] if machines else []), "only the gate and the proxy know the machines hostnames (%s)" % holders)
+check(all(not any(k.startswith("AGENTBOX_MACHINE") for k in env_of(n)) for n in sandbox),
+      "no sandbox service is told about machines")
+rule = " ".join(str(v) for k, v in (svc["proxy"].get("labels") or {}).items() if k.endswith(".rule"))
+if traefik:
+    named = [h for h in MACHINES_HOSTS if h in rule]
+    check(named == (MACHINES_HOSTS if machines else []), "Traefik routes the machines hostnames only when set (%s)" % rule)
 check(svc["code"].get("init") is True, "the sandbox's PID 1 is an init that reaps orphans")
 sys.exit(1 if failed else 0)

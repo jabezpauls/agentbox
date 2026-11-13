@@ -117,16 +117,22 @@ jobs:
         # an .env from before may still hold: Caddy must not read it (listed
         # twice, a header name stops Caddy starting). The passthrough Caddyfile
         # also reads the addresses Traefik's PROXY header is believed from.
+        # Each again with machines on: the two machines hostnames beside the
+        # domain.
         run: |
           for file in Caddyfile.standalone Caddyfile.behind-proxy Caddyfile.passthrough; do
             for trust in standalone-off standalone-on proxied-off proxied-on; do
               for header in "" X-Real-IP; do
-                echo "== $file $trust header=${header:-none}"
-                docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
-                  -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" \
-                  -e AGENTBOX_REAL_IP_HEADER="$header" -e AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP \
-                  -e "AGENTBOX_PROXY_PROTOCOL_FROM=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7" \
-                  caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+                for machines in "" machines.example.com; do
+                  apps=""; [ -n "$machines" ] && apps=mapps.example.com
+                  echo "== $file $trust header=${header:-none} machines=${machines:-off}"
+                  docker run --rm -v "$PWD/proxy:/p:ro" -v "$PWD/proxy/trust:/etc/caddy/trust:ro" \
+                    -e AGENTBOX_DOMAIN=example.com -e AGENTBOX_TRUST="$trust" \
+                    -e AGENTBOX_MACHINES_HOST="$machines" -e AGENTBOX_MACHINE_APPS_HOST="$apps" \
+                    -e AGENTBOX_REAL_IP_HEADER="$header" -e AGENTBOX_CLIENT_IP_HEADER=CF-Connecting-IP \
+                    -e "AGENTBOX_PROXY_PROTOCOL_FROM=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7" \
+                    caddy:2-alpine caddy validate --adapter caddyfile --config "/p/$file"
+                done
               done
             done
           done

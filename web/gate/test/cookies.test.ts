@@ -11,6 +11,7 @@ describe("the gate's cookies", () => {
     expect(isOurCookie("__host-AGENTBOX")).toBe(true);
     expect(isOurCookie("__Secure-agentbox-app")).toBe(true);
     expect(isOurCookie(" __secure-agentbox-app ")).toBe(true);
+    expect(isOurCookie("__Host-agentbox-machines")).toBe(true);
     expect(isOurCookie("agentbox")).toBe(false);
     expect(isOurCookie("__Host-agentbox2")).toBe(false);
   });
