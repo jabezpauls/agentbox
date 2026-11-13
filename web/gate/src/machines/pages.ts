@@ -191,7 +191,7 @@ function machineList(machines: MachineView[], manage: boolean): string {
   return `<ul class="machines">${machines.map((m) => machineItem(m, manage)).join("\n")}</ul>`;
 }
 
-/** The Machines page at `/`: the list, until the machines UI (phase 4) mounts here. */
+/** The Machines page at `/` when the machines UI is not built (a gate built alone): the list. */
 export function renderMachinesShell(v: { host: string; machines: MachineView[] }): string {
   return page(
     "Machines · agentbox",

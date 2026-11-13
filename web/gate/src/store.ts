@@ -102,7 +102,7 @@ export interface MachineRecord {
   pausedAt: number | null;
   revokedAt: number | null;
   leftAt: number | null;
-  /** What the owner opted this machine in to (phase 4: the shared Claude token). */
+  /** What the owner opted this machine in to: the shared Claude token. */
   optIns: { claudeToken: boolean };
   /** The shared Claude token's generation last sent to it (`null`: none, or wiped). */
   claudeTokenGeneration?: number | null;

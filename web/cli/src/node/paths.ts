@@ -9,7 +9,9 @@ import path from "node:path";
  *
  *   policy.json        what the box may do here (the owner's; `join` writes it once)
  *   credentials.json   node token, machine id, box URL, presence verifier
- *   secrets/           the shared Claude token, when opted in (phase 4)
+ *   secrets/           the shared Claude token, when opted in
+ *   claude/, shims/    Claude Code's config folder and its shim (claude.ts)
+ *   agents.md          agentbox's instructions for agents here
  *   bin/               herdr, Claude Code (verified)
  *   state/             trash, upload state, the local log
  *   control.sock       the local control socket (control.ts)

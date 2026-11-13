@@ -23,7 +23,7 @@ import { writeInitialPolicy, type FileMode } from "./policy.js";
  * machine.
  */
 
-/** herdr and (from phase 4) Claude Code, with room to spare. */
+/** herdr and Claude Code, with room to spare. */
 export const MIN_FREE_BYTES = 512 * 1024 * 1024;
 export const SUPPORTED_PLATFORMS = new Set(["linux"]);
 

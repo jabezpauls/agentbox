@@ -17,7 +17,7 @@ import { requireMachinesSession } from "./session.js";
  * the code the machine shows into the machines origin's Admin page.
  *
  * On the machines origin, with a machines session: the Admin page, and the
- * registry's API the machines UI reads (phase 4) — the machines, the pending
+ * registry's API the machines UI reads — the machines, the pending
  * joins, approve (by typed code), deny, revoke, remove, the audit log.
  */
 

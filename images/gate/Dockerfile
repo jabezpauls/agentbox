@@ -29,6 +29,9 @@ RUN npm run build:machines -w app && npm run build -w gate
 # what /_gate/version reports and the CLI compares itself with. Declared only
 # here, so a new version rebuilds just this step.
 ARG AGENTBOX_VERSION=dev
+# The node's instructions for agents on a machine, bundled into the CLI from
+# beside web/, where the repository keeps it.
+COPY images/machine/agents.md /images/machine/agents.md
 RUN npm run build -w cli
 
 # The gate's production dependencies alone, installed from the lockfile on the
