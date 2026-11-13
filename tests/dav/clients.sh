@@ -9,7 +9,7 @@
 # purges and syncs.
 #
 # Needs Docker, Node 22 and the bridge built:
-#   (cd web && npm ci && npm run build -w bridge)
+#   (cd web && npm ci && npm run build -w hostcore -w bridge)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -19,7 +19,7 @@ RCLONE_IMAGE="${RCLONE_IMAGE:-rclone/rclone:latest}"
 URL="http://127.0.0.1:$PORT/api/dav/"
 
 [ -f "$ROOT/web/bridge/dist/bridge/src/app.js" ] \
-    || { echo "build the bridge first: (cd web && npm ci && npm run build -w bridge)" >&2; exit 2; }
+    || { echo "build the bridge first: (cd web && npm ci && npm run build -w hostcore -w bridge)" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
 LOG="$WORK/harness.log"

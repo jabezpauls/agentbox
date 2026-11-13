@@ -4,8 +4,7 @@ import { WebSocket } from "ws";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
-import type { TerminalStreams } from "../src/herdr/terminal.js";
+import type { SessionHub, TerminalStreams } from "@workbench/hostcore";
 import { isSameOrigin } from "../src/ws-origin.js";
 
 // The origin check runs before any handler, so neither herdr nor a real

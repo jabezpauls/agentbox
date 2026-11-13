@@ -6,7 +6,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { encodePathParam } from "@workbench/shared";
-import { entryComponent, zipStream } from "../src/files/zip.js";
+import { entryComponent, zipStream } from "@workbench/hostcore";
 import { filesFixture, rawPath, type FilesFixture } from "./helpers/files.js";
 
 let f: FilesFixture;

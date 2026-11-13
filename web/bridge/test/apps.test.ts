@@ -5,7 +5,7 @@ import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { BridgeEvents } from "../src/events.js";
 import { APPS_WORKSPACE, AppsService, cleanBy } from "../src/apps/service.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import { FakeGate } from "./helpers/fake-gate.js";
 
 interface Rig {

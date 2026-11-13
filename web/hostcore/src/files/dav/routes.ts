@@ -7,7 +7,7 @@ import { createWriteStream } from "node:fs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { decodeComponent, decodeName, displayName, encodeSegment, fsPath } from "../names.js";
 import { contentTypeFor, etagOf, loadedAsCode, sendFile } from "../raw.js";
-import { fsError, FilesError, STATE_DIR, within, type Located } from "../roots.js";
+import { fsError, FilesError, within, type Located } from "../roots.js";
 import { closeIfBodyUnread, sendError } from "../routes.js";
 import type { FilesService } from "../service.js";
 import { copyTree, moveTree, noClobberRename, removeTree, scratchName } from "../tree.js";
@@ -142,7 +142,9 @@ function statusLine(code: number): string {
  */
 export function registerDavRoutes(app: FastifyInstance, files: FilesService, locks = new LockManager()): void {
   const { roots } = files;
-  const ws = roots.workspace;
+  // The first root: the workspace, in the box.
+  const ws = roots.primary;
+  const stateName = roots.stateName(ws);
 
   /** Map a raw request path under the prefix to an absolute path, strictly. */
   const toAbs = (rawPath: string): string => {
@@ -159,7 +161,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
     // The API's own state (trash, upload scratch) is not a file of the
     // user's: a mounted folder should not show it, and `rclone sync` to the
     // root must not try to delete it.
-    if (names[0] === STATE_DIR) throw new FilesError(404, "not found");
+    if (names[0] === stateName) throw new FilesError(404, "not found");
     return path.join(ws.path, ...names);
   };
 
@@ -300,7 +302,7 @@ export function registerDavRoutes(app: FastifyInstance, files: FilesService, loc
    */
   const memberNames = async (abs: string, real: string): Promise<string[]> =>
     (await files.listings.names(real, abs))
-      .filter((d) => !(abs === ws.path && d.name === STATE_DIR))
+      .filter((d) => !(abs === ws.path && d.name === stateName))
       .map((d) => d.name);
 
   /**

@@ -9,9 +9,9 @@ import type { FastifyInstance } from "fastify";
 import type { EventsMessage, UsageSnapshot } from "@workbench/shared";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import { UsageService } from "../src/usage/service.js";
-import { waitFor } from "./helpers/wait.js";
+import { waitFor } from "../../hostcore/test/helpers/wait.js";
 
 // The report route and the events socket, against a real server; and the
 // status line helper the image installs, run as Claude Code runs it.

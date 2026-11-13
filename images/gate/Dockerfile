@@ -14,6 +14,7 @@ WORKDIR /src
 # Every workspace's manifest, so `npm ci` can check the lockfile against them.
 COPY web/package.json web/package-lock.json ./
 COPY web/shared/package.json shared/
+COPY web/hostcore/package.json hostcore/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/
@@ -34,6 +35,7 @@ FROM node:22-alpine AS deps
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
 COPY web/shared/package.json shared/
+COPY web/hostcore/package.json hostcore/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 COPY web/gate/package.json gate/

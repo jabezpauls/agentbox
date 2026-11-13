@@ -12,6 +12,7 @@ FROM node:22-bookworm-slim AS web
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
 COPY web/shared/package.json shared/
+COPY web/hostcore/package.json hostcore/
 COPY web/bridge/package.json bridge/
 COPY web/app/package.json app/
 # The gate and the CLI are not part of this image (the gate is its own, and
@@ -212,8 +213,11 @@ RUN code-server --install-extension /usr/local/share/agentbox/agentbox-connect.v
 
 # The Workbench, from the build stage above. `npm prune --omit=dev` left the
 # workspace's node_modules hoisted at the root, so the bridge's dependencies
-# come from there.
+# come from there. The shared host code is a workspace too: its link in
+# node_modules points at ../../hostcore, beside them.
 COPY --from=web /src/bridge/dist /usr/local/lib/agentbox-workbench/bridge
+COPY --from=web /src/hostcore/package.json /usr/local/lib/agentbox-workbench/hostcore/package.json
+COPY --from=web /src/hostcore/dist /usr/local/lib/agentbox-workbench/hostcore/dist
 COPY --from=web /src/node_modules /usr/local/lib/agentbox-workbench/node_modules
 COPY --from=web /src/app/dist /usr/local/lib/agentbox-workbench/app
 

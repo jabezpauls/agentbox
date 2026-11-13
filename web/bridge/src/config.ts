@@ -1,4 +1,5 @@
 import os from "node:os"; import path from "node:path";
+import { STATE_DIR, type RootConfig } from "@workbench/hostcore";
 export interface Config {
   port: number; staticDir: string | null; socketPath: string;
   workspaceRoot: string; reviewDir: string; publicUrl: string | null;
@@ -67,4 +68,12 @@ export function loadConfig(env = process.env): Config {
       : path.join(env.HOME || os.homedir(), ".claude.json"),
     codexHome: env.CODEX_HOME || path.join(env.HOME || os.homedir(), ".codex"),
   };
+}
+
+/** The files API's roots: the workspace, then home, each keeping its state in its own `.agentbox`. */
+export function boxFileRoots(c: Pick<Config, "workspaceRoot" | "homeRoot">): RootConfig[] {
+  return [
+    { id: "workspace", path: c.workspaceRoot, mode: "write", stateDir: path.join(c.workspaceRoot, STATE_DIR) },
+    { id: "home", path: c.homeRoot, mode: "write", stateDir: path.join(c.homeRoot, STATE_DIR) },
+  ];
 }

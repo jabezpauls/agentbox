@@ -1,8 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Config } from "../config.js";
-import { request, HerdrError } from "../herdr/socket.js";
-import { isAllowed } from "../rpc-allowlist.js";
-import type { SessionHub } from "../herdr/session.js";
+import { request, HerdrError, isAllowed, type SessionHub } from "@workbench/hostcore";
 import type { PortsWatcher } from "../app.js";
 import { listDirs } from "../fs.js";
 

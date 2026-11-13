@@ -4,17 +4,23 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import type { ListeningPort } from "@workbench/shared";
-import type { Config } from "./config.js";
-import type { SessionHub } from "./herdr/session.js";
-import { TerminalStreams } from "./herdr/terminal.js";
+import { boxFileRoots, type Config } from "./config.js";
+import {
+  DAV_METHODS,
+  FilesService,
+  herdrRequest,
+  pathGuard,
+  registerDavRoutes,
+  registerFilesRoutes,
+  routableUrl,
+  TerminalStreams,
+  type SessionHub,
+} from "@workbench/hostcore";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerEventsWs } from "./routes/events-ws.js";
 import { registerTerminalWs } from "./routes/terminal-ws.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { ReviewStore } from "./review/store.js";
-import { pathGuard } from "./path-guard.js";
-import { FilesService } from "./files/service.js";
-import { registerFilesRoutes } from "./files/routes.js";
 import { SystemMonitor } from "./system.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { BridgeEvents } from "./events.js";
@@ -23,11 +29,9 @@ import { registerProjectRoutes } from "./routes/projects.js";
 import { EditorChannel } from "./editor.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { listListeningPorts } from "./ports.js";
-import { DAV_METHODS, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 import { AppsService } from "./apps/service.js";
 import { gateApps } from "./apps/gate.js";
 import { registerAppRoutes } from "./routes/apps.js";
-import { request as herdrRequest } from "./herdr/socket.js";
 import { UsageService } from "./usage/service.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 
@@ -118,7 +122,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
   const files =
-    deps.files ?? new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+    deps.files ?? new FilesService({ roots: boxFileRoots(config) });
   const events = deps.events ?? new BridgeEvents();
   const projects =
     deps.projects ??

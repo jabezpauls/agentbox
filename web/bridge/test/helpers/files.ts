@@ -1,12 +1,13 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppDeps } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
-import type { SessionHub } from "../../src/herdr/session.js";
-import { FilesService, type FilesOptions } from "../../src/files/service.js";
+import { boxFileRoots, loadConfig } from "../../src/config.js";
+import { type SessionHub, FilesService, type FilesOptions } from "@workbench/hostcore";
 import { SystemMonitor } from "../../src/system.js";
+import { tmpBase } from "../../../hostcore/test/helpers/tmp.js";
+
+export { tmpBase };
 
 export const stubHub = {
   connected: false,
@@ -17,10 +18,6 @@ export const stubHub = {
   start: async () => {},
   stop: () => {},
 } as unknown as SessionHub;
-
-export function tmpBase(): string {
-  return fs.existsSync("/tmp/claude-1000") ? "/tmp/claude-1000" : os.tmpdir();
-}
 
 export interface FilesFixture {
   base: string;
@@ -44,7 +41,7 @@ export async function filesFixture(
   const home = path.join(base, "home");
   fs.mkdirSync(workspace);
   fs.mkdirSync(home);
-  const files = new FilesService({ workspaceRoot: workspace, homeRoot: home, gitTtlMs: 0, ...opts });
+  const files = new FilesService({ roots: boxFileRoots({ workspaceRoot: workspace, homeRoot: home }), gitTtlMs: 0, ...opts });
   const config = loadConfig({
     WORKBENCH_PORT: "0",
     HERDR_SOCKET_PATH: path.join(base, "no-herdr.sock"),

@@ -5,7 +5,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import { ReviewStore } from "../src/review/store.js";
 
 // Review needs no herdr; a stub hub keeps the sibling routes registrable.

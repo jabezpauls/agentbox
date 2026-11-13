@@ -1,4 +1,5 @@
 import { encodePathParam, type FileEntry, type FileListing, type TrashItem, type UploadSession } from "@workbench/shared";
+import { apiUrl } from "../api/base.ts";
 import { http } from "../api/http.ts";
 
 /**
@@ -46,14 +47,14 @@ export const filesApi = {
 
 /** A file's bytes; `inline` asks to show it (pictures, PDF, text) rather than download it. */
 export function rawUrl(path: string, inline = false): string {
-  return `/api/files/raw?path=${q(path)}${inline ? "&inline=1" : ""}`;
+  return apiUrl(`/api/files/raw?path=${q(path)}${inline ? "&inline=1" : ""}`);
 }
 
 /** A zip of one or more paths, streamed. */
 export function zipUrl(paths: string[], name?: string): string {
   const parts = paths.map((p) => `path=${q(p)}`);
   if (name) parts.push(`name=${encodeURIComponent(name)}`);
-  return `/api/files/zip?${parts.join("&")}`;
+  return apiUrl(`/api/files/zip?${parts.join("&")}`);
 }
 
 /** Start a download without leaving the page. */

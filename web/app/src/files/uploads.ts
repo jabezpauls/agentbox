@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { apiUrl } from "../api/base.ts";
 import { HttpError } from "../api/http.ts";
 import { filesApi } from "./api.ts";
 import { UploadQueue, type TransportError, type UploadItem, type UploadTransport } from "./upload-queue.ts";
@@ -12,7 +13,7 @@ function asTransportError(err: unknown): TransportError {
 function putChunk(id: string, offset: number, chunk: Blob, onProgress: (n: number) => void, signal: AbortSignal): Promise<{ received: number }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `/api/files/uploads/${id}?offset=${offset}`);
+    xhr.open("PUT", apiUrl(`/api/files/uploads/${id}?offset=${offset}`));
     xhr.setRequestHeader("content-type", "application/octet-stream");
     xhr.upload.onprogress = (e) => onProgress(e.loaded);
     xhr.onload = () => {

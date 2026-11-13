@@ -1,11 +1,9 @@
-import { loadConfig } from "./config.js";
+import { boxFileRoots, loadConfig } from "./config.js";
 import { ensureServer } from "./herdr/supervisor.js";
-import { SessionHub } from "./herdr/session.js";
-import { request as herdrRequest } from "./herdr/socket.js";
+import { FilesService, herdrRequest, SessionHub } from "@workbench/hostcore";
 import { buildApp } from "./app.js";
 import { PortsWatcher, listListeningPorts } from "./ports.js";
 import { ensureReviewRoot } from "./review/store.js";
-import { FilesService } from "./files/service.js";
 import { sweepClones } from "./projects.js";
 import { BridgeEvents } from "./events.js";
 import { AppsService } from "./apps/service.js";
@@ -44,7 +42,7 @@ async function main(argv: string[]): Promise<void> {
 
   // The files API's roots, trash and uploads. Abandoned uploads are swept here
   // rather than in buildApp, so a test server never touches a real volume.
-  const files = new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+  const files = new FilesService({ roots: boxFileRoots(config) });
   const stopFiles = files.startMaintenance();
   // A clone cut off by a restart is left in scratch space; clear old ones.
   void sweepClones(config.workspaceRoot).catch(() => {});

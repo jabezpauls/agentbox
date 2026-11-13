@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { sendError } from "../files/routes.js";
+import { sendError } from "@workbench/hostcore";
 import type { Projects } from "../projects.js";
 
 type Body = Record<string, unknown> | undefined;

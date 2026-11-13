@@ -5,8 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { createClient, type FileStat, type WebDAVClient } from "webdav";
 import { filesFixture, rawPath, type FilesFixture } from "./helpers/files.js";
-import { parseXml } from "../src/files/dav/xml.js";
-import { parseIf } from "../src/files/dav/locks.js";
+import { parseXml, parseIf } from "@workbench/hostcore";
 
 let f: FilesFixture;
 let base: string;

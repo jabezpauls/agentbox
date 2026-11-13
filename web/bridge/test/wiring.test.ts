@@ -7,7 +7,7 @@ import type { FastifyInstance } from "fastify";
 import type { ListeningPort, EventsMessage } from "@workbench/shared";
 import { buildApp, type PortsWatcher } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 
 const stubHub = {
   connected: false,

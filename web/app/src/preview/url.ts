@@ -2,6 +2,8 @@
 // own origin: the panel frames it, full screen opens it, and sharing makes the
 // same URL public.
 
+import { apiUrl } from "../api/base.ts";
+
 /** A path within an app, always starting with `/`. */
 export function normalisePath(path: string): string {
   const t = path.trim();
@@ -11,7 +13,7 @@ export function normalisePath(path: string): string {
 
 /** The app's URL at `path`, relative to the box: `/a/<id>/<path>`. */
 export function appUrl(id: string, path = "/"): string {
-  return `/a/${id}/${normalisePath(path).replace(/^\/+/, "")}`;
+  return apiUrl(`/a/${id}/${normalisePath(path).replace(/^\/+/, "")}`);
 }
 
 /** The absolute link to hand someone, on the origin this page was loaded from. */

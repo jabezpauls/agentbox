@@ -1,3 +1,4 @@
+import { apiUrl } from "../api/base.ts";
 import { useApp } from "../store/app.ts";
 import { navigate } from "../shell/router.ts";
 import type { AppView } from "./model.ts";
@@ -17,7 +18,7 @@ export function appPageUrl(url: string): string | null {
   try {
     const u = new URL(url, window.location.origin);
     if (u.origin !== window.location.origin || !u.pathname.startsWith("/a/")) return null;
-    return `${u.pathname}${u.search}${u.hash}`;
+    return apiUrl(`${u.pathname}${u.search}${u.hash}`);
   } catch {
     return null;
   }

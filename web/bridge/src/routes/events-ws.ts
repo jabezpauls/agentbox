@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { EventsMessage } from "@workbench/shared";
-import type { SessionHub } from "../herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 import type { PortsWatcher } from "../app.js";
 import type { BridgeEvents } from "../events.js";
 import type { UsageService } from "../usage/service.js";

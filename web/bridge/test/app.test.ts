@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WebSocket } from "ws";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
-import { SessionHub } from "../src/herdr/session.js";
+import { SessionHub } from "@workbench/hostcore";
 import { loadConfig, type Config } from "../src/config.js";
-import { startTestHerdr, TestHerdr } from "./helpers/herdr.js";
+import { startTestHerdr, TestHerdr } from "../../hostcore/test/helpers/herdr.js";
 import type { EventsMessage } from "@workbench/shared";
 
 let h: TestHerdr;

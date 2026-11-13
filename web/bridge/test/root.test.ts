@@ -5,7 +5,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import type { SessionHub } from "../src/herdr/session.js";
+import type { SessionHub } from "@workbench/hostcore";
 
 // The app at `/`: static files, history-API routing, and the old prefix.
 const stubHub = {
