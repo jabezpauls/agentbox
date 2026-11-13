@@ -65,6 +65,12 @@ export async function runNode(o: RunOptions): Promise<number> {
     throw new CliError("a node is already running on this machine (see `agentbox node status`)");
   }
 
+  // Work from the node's own folder, which the box can never write: Windows
+  // looks for a program named bare (`nvidia-smi`, `docker`) in the working
+  // folder before PATH, and a node started from `join` would otherwise be
+  // wherever `join` ran — often a project folder the box may write.
+  process.chdir(o.paths.dir);
+
   let policy: LoadedPolicy = loadPolicy(o.paths.policy, o.home);
 
   // Claude Code: its shim first on herdr's PATH, its own config, agents.md.

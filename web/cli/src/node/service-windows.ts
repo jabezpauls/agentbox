@@ -33,6 +33,16 @@ export const LOG_FILES = 3;
 /** The exit code of a node that replaced itself (run.ts). */
 const RESTART_EXIT = 75;
 
+/**
+ * Windows' own `reg.exe`, by its full path: a program named bare is looked
+ * for in the working folder before PATH, and `node status` may well be run
+ * in a project folder the box can write.
+ */
+export function regExe(env: NodeJS.ProcessEnv = process.env): string {
+  const root = env.SystemRoot && path.win32.isAbsolute(env.SystemRoot) ? env.SystemRoot : "C:\\Windows";
+  return path.win32.join(root, "System32", "reg.exe");
+}
+
 /** Whether this is the standalone executable (a SEA): its script is itself. */
 function standalone(execPath: string, script: string | undefined): boolean {
   return script === undefined || path.resolve(script) === path.resolve(execPath);
@@ -73,7 +83,7 @@ export interface WindowsServiceResult {
 export async function installService(opts: { gui: string; run?: Runner; start?: boolean }): Promise<WindowsServiceResult> {
   const run = opts.run ?? runCommand;
   const entry = runEntry(opts.gui);
-  const r = await run("reg.exe", ["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", entry, "/f"]);
+  const r = await run(regExe(), ["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", entry, "/f"]);
   if (r.code !== 0) throw new Error(`reg add ${RUN_KEY} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`);
   if (opts.start !== false) {
     const child = spawn(opts.gui, ["node", "supervise"], { detached: true, stdio: "ignore", windowsHide: true });
@@ -85,7 +95,7 @@ export async function installService(opts: { gui: string; run?: Runner; start?: 
 
 /** The Run entry's value, or `null` when there is none. */
 export async function readRunEntry(run: Runner = runCommand): Promise<string | null> {
-  const r = await run("reg.exe", ["query", RUN_KEY, "/v", RUN_VALUE]);
+  const r = await run(regExe(), ["query", RUN_KEY, "/v", RUN_VALUE]);
   if (r.code !== 0) return null;
   return new RegExp(`${RUN_VALUE}\\s+REG_SZ\\s+(.*)`).exec(r.stdout)?.[1]?.trim() ?? null;
 }
@@ -94,7 +104,7 @@ export async function readRunEntry(run: Runner = runCommand): Promise<string | n
 export async function removeService(opts: { paths: NodePaths; run?: Runner }): Promise<boolean> {
   const run = opts.run ?? runCommand;
   const had = (await readRunEntry(run)) !== null;
-  if (had) await run("reg.exe", ["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
+  if (had) await run(regExe(), ["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
   const pid = supervisorPid(opts.paths);
   if (pid !== null && pid !== process.pid) {
     try {

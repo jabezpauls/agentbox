@@ -327,7 +327,7 @@ export function windowsDocuments(env: NodeJS.ProcessEnv = process.env): string[]
   const out: string[] = [];
   for (const key of ["User Shell Folders", "Shell Folders"]) {
     try {
-      const text = execFileSync("reg.exe", ["query", `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\${key}`, "/v", "Personal"], {
+      const text = execFileSync(path.win32.join(env.SystemRoot && path.win32.isAbsolute(env.SystemRoot) ? env.SystemRoot : "C:\\Windows", "System32", "reg.exe"), ["query", `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\${key}`, "/v", "Personal"], {
         encoding: "utf8",
         timeout: 10_000,
         windowsHide: true,
