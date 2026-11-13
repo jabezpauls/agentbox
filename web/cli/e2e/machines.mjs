@@ -6,8 +6,10 @@
 //
 //   join (typed code, passphrase on stdin) → online with specs → survives a
 //   gate restart → offline on network loss and back → a copied token is
-//   refused as a duplicate → pause / resume → revoke stops it, wiping only
-//   secrets/.
+//   refused as a duplicate → pause / resume → presence → a terminal runs a
+//   command → a stub Claude Code through the shim, with the shared token →
+//   terminals: false closes the terminal → five wrong passphrases lock →
+//   revoke stops it, wiping only secrets/.
 //
 //   npm run build            (in web/)
 //   node e2e/machines.mjs    (in web/cli) [--keep]
@@ -15,11 +17,13 @@
 // Needs herdr on PATH, installed by scripts/install-herdr.sh (the node checks
 // it against the same pin).
 import { spawn } from "node:child_process";
+import { createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket } from "ws";
 import { bundle, cliDir, freePort, waitForPort, which } from "./stack.mjs";
 
 const keep = process.argv.includes("--keep");
@@ -207,7 +211,8 @@ try {
   });
 
   await step("join: a typed code, the address the gate saw, a token once", async () => {
-    const join = cli(homeA, ["node", "join", boxUrl, "--name", "e2e-laptop", "--folder", path.join(homeA, "code"), "--no-service"], `${PASSPHRASE}\n${PASSPHRASE}\n`);
+    // Never the real Claude Code here: a stub stands in for it below.
+    const join = cli(homeA, ["node", "join", boxUrl, "--name", "e2e-laptop", "--folder", path.join(homeA, "code"), "--no-service", "--no-claude"], `${PASSPHRASE}\n${PASSPHRASE}\n`);
     const code = await until("the code on the machine's screen", () => /\n {4}([A-Z]{4}-[A-Z]{4})\n/.exec(join.out.text)?.[1]);
     const pending = (await mget("/_gate/machines/joins")).joins;
     assert(pending.length === 1 && pending[0].name === "e2e-laptop" && pending[0].ip === MACHINE_IP, `pending: ${JSON.stringify(pending)}`);
@@ -273,10 +278,114 @@ try {
     await until("online", async () => (await machine())?.state === "online");
   });
 
+
+  // --- agents and terminals, behind presence ------------------------------------------
+  const mid = (await machine()).id;
+  const M_ORIGIN = `https://${MACHINES}`;
+  const rpc = (method, params = {}) => mpost(`/m/${mid}/api/rpc`, { method, params });
+  const answerFor = (passphrase, c) =>
+    createHmac("sha256", pbkdf2Sync(passphrase, Buffer.from(c.salt, "base64url"), c.iterations, 32, "sha256"))
+      .update(Buffer.concat([Buffer.from(c.challenge, "base64url"), Buffer.from(c.session + c.machine)]))
+      .digest("base64url");
+  const prove = async (passphrase) => {
+    const c = await mpost(`/_gate/machines/m/${mid}/presence/challenge`);
+    if (c.status !== 200) return c;
+    return mpost(`/_gate/machines/m/${mid}/presence`, { challenge: c.json().challenge, answer: answerFor(passphrase, c.json()) });
+  };
+  /** A terminal on `pane`, through the gate and the link: its screen, as text, as it comes. */
+  const terminal = (pane) =>
+    new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${ports.gate}/m/${mid}/ws/terminal?pane=${encodeURIComponent(pane)}&cols=100&rows=30`, {
+        headers: { host: MACHINES, origin: M_ORIGIN, cookie: machinesCookie },
+      });
+      // The screen comes as herdr renders it: spaces are often cursor moves, so compare without them.
+      const t = { ws, text: "", closedAt: null };
+      ws.on("message", (data, binary) => {
+        if (binary) t.text += data.toString("utf8").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, "");
+      });
+      ws.on("close", () => (t.closedAt = Date.now()));
+      ws.once("open", () => resolve(t));
+      ws.once("unexpected-response", (_q, res) => reject(new Error(`terminal refused: ${res.statusCode}`)));
+      ws.once("error", reject);
+    });
+  const type = (t, text) => t.ws.send(JSON.stringify({ type: "input", text }));
+  let pane = null;
+  let term = null;
+
+  await step("presence: nothing of herdr's without it; the passphrase proves it", async () => {
+    const before = await rpc("ping");
+    assert(before.status === 401 && before.json().error === "presence", `before presence: ${before.status} ${before.text}`);
+    const ok = await prove(PASSPHRASE);
+    assert(ok.status === 200, `presence: ${ok.status} ${ok.text}`);
+    assert(!ok.text.includes("pg_"), "the grant reached the page");
+  });
+
+  await step("a workspace, and its terminal runs a command", async () => {
+    const created = await until("herdr up on the machine", async () => {
+      const r = await rpc("workspace.create", { cwd: path.join(homeA, "code") });
+      return r.status === 200 ? r.json() : null;
+    });
+    pane = created.result.root_pane.pane_id;
+    const session = await mget(`/m/${mid}/api/session`);
+    assert(session.workspaces.some((w) => w.workspace_id === created.result.workspace.workspace_id), "the workspace is not in the session");
+    term = await terminal(pane);
+    await new Promise((r) => setTimeout(r, 500));
+    type(term, "echo ok-$((40+2))\r");
+    await until("ok-42 on the screen", () => term.text.includes("ok-42"), 20_000);
+  });
+
+  await step("Claude Code through the shim, with the shared token when opted in", async () => {
+    const dir = nodeDirOf(homeA);
+    // A stub stands in for Claude Code: it says what it was started with.
+    fs.writeFileSync(
+      path.join(dir, "bin", "claude"),
+      '#!/bin/sh\necho "stub-claude token=$([ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && echo set || echo none) prompt=$([ "$1" = --append-system-prompt-file ] && [ -f "$2" ] && echo yes || echo no) config=${CLAUDE_CONFIG_DIR##*/}"\n',
+      { mode: 0o755 },
+    );
+    // Generated here; never a real token.
+    const token = `e2e-${randomBytes(16).toString("hex")}`;
+    assert((await mpost("/_gate/machines/claude-token", { token })).status === 200, "setting the token failed");
+    assert((await mpost(`/_gate/machines/m/${mid}/opt-in`, { claudeToken: true })).status === 200, "opting in failed");
+    const file = path.join(dir, "secrets", "claude-token");
+    await until("the token on the machine", () => fs.existsSync(file) && fs.readFileSync(file, "utf8") === token);
+    assert((fs.statSync(file).mode & 0o777) === 0o600, "secrets/claude-token is not 0600");
+    assert(!run.out.text.includes(token), "the token is in the node's log");
+    type(term, "claude hello\r");
+    await until("the stub's line", () => term.text.replace(/\s+/g, "").includes("stub-claudetoken=setprompt=yesconfig=claude"), 20_000).catch((err) => {
+      throw new Error(`${err.message}; the screen said: ${term.text.slice(-600)}`);
+    });
+    const seed = JSON.parse(fs.readFileSync(path.join(dir, "claude", ".claude.json"), "utf8"));
+    assert(seed.hasCompletedOnboarding === true && seed.projects[homeA].hasTrustDialogAccepted === true, JSON.stringify(seed));
+  });
+
+  await step("terminals: false closes the open terminal within 2 s, and refuses another", async () => {
+    const file = path.join(nodeDirOf(homeA), "policy.json");
+    const policy = JSON.parse(fs.readFileSync(file, "utf8"));
+    const t = Date.now();
+    fs.writeFileSync(file, JSON.stringify({ ...policy, terminals: false }));
+    await until("the terminal closed", () => term.closedAt !== null, 10_000);
+    assert(term.closedAt - t <= 3_000, `closed after ${term.closedAt - t} ms`);
+    const r = await rpc("ping");
+    assert(r.status === 403 && r.json().error === "terminals_off", `${r.status} ${r.text}`);
+    fs.writeFileSync(file, JSON.stringify(policy));
+    await until("terminals back", async () => (await rpc("ping")).status === 200);
+  });
+
+  await step("five wrong passphrases in a row lock presence, the right one included", async () => {
+    for (let i = 1; i <= 4; i++) {
+      const r = await prove(`wrong passphrase ${i}`);
+      assert(r.status === 401 && r.json().error === "wrong", `wrong ${i}: ${r.status} ${r.text}`);
+    }
+    const fifth = await prove("wrong passphrase 5");
+    assert(fifth.status === 429 && fifth.json().error === "locked", `fifth: ${fifth.status} ${fifth.text}`);
+    const right = await prove(PASSPHRASE);
+    assert(right.status === 429, `the right passphrase while locked: ${right.status}`);
+    await until("said on the machine", () => run.out.text.includes("locked for 15 minutes"));
+  });
+
   await step("revoke: the node stops, wiping secrets/ and nothing else", async () => {
     const dir = nodeDirOf(homeA);
-    fs.mkdirSync(path.join(dir, "secrets"), { mode: 0o700 });
-    fs.writeFileSync(path.join(dir, "secrets", "claude-token"), "not a real token", { mode: 0o600 });
+    assert(fs.existsSync(path.join(dir, "secrets", "claude-token")), "no shared token to wipe");
     const id = (await machine()).id;
     assert((await mpost(`/_gate/machines/m/${id}/revoke`)).status === 200, "revoke failed");
     const code = await Promise.race([run.exited, new Promise((r) => setTimeout(() => r("still running"), 20_000))]);
@@ -293,6 +402,24 @@ try {
   // Reported by step().
 } finally {
   for (const { child } of children) if (child.exitCode === null) child.kill("SIGKILL");
+  // The nodes' herdr servers outlive them, by design: end them here.
+  for (const home of [homeA, homeB]) {
+    let pid = null;
+    try {
+      pid = JSON.parse(fs.readFileSync(path.join(nodeDirOf(home), "state", "herdr.json"), "utf8")).pid;
+      process.kill(pid, "SIGTERM");
+    } catch {
+      continue; // None started, or gone.
+    }
+    for (let i = 0; i < 50; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
   proxy.close();
   if (failures > 0) {
     for (const c of children) console.log(`--- ${c.name}\n${c.out.text.slice(-3000)}`);
