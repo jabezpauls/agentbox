@@ -2,7 +2,11 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // src/link is the link's codec from @workbench/hostcore, by a symlink: so
+    // it compiles into the gate's own dist, and the gate's image needs nothing
+    // from the shared package at run time.
+    "preserveSymlinks": true
   },
   "include": ["src"]
 }

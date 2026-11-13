@@ -26,7 +26,9 @@ export type Route =
   /** An app, `/a/<id>/…`: the app policy decides (app-access.ts). `rest` starts with `/`. */
   | { kind: "app"; id: string; rest: string; query: string | null }
   /** The CLI's tunnels, WebSocket only, device token only. */
-  | { kind: "tunnel" };
+  | { kind: "tunnel" }
+  /** A machine's link (machines/link.ts): WebSocket only, node token only. */
+  | { kind: "node" };
 
 /** True when `path` is `prefix` itself or lies beneath it. */
 export function underSegment(path: string, prefix: string): boolean {
@@ -89,6 +91,9 @@ export const APP_PREFIX = "/a";
 /** `GET /_gate/tunnel?target=tcp:<port>|herdr`: a WebSocket the CLI forwards a port or herdr over. */
 export const TUNNEL_PATH = "/_gate/tunnel";
 
+/** `GET /_gate/node`: a machine's link, exactly this path. */
+export const NODE_LINK_PATH = "/_gate/node";
+
 export function route(path: string, query: string | null): Route {
   const qs = query === null ? "" : `?${query}`;
 
@@ -111,6 +116,7 @@ export function route(path: string, query: string | null): Route {
   }
 
   if (path === TUNNEL_PATH) return { kind: "tunnel" };
+  if (path === NODE_LINK_PATH) return { kind: "node" };
 
   if (GATE_EXACT.has(path) || GATE_PREFIXES.some((p) => underSegment(path, p))) {
     return { kind: "gate" };

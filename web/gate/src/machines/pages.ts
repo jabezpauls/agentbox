@@ -1,4 +1,7 @@
 import { escapeHtml } from "../pages.js";
+import type { AuditEvent } from "./audit.js";
+import type { JoinView } from "./joins.js";
+import type { MachineView } from "./registry.js";
 
 /**
  * The machines origin's own pages: the sign-in, and the shell the machines UI
@@ -26,7 +29,7 @@ export const MACHINES_PAGE_CSP = [
 /** Where the machines pages' files are served (machines host only). */
 export const MACHINES_ASSETS = "/_gate/machines/assets";
 
-function page(title: string, body: string): string {
+function page(title: string, body: string, wide = false): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -40,7 +43,7 @@ function page(title: string, body: string): string {
 <script src="${MACHINES_ASSETS}/machines.js"></script>
 </head>
 <body>
-<main class="gate">
+<main class="gate${wide ? " gate-wide" : ""}">
 <div class="gate-brand" aria-hidden="true"><span class="gate-mark"></span>agentbox machines</div>
 ${body}
 </main>
@@ -102,16 +105,143 @@ ${where}
   );
 }
 
-/** The Machines page: an empty shell the machines UI mounts into at `/`. */
-export function renderMachinesShell(v: { host: string }): string {
+const STATE_LABEL: Record<MachineView["state"], string> = {
+  online: "online",
+  offline: "offline",
+  paused: "paused on the machine",
+  revoked: "revoked",
+  left: "left",
+};
+
+function when(t: number | null): string {
+  return t === null ? "never" : new Date(t).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+function gib(bytes: number): string {
+  return `${(bytes / 2 ** 30).toFixed(1)} GiB`;
+}
+
+function specsLine(m: MachineView): string {
+  const s = m.specs;
+  if (!s) return `${escapeHtml(m.reported.platform)}/${escapeHtml(m.reported.arch)} · ${escapeHtml(m.reported.hostname)}`;
+  const parts = [
+    `${s.platform}/${s.arch}`,
+    s.hostname,
+    `node ${s.version}`,
+    `${s.cpu.cores} × ${s.cpu.model || "CPU"}`,
+    `${gib(s.ramBytes)} RAM`,
+    ...s.gpus.map((g) => `GPU ${g.name}${g.memoryMiB ? ` (${g.memoryMiB} MiB)` : ""}`),
+    s.docker ? "Docker" : "no Docker",
+    s.claude ? `Claude Code ${s.claude}` : "no Claude Code",
+  ];
+  return parts.map(escapeHtml).join(" · ");
+}
+
+function policyLine(m: MachineView): string {
+  const p = m.specs?.policy;
+  if (!p) return "";
+  if (p.problem) return `<span class="gate-msg is-error">policy: ${escapeHtml(p.problem)} (everything denied)</span>`;
+  const folders = p.files.map((f) => `${f.path} (${f.mode})`).join(", ") || "no folders";
+  return escapeHtml(`terminals ${p.terminals ? "on" : "off"} · ${folders} · ports ${p.ports ? "on" : "off"} · presence ${p.presenceHours} h`);
+}
+
+function machineItem(m: MachineView, manage: boolean): string {
+  const free = m.specs?.disks.map((d) => `${d.path}: ${gib(d.freeBytes)} free`).join(", ") ?? "";
+  const actions = !manage
+    ? ""
+    : m.state === "revoked" || m.state === "left"
+      ? `<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/remove" data-confirm="Remove ${escapeHtml(m.name)} from the list? Its token will be unknown from now on.">Remove</button>`
+      : `<button class="btn" type="button" data-machines-post="/_gate/machines/m/${escapeHtml(m.id)}/revoke" data-confirm="Revoke ${escapeHtml(m.name)}? Its link ends now and it stops.">Revoke</button>`;
+  return `<li class="machine" data-machine="${escapeHtml(m.id)}" data-state="${m.state}">
+<div class="machine-head"><strong>${escapeHtml(m.name)}</strong> <span class="machine-state is-${m.state}">${STATE_LABEL[m.state]}</span></div>
+<div class="gate-hint">${specsLine(m)}</div>
+${free ? `<div class="gate-hint">${escapeHtml(free)}</div>` : ""}
+${policyLine(m) ? `<div class="gate-hint">${policyLine(m)}</div>` : ""}
+<div class="gate-hint">last seen ${escapeHtml(when(m.lastSeenAt))}${m.lastIp ? ` from ${escapeHtml(m.lastIp)}` : ""} · id ${escapeHtml(m.id)}</div>
+${m.duplicateAt ? `<div class="gate-msg is-error">A second link for this machine was refused at ${escapeHtml(when(m.duplicateAt))}: is its token copied elsewhere?</div>` : ""}
+${m.upgradeNeeded ? `<div class="gate-msg is-error">Update needed: this machine's node is too old for the box.</div>` : ""}
+${actions}
+</li>`;
+}
+
+function machineList(machines: MachineView[], manage: boolean): string {
+  if (machines.length === 0) return `<p class="gate-sub">No machines are joined yet.</p>`;
+  return `<ul class="machines">${machines.map((m) => machineItem(m, manage)).join("\n")}</ul>`;
+}
+
+/** The Machines page at `/`: the list, until the machines UI (phase 4) mounts here. */
+export function renderMachinesShell(v: { host: string; machines: MachineView[] }): string {
   return page(
     "Machines · agentbox",
     `<section class="gate-card" aria-labelledby="gate-title" id="machines-root" data-host="${escapeHtml(v.host)}">
 <h1 id="gate-title" class="gate-title">Machines</h1>
-<p class="gate-sub">No machines are joined yet.</p>
+${machineList(v.machines, false)}
+<p><a class="btn" href="/admin">Admin: join, revoke, audit</a></p>
 <form id="machines-signout" method="post" action="/signout">
 <button class="btn gate-submit" type="submit">Sign out of machines</button>
 </form>
 </section>`,
+    true,
+  );
+}
+
+export interface AdminView {
+  host: string;
+  /** The box's own hostname, which `node join` is given. */
+  box: string;
+  machines: MachineView[];
+  joins: JoinView[];
+  audit: AuditEvent[];
+}
+
+/** The Admin page: pending joins (approved by typing the code the machine shows), machines, the audit log. */
+export function renderAdmin(v: AdminView): string {
+  const joins = v.joins.length
+    ? `<ul class="machines">${v.joins
+        .map(
+          (j) => `<li class="machine" data-join="${escapeHtml(j.id)}">
+<div class="machine-head"><strong>${escapeHtml(j.name)}</strong>${j.rejoinOf ? " (re-joining in place)" : ""}</div>
+<div class="gate-hint">${escapeHtml(`${j.platform}/${j.arch} · ${j.hostname}`)} · asked from <strong>${escapeHtml(j.ip)}</strong> · expires ${escapeHtml(when(j.expiresAt))}</div>
+<button class="btn" type="button" data-machines-post="/_gate/machines/joins/deny" data-body="${escapeHtml(JSON.stringify({ id: j.id }))}">Deny</button>
+</li>`,
+        )
+        .join("\n")}</ul>`
+    : `<p class="gate-sub">No machine is waiting to join.</p>`;
+  const audit = v.audit.length
+    ? `<ol class="audit">${v.audit
+        .map(
+          (e) =>
+            `<li><span class="gate-hint">${escapeHtml(when(e.at))}</span> ${escapeHtml(e.kind)}${e.name ? ` <strong>${escapeHtml(e.name)}</strong>` : ""}${e.ip ? ` from ${escapeHtml(e.ip)}` : ""}${e.detail ? ` — ${escapeHtml(e.detail)}` : ""}</li>`,
+        )
+        .join("\n")}</ol>`
+    : `<p class="gate-sub">Nothing yet.</p>`;
+  return page(
+    "Admin · machines",
+    `<section class="gate-card" aria-labelledby="gate-title" id="machines-admin" data-host="${escapeHtml(v.host)}">
+<h1 id="gate-title" class="gate-title">Machines admin</h1>
+<p><a href="/">Back to machines</a></p>
+</section>
+<section class="gate-card" aria-labelledby="joins-title">
+<h2 id="joins-title" class="gate-title">Join a machine</h2>
+<p class="gate-hint">On the machine, run <code>agentbox node join https://${escapeHtml(v.box)}</code>. It shows a code: type that code here. Approve only a machine whose name, platform and address you recognise.</p>
+${joins}
+<form class="gate-form" id="machines-approve" method="post" action="/_gate/machines/joins/approve">
+<div class="field">
+<label class="field-label" for="join-code">Code shown on the machine</label>
+<input class="input" id="join-code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="XXXX-XXXX">
+</div>
+<p class="gate-msg is-error" id="machines-message" role="alert" hidden></p>
+<button class="btn btn-primary gate-submit" type="submit">Approve</button>
+</form>
+</section>
+<section class="gate-card" aria-labelledby="list-title">
+<h2 id="list-title" class="gate-title">Machines</h2>
+${machineList(v.machines, true)}
+</section>
+<section class="gate-card" aria-labelledby="audit-title">
+<h2 id="audit-title" class="gate-title">Audit log</h2>
+${audit}
+</section>`,
+    true,
   );
 }

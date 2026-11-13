@@ -71,6 +71,43 @@
       });
     }
 
+    // Admin: approve a join by the code typed from the machine's screen.
+    var approve = document.getElementById("machines-approve");
+    if (approve) {
+      var approveMessage = document.getElementById("machines-message");
+      approve.addEventListener("submit", function (event) {
+        event.preventDefault();
+        approveMessage.hidden = true;
+        post("/_gate/machines/joins/approve", { code: approve.querySelector("input[name=code]").value })
+          .then(function (res) {
+            if (res.ok) return location.reload();
+            return res.json().then(function (data) {
+              approveMessage.textContent = data.message || "That did not work.";
+              approveMessage.hidden = false;
+            });
+          })
+          .catch(function () {
+            approveMessage.textContent = "The box did not answer. Try again.";
+            approveMessage.hidden = false;
+          });
+      });
+    }
+
+    // Admin: deny, revoke, remove.
+    var buttons = document.querySelectorAll("[data-machines-post]");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener("click", function (event) {
+        var b = event.currentTarget;
+        var ask = b.getAttribute("data-confirm");
+        if (ask && !window.confirm(ask)) return;
+        var body = b.getAttribute("data-body");
+        b.disabled = true;
+        post(b.getAttribute("data-machines-post"), body ? JSON.parse(body) : {}).finally(function () {
+          location.reload();
+        });
+      });
+    }
+
     var signout = document.getElementById("machines-signout");
     if (signout) {
       signout.addEventListener("submit", function (event) {

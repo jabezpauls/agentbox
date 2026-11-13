@@ -29,6 +29,8 @@ export interface AdminDeps {
   passcodes?: LoginLimiter;
   /** Machines passphrase attempts, which `unlock` clears too. */
   machinesLimiter?: LoginLimiter;
+  /** The machines' links, which `machines-off` ends. */
+  links?: { closeAll(reason?: string): number };
   now: () => number;
 }
 
@@ -102,7 +104,9 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: Ad
     }
     case "machines-off": {
       const { endedSessions } = await clearMachines(store);
-      return { ok: true, endedMachinesSessions: endedSessions };
+      // With the passphrase gone no link is taken (link.ts); those up end now.
+      const closedLinks = deps.links?.closeAll() ?? 0;
+      return { ok: true, endedMachinesSessions: endedSessions, closedLinks };
     }
     case "status": {
       return {
@@ -119,6 +123,7 @@ export async function runAdmin(deps: AdminDeps, command: AdminCommand, input: Ad
           passphraseSet: store.data.machines.passphrase !== null,
           passphraseUpdatedAt: store.data.machines.passphrase?.updatedAt ?? null,
           sessions: store.data.machines.sessions.length,
+          machines: store.data.machines.nodes.length,
         },
       };
     }

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { PolicySummary } from "./link/index.js";
 
 /**
  * The gate's state: everything that decides who gets in. One JSON file on the
@@ -62,12 +63,76 @@ export interface MachinesSessionRecord {
   userAgent: string;
 }
 
+/** What a machine said about itself in its last hello (protocol.ts's Hello, without the link's nonce). */
+export interface MachineSpecs {
+  version: string;
+  protocol: number;
+  platform: string;
+  arch: string;
+  hostname: string;
+  cpu: { model: string; cores: number };
+  ramBytes: number;
+  disks: Array<{ path: string; freeBytes: number }>;
+  gpus: Array<{ name: string; memoryMiB: number | null }>;
+  docker: boolean;
+  claude: string | null;
+  policy: PolicySummary;
+}
+
+/**
+ * A joined machine (machines/registry.ts). Its node token is kept as a
+ * digest only. A revoked machine keeps its record — and its digest — so its
+ * next link can be told, signed, that it is revoked; removing it forgets both.
+ */
+export interface MachineRecord {
+  id: string;
+  name: string;
+  /** SHA-256 of the `abn_` node token. */
+  tokenHash: string;
+  state: "active" | "revoked" | "left";
+  createdAt: number;
+  /** The address the join was asked for from, as the gate saw it. */
+  joinIp: string;
+  /** What the machine reported when it asked to join. */
+  reported: { platform: string; arch: string; hostname: string };
+  specs: MachineSpecs | null;
+  lastSeenAt: number | null;
+  lastIp: string | null;
+  /** Paused on the machine (`agentbox node pause`); cleared by its next hello. */
+  pausedAt: number | null;
+  revokedAt: number | null;
+  leftAt: number | null;
+  /** What the owner opted this machine in to (phase 4: the shared Claude token). */
+  optIns: { claudeToken: boolean };
+}
+
+/** A machine asking to join (machines/joins.ts): a record kind of its own, apart from device logins. */
+export interface MachineJoinRecord {
+  id: string;
+  /** SHA-256 of the join code the node polls with. */
+  hash: string;
+  /** What the machine shows and the owner types, `XXXX-XXXX`. Never listed. */
+  userCode: string;
+  name: string;
+  platform: string;
+  arch: string;
+  hostname: string;
+  ip: string;
+  createdAt: number;
+  expiresAt: number;
+  status: "pending" | "approved" | "denied";
+  /** Re-joining in place: the machine whose old node token the request proved. */
+  rejoinOf: string | null;
+}
+
 export interface MachinesData {
   /** The machines passphrase, bcrypt; set on the host only (`agentbox machines enable`). */
   passphrase: PasswordRecord | null;
   /** Bumped when the passphrase changes, so a sign-in checked against the old one is refused. */
   generation: number;
   sessions: MachinesSessionRecord[];
+  nodes: MachineRecord[];
+  joins: MachineJoinRecord[];
 }
 
 export interface TokenRecord {
@@ -164,7 +229,7 @@ export interface StoreData {
 }
 
 export function emptyMachines(): MachinesData {
-  return { passphrase: null, generation: 0, sessions: [] };
+  return { passphrase: null, generation: 0, sessions: [], nodes: [], joins: [] };
 }
 
 export function emptyTotp(): TotpRecord {
@@ -229,6 +294,8 @@ function parseMachines(raw: unknown): MachinesData {
     passphrase: m.passphrase && typeof m.passphrase.hash === "string" ? m.passphrase : null,
     generation: typeof m.generation === "number" ? m.generation : 0,
     sessions: Array.isArray(m.sessions) ? m.sessions.filter((s) => s?.aud === "machines") : [],
+    nodes: Array.isArray(m.nodes) ? m.nodes.filter((n) => typeof n?.id === "string" && typeof n.tokenHash === "string") : [],
+    joins: Array.isArray(m.joins) ? m.joins.filter((j) => typeof j?.id === "string" && typeof j.hash === "string") : [],
   };
 }
 

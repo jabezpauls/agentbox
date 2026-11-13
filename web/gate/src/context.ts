@@ -5,7 +5,11 @@ import type { Auth, Subject } from "./auth.js";
 import type { Config } from "./config.js";
 import type { DeviceFlow } from "./device.js";
 import type { HostKind, HostNames } from "./hosts.js";
+import type { MachinesAudit } from "./machines/audit.js";
 import type { Handoffs } from "./machines/handoff.js";
+import type { Joins } from "./machines/joins.js";
+import type { LinkHub } from "./machines/link.js";
+import type { Registry } from "./machines/registry.js";
 import type { MachinesSessions } from "./machines/session.js";
 import type { PasswordChecker } from "./password.js";
 import type { LoginLimiter, WindowLimiter } from "./ratelimit.js";
@@ -72,6 +76,20 @@ export interface GateCore {
   machinesLimiter: LoginLimiter;
   machinesSessions: MachinesSessions;
   handoffs: Handoffs;
+  /** Joined machines: the registry, joins, their links and the audit log. */
+  machines: MachinesCore;
+}
+
+export interface MachinesCore {
+  registry: Registry;
+  joins: Joins;
+  links: LinkHub;
+  audit: MachinesAudit;
+  /** Asking to join, per address; polling for the token, per address. */
+  joinStarts: WindowLimiter;
+  joinPolls: WindowLimiter;
+  /** Join codes typed on the Admin page, per machines session. */
+  codeGuesses: WindowLimiter;
 }
 
 /** Compare two strings in time that does not depend on where they differ. */

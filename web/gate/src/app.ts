@@ -11,7 +11,11 @@ import type { Config } from "./config.js";
 import { infoOf, peekInfo, setInfo, type GateCore, type RequestInfo } from "./context.js";
 import { DeviceFlow } from "./device.js";
 import { classifyHost, enforceRouteHosts, hostNames, type HostKind, type TaggedRoute } from "./hosts.js";
+import { MachinesAudit } from "./machines/audit.js";
 import { Handoffs } from "./machines/handoff.js";
+import { Joins } from "./machines/joins.js";
+import { LinkHub, type LinkOptions } from "./machines/link.js";
+import { Registry } from "./machines/registry.js";
 import { machinesHeaderLines, machinesOriginOf, machinesRequestRefusal, setMachinesHeaders } from "./machines/headers.js";
 import { registerMachines } from "./machines/routes.js";
 import { MachinesSessions } from "./machines/session.js";
@@ -71,6 +75,8 @@ export interface GateDeps {
   /** DNS for the trusted proxy's name; tests substitute their own. */
   lookup?: (host: string) => Promise<string[]>;
   timeouts?: Partial<GateTimeouts>;
+  /** The machines link's timings (tests shorten them). */
+  link?: Pick<LinkOptions, "pingMs" | "missedPings" | "stalePongMs" | "helloTimeoutMs" | "minProtocol">;
 }
 
 export interface Gate {
@@ -138,6 +144,17 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
   // not up yet is looked for again in the background).
   await Promise.race([clientIps.start(), new Promise((r) => setTimeout(r, 2_000).unref())]);
 
+  const registry = new Registry(store, now);
+  const audit = new MachinesAudit(config.dataDir, now);
+  const links = new LinkHub({
+    registry,
+    audit,
+    // Links only while machines are on and have a passphrase: `machines-off`
+    // clears it, and every link ends with it (admin.ts).
+    enabled: () => core.hosts !== null && store.data.machines.passphrase !== null,
+    now,
+    ...(deps.link ?? {}),
+  });
   const core: GateCore = {
     config,
     store,
@@ -156,6 +173,15 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     machinesLimiter: new LoginLimiter(deps.limits ?? LOGIN_LIMITS, now),
     machinesSessions: new MachinesSessions(store, now),
     handoffs: new Handoffs(now),
+    machines: {
+      registry,
+      joins: new Joins(store, registry, audit, now),
+      links,
+      audit,
+      joinStarts: new WindowLimiter(10, 60_000, now),
+      joinPolls: new WindowLimiter(60, 60_000, now),
+      codeGuesses: new WindowLimiter(10, 10 * 60_000, now),
+    },
   };
   const names = core.hosts;
   if (names) console.log(`[gate] machines are on: ${names.machines} and ${names.machineApps}, beside ${names.main}`);
@@ -311,6 +337,12 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
       plain(res, 426, "a tunnel is a WebSocket", { upgrade: "websocket" });
       return;
     }
+    if (r.kind === "node") {
+      // With machines off, the path is the gate's like any other, as it always was.
+      if (names === null) toGate(req, res);
+      else plain(res, 426, "a machine's link is a WebSocket", { upgrade: "websocket" });
+      return;
+    }
 
     const subject = core.authenticate(req);
     if (!subject) {
@@ -378,6 +410,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     const r = route(path, query);
     if (r.kind === "app") return appGateway.upgrade(req, socket, head, r, info);
     if (r.kind === "tunnel") return tunnel(req, socket, head, query, info);
+    if (r.kind === "node") return links.handleUpgrade(req, socket, head, info);
     // The gate's own routes take no other upgrades; nor does a redirect, nor
     // the editor channel, which is for the extension inside the sandbox alone.
     if (r.kind !== "upstream") return refuseUpgrade(socket, 404, "Not Found");
@@ -449,6 +482,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     void auth.prune().catch(() => {});
     void devices.prune().catch(() => {});
     void core.machinesSessions.prune().catch(() => {});
+    void core.machines.joins.prune().catch(() => {});
   }, PRUNE_MS);
   pruner.unref();
 
@@ -462,6 +496,7 @@ export async function buildGate(config: Config, deps: GateDeps = {}): Promise<Ga
     routes,
     close: async () => {
       clearInterval(pruner);
+      links.close();
       appGateway.close();
       clientIps.stop();
       sandboxServer.closeAllConnections();
