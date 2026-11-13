@@ -324,9 +324,9 @@ try {
       type('echo "shell-$($PSVersionTable.PSEdition)"\r');
       await on("the shell", "shell-Core");
       // herdr's panes take Windows' PATH from the registry: the shell shim puts the node's folders back.
-      type('echo "shim-$((Get-Command claude).Source) shell-[$env:SHELL]"\r');
-      await on("SHELL cleared", "shell-[]");
+      type('echo "shim-$((Get-Command claude).Source) parent-$((Get-CimInstance Win32_Process -Filter "ProcessId=$((Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId)").Name)"\r');
       await on("claude.cmd", "claude.cmd");
+      await on("the shell shim as the shell's parent", "parent-cmd.exe");
     } else {
       type('echo "shim-$(command -v claude)"\r');
       await on("the claude shim", "shims/claude");

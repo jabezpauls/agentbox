@@ -4,7 +4,7 @@ import { SessionHub, TerminalStreams, type Viewer } from "@workbench/hostcore/he
 import { CliError, EXIT } from "../errors.js";
 import { claudePaths, holdToken, installedClaude, prepareClaude } from "./claude.js";
 import { HerdrSupervisor, HERDR_SESSION } from "./herdr.js";
-import { withPath, windowsShell, writeShellShim } from "./proc.js";
+import { withPath, windowsShell, writeHerdrConfig, writeShellShim } from "./proc.js";
 import { GUI_EXE } from "./service-windows.js";
 import { PresenceGate } from "./presence.js";
 import { NodeServer } from "./server.js";
@@ -76,7 +76,7 @@ export async function runNode(o: RunOptions): Promise<number> {
   const win = process.platform === "win32";
   const onPath = [claude.shims, o.paths.bin, ...(win ? [herdrDir(o.paths.bin)] : [])];
   const herdrEnv: NodeJS.ProcessEnv = withPath(process.env, onPath);
-  if (win) herdrEnv.SHELL = writeShellShim(claude.shims, onPath, windowsShell(herdrEnv));
+  if (win) herdrEnv.HERDR_CONFIG_PATH = writeHerdrConfig(path.join(o.paths.dir, "herdr-config.toml"), writeShellShim(claude.shims, onPath, windowsShell(herdrEnv)));
   delete herdrEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
   // Files: the policy's folders, behind the lists the box can never get past (files.ts).

@@ -249,7 +249,6 @@ describe("the node's shims and service on Windows", () => {
     expect(fs.readFileSync(shell, "utf8").split("\r\n")).toEqual([
       "@echo off",
       expect.stringMatching(/^rem /),
-      'set "SHELL="',
       'set "Path=C:\\n\\shims;C:\\100%%\\bin;%Path%"',
       '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo',
       "",

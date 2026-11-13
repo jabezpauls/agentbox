@@ -27,14 +27,15 @@ export function withPath(env: NodeJS.ProcessEnv, dirs: string[], platform: NodeJ
 }
 
 /**
- * The shell herdr starts in each pane on Windows (its `SHELL`):
- * `agentbox-shell.cmd`, which puts `dirs` first on PATH and runs `shell`.
+ * The shell herdr starts in each pane on Windows: `agentbox-shell.cmd`,
+ * which puts `dirs` first on PATH and runs `shell`. Named by a herdr config
+ * file of the node's own (`HERDR_CONFIG_PATH`, see {@link writeHerdrConfig}).
  *
  * herdr's terminals (portable-pty) build a pane's environment from the
  * node's with the registry's on top, and Windows' PATH there replaces the
  * one the node passed: without this the panes would not find the `claude`
  * and `agentbox-preview` shims. herdr takes an executable for its shell, with
- * no arguments, hence a file. It clears SHELL again for what runs inside.
+ * no arguments, hence a file.
  */
 export function writeShellShim(shims: string, dirs: string[], shell: string): string {
   const q = (s: string): string => s.replace(/%/g, "%%");
@@ -42,12 +43,24 @@ export function writeShellShim(shims: string, dirs: string[], shell: string): st
   const text = [
     "@echo off",
     "rem agentbox: the shell of the node's terminals. Written by the node; rewritten at every start.",
-    'set "SHELL="',
     `set "Path=${dirs.map(q).join(";")};%Path%"`,
     `"${q(shell)}" -NoLogo`,
     "",
   ].join("\r\n");
   writePrivate(file, text, 0o700);
+  return file;
+}
+
+/**
+ * The node's herdr's own config file (`HERDR_CONFIG_PATH`), so it never
+ * reads or changes the owner's: on Windows it names the pane shell. Returns
+ * its path.
+ */
+export function writeHerdrConfig(file: string, shell: string | null): string {
+  // A TOML basic string is a JSON string, for what a path holds.
+  const lines = ["# agentbox: the node's own herdr settings. Written by the node; rewritten at every start.", ""];
+  if (shell) lines.push("[terminal]", `default_shell = ${JSON.stringify(shell)}`, "");
+  writePrivate(file, lines.join("\n"));
   return file;
 }
 
