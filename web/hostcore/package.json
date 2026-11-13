@@ -4,7 +4,8 @@
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./dist/hostcore/src/index.js" },
     "./link": { "types": "./src/link/index.ts", "default": "./dist/hostcore/src/link/index.js" },
-    "./herdr": { "types": "./src/herdr/index.ts", "default": "./dist/hostcore/src/herdr/index.js" }
+    "./herdr": { "types": "./src/herdr/index.ts", "default": "./dist/hostcore/src/herdr/index.js" },
+    "./files": { "types": "./src/files/index.ts", "default": "./dist/hostcore/src/files/index.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json", "test": "vitest run", "typecheck": "tsc -p tsconfig.json --noEmit", "lint": "eslint src test"

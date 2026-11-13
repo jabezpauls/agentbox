@@ -164,6 +164,36 @@ export class Trash {
     await removeTree(path.join(this.dir(root), id));
   }
 
+  /**
+   * Delete for good what was trashed before `before` (ms), and entries whose
+   * metadata cannot be read; returns how many went. The box keeps its trash
+   * until it is emptied; a machine's node sweeps its own after 7 days.
+   */
+  async expire(before: number): Promise<number> {
+    let n = 0;
+    for (const root of this.roots.list()) {
+      let ids: string[];
+      try {
+        ids = await fsp.readdir(this.dir(root));
+      } catch {
+        continue;
+      }
+      for (const id of ids) {
+        if (!TRASH_ID.test(id)) continue;
+        const meta = await this.read(root, id);
+        if (meta && meta.trashedAt >= before) continue;
+        if (!meta) {
+          // A half-written entry: gone once it is as old as the cut-off.
+          const st = await fsp.stat(path.join(this.dir(root), id)).catch(() => null);
+          if (st && st.mtimeMs >= before) continue;
+        }
+        await removeTree(path.join(this.dir(root), id)).catch(() => {});
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   /** Delete everything in the trash for good; returns how many items went. */
   async empty(): Promise<number> {
     const items = await this.list();

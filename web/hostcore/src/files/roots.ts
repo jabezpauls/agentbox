@@ -46,6 +46,12 @@ export interface RootsOptions {
   isHidden?: (realPath: string) => boolean;
   /** A resolved path that may be read but never changed. */
   isWriteDenied?: (realPath: string) => boolean;
+  /**
+   * Why a path as the client spelled it is refused before it is placed (a
+   * machine on Windows: UNC and device paths, streams, trailing dots), or
+   * `null` to go on.
+   */
+  refusePath?: (input: string) => string | null;
 }
 
 export interface Root {
@@ -135,6 +141,7 @@ export class Roots {
   private readonly caseInsensitive: boolean;
   private readonly isHidden: ((realPath: string) => boolean) | undefined;
   private readonly isWriteDenied: ((realPath: string) => boolean) | undefined;
+  private readonly refusePath: ((input: string) => string | null) | undefined;
 
   constructor(opts: RootsOptions) {
     this.roots = opts.roots.map((r) => ({ id: r.id, path: path.resolve(r.path), mode: r.mode, stateDir: path.resolve(r.stateDir) }));
@@ -147,6 +154,7 @@ export class Roots {
     this.caseInsensitive = opts.caseInsensitive ?? false;
     this.isHidden = opts.isHidden;
     this.isWriteDenied = opts.isWriteDenied;
+    this.refusePath = opts.refusePath;
   }
 
   byId(id: string): Root {
@@ -218,6 +226,8 @@ export class Roots {
     if (typeof input !== "string") throw new FilesError(400, "path required");
     if (input.length > MAX_PATH) throw new FilesError(400, "path too long");
     if (input.includes("\0")) throw new FilesError(400, "path contains a NUL byte");
+    const refused = this.refusePath?.(input) ?? null;
+    if (refused !== null) throw new FilesError(400, refused, "refused");
     if (hasEscapes(input)) {
       try {
         encodeName(input);
