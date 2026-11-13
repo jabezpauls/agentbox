@@ -10,6 +10,8 @@ import type { Handoffs } from "./machines/handoff.js";
 import type { Joins } from "./machines/joins.js";
 import type { LinkHub } from "./machines/link.js";
 import type { Registry } from "./machines/registry.js";
+import type { ClaudeTokens } from "./machines/claude-token.js";
+import type { MachineRouter } from "./machines/router.js";
 import type { MachinesSessions } from "./machines/session.js";
 import type { PasswordChecker } from "./password.js";
 import type { LoginLimiter, WindowLimiter } from "./ratelimit.js";
@@ -90,6 +92,12 @@ export interface MachinesCore {
   joinPolls: WindowLimiter;
   /** Join codes typed on the Admin page, per machines session. */
   codeGuesses: WindowLimiter;
+  /** `/m/<id>/…`: the machines' own servers, over their links, and the presence grants they issued. */
+  router: MachineRouter;
+  /** The shared Claude Code token (write-only). */
+  claudeTokens: ClaudeTokens;
+  /** Send a machine what it should hold of the shared token now (it, or nothing). */
+  pushClaudeToken: (machineId: string) => void;
 }
 
 /** Compare two strings in time that does not depend on where they differ. */

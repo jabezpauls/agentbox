@@ -30,10 +30,13 @@ export type AuditKind =
   | "upgrade"
   | "revoked"
   | "removed"
-  | "left";
+  | "left"
+  | "claude-token"
+  | "opt-in"
+  | "presence";
 
 /** Never rotated out. */
-const KEPT = new Set<AuditKind>(["join-approved", "join-denied", "token-issued", "rejoined", "revoked", "removed", "left"]);
+const KEPT = new Set<AuditKind>(["join-approved", "join-denied", "token-issued", "rejoined", "revoked", "removed", "left", "claude-token", "opt-in"]);
 
 export interface AuditEvent {
   id: string;

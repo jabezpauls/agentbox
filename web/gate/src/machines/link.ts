@@ -4,10 +4,12 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   CONTROL_PER_SECOND,
   decodeControl,
+  BudgetExceeded,
   decodeFrame,
   DUPLICATE_BACKOFF_MS,
   encodeControl,
   encodeFrame,
+  encodeOpen,
   FrameError,
   FrameType,
   HELLO_MAX_BYTES,
@@ -21,6 +23,9 @@ import {
   PING_MS,
   revokeMac,
   STALE_PONG_MS,
+  STREAM_WINDOW,
+  StreamBudget,
+  StreamTable,
   type ControlMessage,
   type GateAnswer,
   type Hello,
@@ -43,8 +48,10 @@ import type { Registry } from "./registry.js";
  * per machine: a second, while the first still answers a ping within 5 s, is
  * refused as a duplicate; a first that does not answer is replaced.
  *
- * Streams (the machine's HTTP server, through the link) come in phase 4:
- * `openStream` refuses until then, and a node may never open one.
+ * Streams: the gate opens one per HTTP connection or WebSocket upgrade bound
+ * for the machine's HTTP server (`openStream`, stream.ts); a node may never
+ * open one. Each holds its window against the gate-wide budget, and past it
+ * waits up to 30 s for room before it is refused with a 503.
  */
 
 export type StreamKind = "http" | "upgrade";
@@ -69,6 +76,16 @@ export interface LinkOptions {
   stalePongMs?: number;
   helloTimeoutMs?: number;
   minProtocol?: number;
+  /** The gate-wide stream budget (tests make it small). */
+  budget?: StreamBudget;
+  /** A machine's link is up (said ok): what it should be told now (the shared Claude token). */
+  onOnline?: (machineId: string) => void;
+}
+
+/** Who a stream is for: the machines session and its presence grant, which the node checks. */
+export interface StreamFor {
+  session: string | null;
+  grant: string | null;
 }
 
 interface Live {
@@ -76,8 +93,9 @@ interface Live {
   ws: WebSocket;
   hello: Hello;
   ip: string;
-  /** Streams open on this link (phase 4). */
-  streams: Map<number, Duplex>;
+  /** Streams open on this link. */
+  streams: StreamTable;
+  nextStream: number;
   stop: () => void;
 }
 
@@ -94,6 +112,7 @@ export class LinkHub {
   private readonly staleMs: number;
   private readonly helloMs: number;
   private readonly minProtocol: number;
+  private readonly budget: StreamBudget;
 
   constructor(private readonly opts: LinkOptions) {
     this.now = opts.now ?? Date.now;
@@ -102,6 +121,7 @@ export class LinkHub {
     this.staleMs = opts.stalePongMs ?? STALE_PONG_MS;
     this.helloMs = opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.minProtocol = opts.minProtocol ?? MIN_PROTOCOL_VERSION;
+    this.budget = opts.budget ?? new StreamBudget();
     // Room for a stream's window and its header; control is bounded tighter by the codec.
     this.wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 + 16, perMessageDeflate: false });
   }
@@ -225,7 +245,10 @@ export class LinkHub {
       ws,
       hello,
       ip,
-      streams: new Map(),
+      streams: new StreamTable((frame) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+      }, STREAM_WINDOW),
+      nextStream: 1,
       stop: () => {
         clearInterval(heartbeat);
         ws.off("pong", alive);
@@ -233,6 +256,7 @@ export class LinkHub {
     };
     this.live.set(machineId, live);
     this.send(ws, { type: "ok", machineId: rec.id, name: rec.name });
+    this.opts.onOnline?.(machineId);
     audit.record("online", { machineId: rec.id, name: rec.name, ip, detail: `node ${hello.version} on ${hello.platform}/${hello.arch}` });
     console.log(`[gate] machine ${rec.name} online from ${ip}`);
 
@@ -248,8 +272,8 @@ export class LinkHub {
       if (frame.type !== FrameType.control) {
         // The gate opens streams; a node never does. Anything for a stream the
         // gate has not opened is answered with its close.
-        if (!live.streams.has(frame.stream) && frame.type !== FrameType.close) {
-          ws.send(encodeFrame(FrameType.close, frame.stream));
+        if (frame.type === FrameType.open || !live.streams.receive(frame)) {
+          if (frame.type !== FrameType.close) ws.send(encodeFrame(FrameType.close, frame.stream));
         }
         return;
       }
@@ -268,7 +292,7 @@ export class LinkHub {
 
     ws.once("close", () => {
       live.stop();
-      for (const s of live.streams.values()) s.destroy(new Error("machine offline"));
+      live.streams.endAll("machine offline");
       if (this.live.get(machineId) !== live) return;
       this.live.delete(machineId);
       const now = registry.get(machineId);
@@ -335,17 +359,54 @@ export class LinkHub {
     return n;
   }
 
-  /**
-   * A byte stream to `machineId`'s HTTP server, over its link. Refused until
-   * phase 4 builds streams; the checks before that refusal are the ones that
-   * stay.
-   */
-  async openStream(machineId: string, kind: StreamKind): Promise<Duplex> {
-    void kind;
+  /** Say `message` to a machine on its link; false when it is not online. */
+  sendControl(machineId: string, message: ControlMessage): boolean {
     const live = this.live.get(machineId);
-    if (!live) throw new StreamRefused("machine offline", 503);
-    if (live.streams.size >= MAX_STREAMS_PER_LINK) throw new StreamRefused(`this machine has ${MAX_STREAMS_PER_LINK} streams open already`, 503);
-    throw new StreamRefused("streams to machines are not available yet", 501);
+    if (!live || live.ws.readyState !== WebSocket.OPEN) return false;
+    this.send(live.ws, message);
+    return true;
+  }
+
+  /**
+   * A byte stream to `machineId`'s HTTP server, over its link, for `who`:
+   * the node is told the machines session and its presence grant in the
+   * stream's open frame, and decides by them (and its policy) what to serve.
+   * Refused (503) when the machine is offline or has its 256 streams, or when
+   * the gate-wide budget has no room within 30 s.
+   */
+  async openStream(machineId: string, kind: StreamKind, who: StreamFor = { session: null, grant: null }): Promise<Duplex> {
+    const full = () => new StreamRefused(`this machine has ${MAX_STREAMS_PER_LINK} streams open already`, 503);
+    const first = this.live.get(machineId);
+    if (!first) throw new StreamRefused("machine offline", 503);
+    if (first.streams.size >= MAX_STREAMS_PER_LINK) throw full();
+    let release: () => void;
+    try {
+      release = await this.budget.reserve(STREAM_WINDOW);
+    } catch (err) {
+      if (err instanceof BudgetExceeded) throw new StreamRefused(err.message, 503);
+      throw err;
+    }
+    const live = this.live.get(machineId);
+    if (!live || live.ws.readyState !== WebSocket.OPEN) {
+      release();
+      throw new StreamRefused("machine offline", 503);
+    }
+    if (live.streams.size >= MAX_STREAMS_PER_LINK) {
+      release();
+      throw full();
+    }
+    let id = live.nextStream;
+    while (live.streams.has(id)) id = id >= 0xffff_ffff ? 1 : id + 1;
+    live.nextStream = id >= 0xffff_ffff ? 1 : id + 1;
+    const stream = live.streams.open(id);
+    stream.once("close", release);
+    live.ws.send(encodeFrame(FrameType.open, id, encodeOpen({ kind, session: who.session, grant: who.grant })));
+    return stream;
+  }
+
+  /** What the stream budget holds now (for tests and the log). */
+  budgetInUse(): number {
+    return this.budget.inUse;
   }
 
   close(): void {

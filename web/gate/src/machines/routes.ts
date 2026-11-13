@@ -6,7 +6,7 @@ import { HANDOFF_PATH, infoOf, type GateCore } from "../context.js";
 import { MACHINES, MAIN } from "../hosts.js";
 import { loginMessage } from "../pages.js";
 import { machinesOriginOf } from "./headers.js";
-import { MACHINES_ASSETS, MACHINES_PAGE_CSP, renderMachinesShell, renderSignin } from "./pages.js";
+import { MACHINES_ASSETS, MACHINES_PAGE_CSP, MACHINES_UI_CSP, renderMachinesShell, renderSignin } from "./pages.js";
 import { registerJoinRoutes, registerManageRoutes } from "./manage.js";
 import { requireMachinesSession } from "./session.js";
 
@@ -57,6 +57,17 @@ function isNavigation(req: FastifyRequest): boolean {
   if (typeof mode === "string") return mode === "navigate";
   return String(req.headers.accept ?? "").includes("text/html");
 }
+
+/** The machines UI's built files (web/app's second entry), under the gate's static folder. */
+export const MACHINES_UI_DIR = "machines-ui";
+const UI_TYPES: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+};
 
 function page(reply: FastifyReply, html: string): FastifyReply {
   return reply.code(200).type("text/html; charset=utf-8").header("content-security-policy", MACHINES_PAGE_CSP).send(html);
@@ -115,10 +126,35 @@ export async function registerMachines(app: FastifyInstance, core: GateCore): Pr
       return payload;
     });
 
-    m.get("/", { config: { hosts: MACHINES, machines: "session" } }, async (_req, reply) => {
+    // The machines UI: the list at `/`, a machine at `/machine/<id>`. Without
+    // a built UI (a gate built alone), the plain list the gate renders.
+    const ui = path.join(config.staticDir, MACHINES_UI_DIR);
+    const shell = async (reply: FastifyReply) => {
+      let html: string | null = null;
+      try {
+        html = await fs.promises.readFile(path.join(ui, "machines.html"), "utf8");
+      } catch {
+        // Not built.
+      }
+      if (html !== null) return reply.code(200).type("text/html; charset=utf-8").header("content-security-policy", MACHINES_UI_CSP).send(html);
       const { registry, links } = core.machines;
       const machines = registry.all().map((r) => registry.view(r, links.isOnline(r.id)));
       return page(reply, renderMachinesShell({ host: names.machines, machines }));
+    };
+    m.get("/", { config: { hosts: MACHINES, machines: "session" } }, async (_req, reply) => shell(reply));
+    m.get("/machine/:id", { config: { hosts: MACHINES, machines: "session" } }, async (_req, reply) => shell(reply));
+    m.get<{ Params: { name: string } }>("/assets/:name", { config: { hosts: MACHINES } }, async (req, reply) => {
+      const name = req.params.name;
+      const type = UI_TYPES[path.extname(name)];
+      if (!type || !/^[A-Za-z0-9._-]{1,200}$/.test(name) || name.startsWith(".")) return reply.code(404).send({ error: "not found" });
+      let data: Buffer;
+      try {
+        data = await fs.promises.readFile(path.join(ui, "assets", name));
+      } catch {
+        return reply.code(404).send({ error: "not found" });
+      }
+      // Content-hashed names: the same name is always the same bytes.
+      return reply.type(type).header("cache-control", "public, max-age=31536000, immutable").send(data);
     });
 
     registerManageRoutes(m, core);
