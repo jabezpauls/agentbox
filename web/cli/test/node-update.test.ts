@@ -275,7 +275,8 @@ describe("the release's manifest (scripts/machines-manifest.mjs)", () => {
 
   it("is signed with the key from the environment, and verifies as the node checks it", () => {
     const pem = release.priv.export({ type: "pkcs8", format: "pem" }).toString();
-    const r = make({ MACHINES_SIGNING_KEY: pem, GITHUB_REPOSITORY: "jabezpauls/agentbox" }, ["--require-signature"]);
+    const trusted = release.pub;
+    const r = make({ MACHINES_SIGNING_KEY: pem, MACHINES_TRUSTED_KEYS: trusted, GITHUB_REPOSITORY: "jabezpauls/agentbox" }, ["--require-signature"]);
     expect(r.status, r.stderr).toBe(0);
     const bytes = fs.readFileSync(path.join(r.out, "machines-manifest.json"));
     const sig = fs.readFileSync(path.join(r.out, "machines-manifest.json.sig"));

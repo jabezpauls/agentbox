@@ -71,9 +71,13 @@ function args(argv) {
   return o;
 }
 
-/** The public keys built into the node, as PEM, read from its source. */
+/**
+ * The public keys built into the node, as PEM, read from its source. Tests
+ * stand in keys of their own with MACHINES_TRUSTED_KEYS (PEM blocks); a
+ * release never sets it.
+ */
 function builtInKeys() {
-  const src = fs.readFileSync(path.join(here, "..", "src", "node", "release-keys.ts"), "utf8");
+  const src = process.env.MACHINES_TRUSTED_KEYS ?? fs.readFileSync(path.join(here, "..", "src", "node", "release-keys.ts"), "utf8");
   return [...src.matchAll(/-----BEGIN PUBLIC KEY-----[A-Za-z0-9+/=\s\\n]+?-----END PUBLIC KEY-----/g)].map((m) => m[0].replace(/\\n/g, "\n"));
 }
 
