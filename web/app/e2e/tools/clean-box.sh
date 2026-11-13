@@ -47,7 +47,7 @@ case "${1:-}" in
 esac
 image="${2:-agentbox/workspace:latest}"
 
-for built in app/dist/index.html bridge/dist/bridge/src/main.js gate/dist/main.js vscode-ext/dist/agentbox-connect.vsix; do
+for built in app/dist/index.html hostcore/dist/hostcore/src/index.js bridge/dist/bridge/src/main.js gate/dist/main.js vscode-ext/dist/agentbox-connect.vsix; do
   if [ ! -e "$web/$built" ]; then
     echo "missing web/$built — run \`npm run build\` in web/ first" >&2
     exit 1
@@ -70,6 +70,7 @@ docker run -d --rm --name "$box" --hostname agentbox --network "$net" --network-
   --tmpfs /home/coder:size=20g,uid=1000,gid=1000,mode=0755 \
   -e AGENTBOX_VERSION="$version" \
   -v "$web/bridge/dist:/usr/local/lib/agentbox-workbench/bridge:ro" \
+  -v "$web/hostcore:/usr/local/lib/agentbox-workbench/hostcore:ro" \
   -v "$web/app/dist:/usr/local/lib/agentbox-workbench/app:ro" \
   -v "$web/node_modules:/usr/local/lib/agentbox-workbench/node_modules:ro" \
   -v "$web/vscode-ext/dist/agentbox-connect.vsix:/usr/local/share/agentbox/agentbox-connect.vsix:ro" \

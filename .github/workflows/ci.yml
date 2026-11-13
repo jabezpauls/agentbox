@@ -156,7 +156,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
-      - run: npm run build -w bridge
+      - run: npm run build -w hostcore -w bridge
         working-directory: web
       - name: Real WebDAV clients against /api/dav
         # litmus and rclone, each in its own container, against the real
