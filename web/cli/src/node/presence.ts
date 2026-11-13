@@ -97,7 +97,8 @@ export interface PresenceOptions {
  * presence here for fifteen, right answers included.
  */
 export class PresenceGate {
-  private readonly key: Buffer;
+  private key: Buffer;
+  private presence: Presence;
   private readonly challenges = new Map<string, { session: string; expiresAt: number }>();
   private readonly grants = new Map<string, Grant>();
   private failures: number[] = [];
@@ -105,8 +106,21 @@ export class PresenceGate {
   private readonly now: () => number;
 
   constructor(private readonly o: PresenceOptions) {
+    this.presence = o.presence;
     this.key = Buffer.from(o.presence.key, "base64url");
     this.now = o.now ?? Date.now;
+  }
+
+  /**
+   * A new passphrase (`agentbox node passphrase`), taken at once: every
+   * challenge and every grant the old one earned ends, so channels opened on
+   * them close at the next check.
+   */
+  rekey(presence: Presence): void {
+    this.presence = presence;
+    this.key = Buffer.from(presence.key, "base64url");
+    this.challenges.clear();
+    this.grants.clear();
   }
 
   /** Locked until this time, or `null`. */
@@ -124,7 +138,7 @@ export class PresenceGate {
     const challenge = randomBytes(32).toString("base64url");
     const expiresAt = t + CHALLENGE_MS;
     this.challenges.set(challenge, { session, expiresAt });
-    return { challenge, salt: this.o.presence.salt, iterations: this.o.presence.iterations, expiresAt };
+    return { challenge, salt: this.presence.salt, iterations: this.presence.iterations, expiresAt };
   }
 
   answer(session: string | null, challenge: string, answer: string): AnswerResult {

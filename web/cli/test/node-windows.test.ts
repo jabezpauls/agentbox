@@ -12,7 +12,7 @@ import { nodePaths } from "../src/node/paths.js";
 import { parsePolicy, summarize } from "../src/node/policy.js";
 import { writePreviewShim } from "../src/node/preview.js";
 import { withPath, writeShellShim } from "../src/node/proc.js";
-import { guiExecutable, RotatingLog, runCommandLine, runEntry, supervise } from "../src/node/service-windows.js";
+import { guiExecutable, regExe, RotatingLog, runCommandLine, runEntry, supervise } from "../src/node/service-windows.js";
 import { unzip } from "../src/node/unzip.js";
 import { tmpDir } from "./helpers.js";
 
@@ -286,5 +286,13 @@ describe("the node's shims and service on Windows", () => {
     const log = fs.readFileSync(path.join(p.state, "node.log"), "utf8");
     expect(log).toMatch(/run 1\n[\s\S]*restarting in[\s\S]*run 3\n[\s\S]*not restarting it/);
     expect(fs.existsSync(path.join(p.state, "supervise.json"))).toBe(false);
+  });
+});
+
+describe("programs the node runs on Windows", () => {
+  it("names reg.exe by its full path: a bare name is looked for in the working folder first", () => {
+    expect(regExe({ SystemRoot: "C:\\Windows" })).toBe("C:\\Windows\\System32\\reg.exe");
+    expect(regExe({ SystemRoot: "relative" })).toBe("C:\\Windows\\System32\\reg.exe");
+    expect(regExe({})).toBe("C:\\Windows\\System32\\reg.exe");
   });
 });

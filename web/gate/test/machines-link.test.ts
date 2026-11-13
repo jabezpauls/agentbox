@@ -279,6 +279,9 @@ describe("the link", () => {
     h = await startHarness({ ...ON, trustedProxies: [] }, { link: FAST });
     await setPassphrase({ store: h.gate.core.store, cost: COST }, PASSPHRASE);
     expect(await connect(h, `abn_${"z".repeat(43)}`)).toEqual({ status: 421 });
+    // Nor may the sandbox ask to join, or poll, from inside: only through the proxy, as the link.
+    expect((await mainPost(h, "/_gate/node/join/start", { name: "x" })).status).toBe(421);
+    expect((await mainPost(h, "/_gate/node/join/poll", { joinCode: "x" })).status).toBe(421);
     await h.close();
     h = await startHarness({ publicUrl: `https://${MAIN}`, trustedProxies: ["127.0.0.1"] }, { link: FAST });
     expect(await connect(h, `abn_${"z".repeat(43)}`)).toEqual({ status: 404 });
@@ -403,6 +406,19 @@ describe("revoking a machine", () => {
     expect(await connect(hh, m.token)).toEqual({ status: 401 });
     const audit = (await mGet(hh, cookie, "/_gate/machines/audit")).body;
     for (const kind of ["revoked", "removed", "online"]) expect(audit).toContain(kind);
+  });
+
+  it("does not let a revoked machine that keeps linking grow the log that is never rotated", async () => {
+    const hh = await on();
+    const cookie = await machinesCookie(hh);
+    const m = await join(hh, cookie);
+    expect((await mPost(hh, cookie, `/_gate/machines/m/${m.machineId}/revoke`)).status).toBe(200);
+    const keep = path.join(hh.dataDir, AUDIT_KEEP_FILE);
+    const lines = () => fs.readFileSync(keep, "utf8").split("\n").filter(Boolean).length;
+    const before = lines();
+    for (let i = 0; i < 5; i++) expect((await link(hh, m.token)).answer.type).toBe("revoked");
+    // Told every time; kept once.
+    expect(lines() - before).toBeLessThanOrEqual(1);
   });
 });
 

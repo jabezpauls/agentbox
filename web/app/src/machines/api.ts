@@ -1,6 +1,8 @@
 // The machines origin's own API (the gate's, not a machine's): the list,
 // the machines session, and presence through the gate.
 
+import { forgetPassphrase } from "./presence.ts";
+
 export interface MachineView {
   id: string;
   name: string;
@@ -67,5 +69,9 @@ export const machinesApi = {
   apps: (id: string) => call<{ apps: MachineApp[] }>("GET", `/_gate/machines/m/${id}/apps`).then((r) => r.apps),
   /** A single-use link that opens the app (and grants it to this session). */
   openApp: (id: string, app: string) => call<{ url: string }>("POST", `/_gate/machines/m/${id}/apps/${app}/open`).then((r) => r.url),
-  signOut: () => fetch("/signout", { method: "POST", credentials: "same-origin" }),
+  /** Signing out forgets the passphrase this tab holds, too. */
+  signOut: () => {
+    forgetPassphrase();
+    return fetch("/signout", { method: "POST", credentials: "same-origin" });
+  },
 };

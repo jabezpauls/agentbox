@@ -163,6 +163,17 @@ With herdr installed locally, `agentbox attach` runs `herdr --remote` over SSH:
 your herdr draws the UI and the box sends only what the panes show. Without
 it, the TUI is streamed from the box. See [docs/cli.md](docs/cli.md).
 
+## Your own machines
+
+Join a laptop, a home server or a Windows PC to the box and run Claude Code
+**on it** from the browser: its terminals and agents, its files, and a
+Preview of the apps an agent starts there. One download and `agentbox node
+join <box>` on the machine; no root, no admin, no Node.js, no open port. It
+lives on an origin of its own that only the gate serves, behind a second
+passphrase that is never typed on the box, and the machine itself checks
+you are there before it opens anything — so nothing in the sandbox can reach
+it. Off until you turn it on; see [docs/machines.md](docs/machines.md).
+
 ## Security
 
 The agents run in the sandbox, so the sandbox is where things can go wrong. We
@@ -233,6 +244,8 @@ sudo ./scripts/agentbox update           # the newest release: fetch, pull, rest
 - [The app](docs/workbench.md): every surface, the keyboard, using it from a
   phone, apps and review
 - [The CLI](docs/cli.md): attach, ssh, files, mount, forward
+- [Machines](docs/machines.md): your own Linux and Windows computers, joined
+  to the box and opened from the browser
 - [Security model](docs/security.md): the boundary and its residuals, stated
   plainly
 - [How I use it](docs/how-i-use-it.md): a day with agentbox, from handing out

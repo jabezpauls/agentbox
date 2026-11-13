@@ -97,6 +97,25 @@ describe("presence", () => {
     const again = g.challenge(SESSION) as { challenge: string };
     expect(g.answer(SESSION, again.challenge, await answerFor(PASS, presence.salt, presence.iterations, again.challenge)).ok).toBe(true);
   });
+
+  it("takes a new passphrase at once: the old one answers nothing, and what it granted ends", async () => {
+    const t = 12_000_000;
+    const { gate: g, presence } = await gate(() => t);
+    const c = g.challenge(SESSION) as { challenge: string; salt: string; iterations: number };
+    const r = g.answer(SESSION, c.challenge, await answerFor(PASS, c.salt, c.iterations, c.challenge));
+    if (!r.ok) throw new Error(r.error);
+    const pending = g.challenge(SESSION) as { challenge: string };
+    const NEW = `${PASS}-new`;
+    const fresh = await enrol(NEW, t, 1_000);
+    g.rekey(fresh);
+    expect(g.check(r.grant, SESSION)).toBe(false);
+    expect(g.answer(SESSION, pending.challenge, await answerFor(PASS, presence.salt, presence.iterations, pending.challenge))).toMatchObject({ ok: false, error: "expired" });
+    const c2 = g.challenge(SESSION) as { challenge: string; salt: string; iterations: number };
+    expect(c2.salt).toBe(fresh.salt);
+    expect(g.answer(SESSION, c2.challenge, await answerFor(PASS, presence.salt, presence.iterations, c2.challenge))).toMatchObject({ ok: false, error: "wrong" });
+    const c3 = g.challenge(SESSION) as { challenge: string; salt: string; iterations: number };
+    expect(g.answer(SESSION, c3.challenge, await answerFor(NEW, c3.salt, c3.iterations, c3.challenge)).ok).toBe(true);
+  });
 });
 
 /** The node's server fed streams the way the link feeds it, from a gate-side table. */

@@ -54,6 +54,8 @@ export class Trash {
         }
         throw err;
       }
+      // Again as it resolves: a link on the way may lead somewhere the lexical path did not say.
+      this.roots.assertMutable(ref);
       result.trashed.push(await this.put(ref.root, ref.abs, ref.fs));
     }
     return result;

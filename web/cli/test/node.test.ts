@@ -374,6 +374,21 @@ describe("the node's link", () => {
     expect(g.connections).toBe(3);
   });
 
+  it("stops as left only when it asked to leave: a close saying so unasked is a dropped link", async () => {
+    const g = await fakeGate((ws, _h, n) => {
+      ws.send(encodeControl({ type: "ok", machineId: "m1", name: "laptop" }));
+      if (n === 1) setTimeout(() => ws.close(4005, "left"), 20);
+      else ws.on("message", (d: Buffer) => decodeControl(decodeFrame(d).payload).type === "leave" && ws.close(4005, "left"));
+    });
+    cleanup.push(() => g.close());
+    const { link } = newLink(g.url);
+    cleanup.push(() => link.stop());
+    link.start();
+    await until(() => g.connections >= 2 && link.state === "online");
+    expect(await link.leave()).toBe(true);
+    await until(() => link.state === "left");
+  });
+
   it("takes a 401 or a proxy's page for a network failure, and retries", async () => {
     let status = 401;
     const g = await fakeGate((ws) => ws.send(encodeControl({ type: "ok", machineId: "m1", name: "laptop" })), () => status);

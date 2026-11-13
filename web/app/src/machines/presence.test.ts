@@ -1,5 +1,7 @@
 import { createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
+import { machinesApi } from "./api.ts";
 import { forgetPassphrase, heldPassphrase, holdPassphrase, presenceAnswer } from "./presence.ts";
 
 describe("presence in the browser", () => {
@@ -24,5 +26,19 @@ describe("presence in the browser", () => {
     expect(localStorage.length).toBe(0);
     forgetPassphrase();
     expect(heldPassphrase()).toBeNull();
+  });
+
+  it("forgets the passphrase on signing out", async () => {
+    holdPassphrase("held until sign-out");
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      await machinesApi.signOut();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(heldPassphrase()).toBeNull();
+    expect(sessionStorage.length).toBe(0);
   });
 });

@@ -435,11 +435,113 @@ every `Host` as the box's, as it always has, and every machines route is a
   same-origin`, `Cross-Origin-Opener-Policy: same-origin`,
   `Origin-Agent-Cluster: ?1`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`, a CSP with `frame-ancestors 'none'`, and no
-  `Access-Control-Allow-*`.
+  `Access-Control-Allow-*`. The machines UI runs only its own script
+  (`script-src 'self'`) and registers no service worker.
+- **Joining.** A machine asks to join on the box's origin, through the proxy
+  only (the sandbox calling the gate directly gets `421`), and shows a code;
+  the owner types that code on the machines origin's Admin page, which lists
+  the name, platform, hostname and the address the gate saw. Nothing opens
+  without the typed code (guesses are limited per machines session); at most
+  3 joins wait, 10 minutes each. The node collects its **node token** once;
+  the gate keeps a digest. A node token opens the link (`/_gate/node`, a
+  WebSocket on the box's host, through the proxy only) and nothing else, and
+  nothing else opens the link. Re-joining in place proves the old token.
+- **What a machine sends** reaches the browser only through the gate, which
+  rebuilds its headers: `Content-Type` only `application/json`,
+  `application/octet-stream` or `text/plain`, a handful of caching and length
+  headers, a download always `attachment`, and the machines origin's own
+  headers plus `Content-Security-Policy: sandbox; default-src 'none'`. Any
+  other header (`Set-Cookie`, `Location`, CORS, CSP) is dropped, and an HTML
+  body, any other type or a redirect becomes a `502`. Nothing of the
+  browser's credentials or address reaches the machine. Bounds: 32 machines,
+  256 streams a machine, a 256 KiB window a stream and 64 MiB in flight across
+  every link, 20 control messages a second, a 16 KiB hello; the node holds
+  the gate to the same frame and stream bounds.
+- **Presence: the machine, not the gate, decides.** Before it opens a
+  terminal, herdr (agents) or Files, a machine wants proof that the owner is
+  at a browser with the machines passphrase now. `agentbox node join` (and
+  `node passphrase`) derive a key from it on the machine (PBKDF2-SHA256,
+  600 000 rounds, a salt of the machine's); the machines UI derives the same
+  key in the tab and answers a fresh challenge (32 random bytes, single use,
+  60 s) with `HMAC-SHA256(key, challenge ‖ machines session id ‖ machine
+  id)`. The grant it earns is bound to that session, held by the gate and
+  never given to the page, and lasts `presenceHours` (1–24, default 12) from
+  its issue, or until 30 minutes without a channel. Five wrong answers in ten
+  minutes lock presence on that machine for 15. A new passphrase on the
+  machine ends every grant the old one earned, at once.
+- **Files on a machine** are the policy's folders only, `read` or `write`.
+  Whatever the policy says, the box never writes the node's folder, any dot
+  file or folder directly in home (AppData too, on Windows) and what is in
+  it, folders on `PATH` inside home, desktop entries, PowerShell's profiles,
+  the Startup folder, anything named `.git` in any repository, or a folder
+  that holds any of these or a hidden path (so it is not moved, trashed or
+  replaced with them in it); and never shows `~/.ssh`, `~/.gnupg`, agentbox's
+  config and the node's secrets, Claude Code's credentials, browser profiles
+  or Windows' credential stores, nor copies a folder holding one. Checked on
+  the resolved path, case-insensitively on Windows; UNC and device paths,
+  streams, trailing dots and spaces, DOS device names and 8.3 short names are
+  refused outright. With `terminals` off this is what keeps "write a file"
+  from becoming "run code".
+- **Updates the box cannot choose.** The node takes code only from a release
+  manifest it fetches from GitHub (never from the box), signed with an
+  ed25519 key built into it (two: current and next), never older than what
+  runs, every file checked against the manifest's SHA-256. `agentbox update`
+  (the box-served CLI) is refused on a machine with a node. Claude Code and
+  herdr are checked against pinned digests the same way. `policy.json` is
+  the owner's file: nothing from the box writes it, and the box cannot
+  un-pause a machine.
+- **The shared Claude token** (`claude setup-token`, pasted on Admin) is kept
+  in a secrets file of its own on the gate's volume (`0600`, never in
+  `gate.json`, never answered back, never logged) and sent only over links,
+  to machines the owner opted in. A machine keeps it in its `secrets/`; a
+  `claude` shim reads it at each launch, so it is not in every shell's
+  environment (Claude Code may pass it on to the commands it runs).
+  Revoking a machine wipes it there at its next link; the machine may have
+  kept a copy, so replace the token.
+- **Apps on machines** are on the machine-apps host, under the box's app
+  policy above — opaque origin, cookies kept to the app's path, the gate's
+  cookies stripped — framed only by the machines origin. They are opened by a
+  single-use ticket the machines origin mints (a `POST`, 60 s, bound to the
+  machines session and the app), traded for an app grant (an hour unused, void
+  when the session ends). A node proxies only ports it registered itself
+  (`agentbox-preview`), on its own loopback, never following a redirect; apps
+  are not behind presence, and cannot be shared.
 
-`tests/proxy/gate-bypass.sh` proves these through the real proxy and gate
-image; `tests/proxy/topology.py` that only the gate and the proxy are told the
-hostnames.
+`tests/proxy/gate-bypass.sh` proves the origin's rules through the real proxy
+and gate image; `tests/proxy/topology.py` that only the gate and the proxy are
+told the hostnames; the gate's unit tests and `web/cli/e2e/machines.mjs` the
+link, joining, presence and the path rules end to end.
+
+**A compromised gate** is the case presence is for. It serves the machines UI
+and holds every machines session, so it can list machines, read their specs,
+open their registered apps, revoke them, and push them a Claude token of its
+choosing (a machine cannot tell opt-in). It can act on a machine only while a
+presence grant the owner gave there is live, and keep that grant from idling
+out, not extend it. It can capture the machines passphrase the next time the
+owner types it into the UI it serves (a passkey would close that; v1 has a
+passphrase), and after that prove presence itself; it also holds the
+passphrase's bcrypt hash, and a captured answer lets it guess at the
+passphrase offline. It cannot widen a policy, un-pause a machine, write past
+the lists, or push code. If you suspect it: change the passphrase on the host
+and on every machine, and pause what you are not using.
+
+**Residuals, stated plainly:**
+
+- **A lookalike page.** The sandbox serves the box's origin, so it can show a
+  page that asks for the machines passphrase. It is only ever asked for on
+  the machines host, and every prompt says so: type it only where the address
+  bar reads the machines host.
+- **Apps on machines carry the app grant's residual** (above, "Another site
+  that knows a private app's id"): a page that knows an app's id can reach it
+  as you while you hold a grant for it. Script the sandbox serves on the box's
+  origin can also set cookies for the parent domain, which reach a machine's
+  app as that app's own cookies would.
+- **Cookies for the parent domain** set by anything on the box's origin also
+  count against the request-header limit on the machines hosts; too many, and
+  they answer `431` until the site's cookies are cleared.
+- **The machine's own agents run as you**, with your access, as Claude Code by
+  hand does: they can change `policy.json`, run `agentbox node resume`, or
+  read the node's secrets. agentbox does not contain them.
 
 **A machine on Windows** (no admin, no WSL) has two limits of its own,
 which `agentbox node join` states before it does anything:
@@ -526,6 +628,9 @@ What the gate guarantees regardless:
   none of agentbox's own services is ever an app;
 - app content never runs with the box's origin: every app is an opaque origin,
   in the Preview panel and full screen;
+- with machines on, nothing on the box's origin opens one: the machines
+  origin takes only its own session, which needs the machines passphrase
+  (never typed on the box's origin), and the machine itself checks presence;
 - the changes that would keep the box or lock you out — a new device, the
   password, two-factor, revoking tokens — need the password again (and a code,
   with two-factor on), not just the session.

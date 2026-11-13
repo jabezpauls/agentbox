@@ -103,6 +103,9 @@ interface Live {
   stop: () => void;
 }
 
+/** How often a revoked machine linking again is written to the audit log. */
+const REVOKED_AUDIT_MS = 60 * 60_000;
+
 /** Close codes the node reads (beside 1000/1001). */
 export const CLOSE = { protocol: 1002, policy: 1008, revoked: 4001, duplicate: 4002, upgrade: 4003, off: 4004, left: 4005, replaced: 4006 } as const;
 
@@ -110,6 +113,8 @@ export class LinkHub {
   private readonly wss: WebSocketServer;
   private readonly live = new Map<string, Live>();
   private readonly pending = new Set<WebSocket>();
+  /** When each revoked machine was last written to the audit log for linking again. */
+  private readonly toldRevoked = new Map<string, number>();
   private readonly now: () => number;
   private readonly pingMs: number;
   private readonly missed: number;
@@ -194,7 +199,13 @@ export class LinkHub {
       // Signed with the token's digest and bound to this link's nonce: only
       // this box's gate can say it, and only to this link.
       this.send(ws, { type: "revoked", machineId: rec.id, mac: revokeMac(rec.tokenHash, rec.id, hello.nonce) });
-      audit.record("revoked", { machineId: rec.id, name: rec.name, ip, detail: "told on its link" });
+      // Told every time, kept at most hourly: the kept log is never rotated,
+      // and a machine holding a revoked token may link again in a loop.
+      const last = this.toldRevoked.get(rec.id);
+      if (last === undefined || this.now() - last >= REVOKED_AUDIT_MS) {
+        this.toldRevoked.set(rec.id, this.now());
+        audit.record("revoked", { machineId: rec.id, name: rec.name, ip, detail: "told on its link" });
+      }
       return ws.close(CLOSE.revoked, "revoked");
     }
     if (hello.protocol < this.minProtocol) {

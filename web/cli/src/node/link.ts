@@ -10,6 +10,7 @@ import {
   encodeFrame,
   FrameType,
   LINK_PATH,
+  MAX_STREAMS_PER_LINK,
   PROTOCOL_VERSION,
   STREAM_WINDOW,
   StreamTable,
@@ -77,6 +78,8 @@ export class NodeLink extends EventEmitter {
   private stateNow: LinkState = "stopped";
   private running = false;
   private paused = false;
+  /** It said `leave`: only then is a close saying "left" taken for one (a gate saying so unasked is a dropped link). */
+  private leaving = false;
   private failures = 0;
   private failingSince: number | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
@@ -186,6 +189,7 @@ export class NodeLink extends EventEmitter {
         clearTimeout(timer);
         resolve(code === 4005);
       });
+      this.leaving = true;
       ws.send(encodeControl({ type: "leave" }));
     });
   }
@@ -241,7 +245,7 @@ export class NodeLink extends EventEmitter {
     if (!this.running || this.paused || this.ws) return;
     this.set("connecting");
     const url = `${this.o.box.replace(/^http/, "ws")}${LINK_PATH}`;
-    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${this.o.token}` }, perMessageDeflate: false, handshakeTimeout: 20_000, followRedirects: false });
+    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${this.o.token}` }, perMessageDeflate: false, handshakeTimeout: 20_000, followRedirects: false, maxPayload: STREAM_WINDOW + 16 });
     this.ws = ws;
     let welcomed = false;
     let stopKeepAlive = (): void => {};
@@ -326,7 +330,7 @@ export class NodeLink extends EventEmitter {
         return;
       }
       if (frame.type === FrameType.open) {
-        if (!welcomed || this.listenerCount("stream") === 0 || streams.has(frame.stream)) {
+        if (!welcomed || this.listenerCount("stream") === 0 || streams.has(frame.stream) || streams.size >= MAX_STREAMS_PER_LINK) {
           ws.send(encodeFrame(FrameType.close, frame.stream));
           return;
         }
@@ -341,7 +345,7 @@ export class NodeLink extends EventEmitter {
       if (this.ws !== ws) return;
       this.ws = null;
       if (!this.running || this.stateNow === "revoked") return;
-      if (code === 4005) {
+      if (code === 4005 && this.leaving) {
         this.stop("left");
         return;
       }

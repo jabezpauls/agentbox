@@ -481,7 +481,8 @@ APPS_HOST="$(printf '%s' "$APPS_HOST" | tr '[:upper:]' '[:lower:]')"
 if [ -n "$MACHINES_HOST$APPS_HOST" ]; then
     { [ -n "$MACHINES_HOST" ] && [ -n "$APPS_HOST" ]; } || die "--machines-host and --apps-host go together: give both, or neither"
     for h in "$MACHINES_HOST" "$APPS_HOST"; do
-        printf '%s' "$h" | grep -Eq '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$' \
+        # The whole value, not line by line as grep would.
+        [[ "$h" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$ ]] \
             || die "--machines-host and --apps-host must be plain hostnames, like machines.example.com (got '$h')"
     done
     [ "$DOMAIN" != localhost ] || die "machines need a --domain: a box reached by localhost cannot have them"

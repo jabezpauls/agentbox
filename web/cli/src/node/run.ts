@@ -65,6 +65,12 @@ export async function runNode(o: RunOptions): Promise<number> {
     throw new CliError("a node is already running on this machine (see `agentbox node status`)");
   }
 
+  // Work from the node's own folder, which the box can never write: Windows
+  // looks for a program named bare (`nvidia-smi`, `docker`) in the working
+  // folder before PATH, and a node started from `join` would otherwise be
+  // wherever `join` ran — often a project folder the box may write.
+  process.chdir(o.paths.dir);
+
   let policy: LoadedPolicy = loadPolicy(o.paths.policy, o.home);
 
   // Claude Code: its shim first on herdr's PATH, its own config, agents.md.
@@ -252,6 +258,15 @@ export async function runNode(o: RunOptions): Promise<number> {
         setPaused(o.paths.policy, false);
         link.resume();
         return { state: link.state };
+      case "passphrase": {
+        // `agentbox node passphrase` wrote a new verifier: the old passphrase answers nothing from now.
+        const fresh = readCredentials(o.paths.credentials);
+        if (!fresh) throw new Error("credentials.json cannot be read");
+        presence.rekey(fresh.presence);
+        const closed = server.enforce();
+        o.log(`presence: the machines passphrase changed on this machine; every grant ended${closed ? ` (${closed} channel(s) closed)` : ""}`);
+        return {};
+      }
       case "leave": {
         const told = await link.leave();
         setImmediate(() => finish(EXIT.OK));
@@ -262,7 +277,7 @@ export async function runNode(o: RunOptions): Promise<number> {
 
   link.on("revoked", () => {
     fs.rmSync(o.paths.secrets, { recursive: true, force: true });
-    writeCredentials(o.paths.credentials, { ...creds, revokedAt: now() });
+    writeCredentials(o.paths.credentials, { ...(readCredentials(o.paths.credentials) ?? creds), revokedAt: now() });
     o.log(`${creds.box} revoked this machine. Its shared secrets are wiped; everything else is kept. Re-join it to use it again.`);
     finish(EXIT.OK);
   });
