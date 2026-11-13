@@ -52,6 +52,7 @@ export class FilesService {
       ...(opts.caseInsensitive === undefined ? {} : { caseInsensitive: opts.caseInsensitive }),
       ...(opts.isHidden === undefined ? {} : { isHidden: opts.isHidden }),
       ...(opts.isWriteDenied === undefined ? {} : { isWriteDenied: opts.isWriteDenied }),
+      ...(opts.holdsHidden === undefined ? {} : { holdsHidden: opts.holdsHidden }),
       ...(opts.refusePath === undefined ? {} : { refusePath: opts.refusePath }),
     });
     this.git = new GitStatusCache(opts.gitTtlMs === undefined ? {} : { ttlMs: opts.gitTtlMs });

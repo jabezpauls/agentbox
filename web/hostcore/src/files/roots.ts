@@ -46,6 +46,8 @@ export interface RootsOptions {
   isHidden?: (realPath: string) => boolean;
   /** A resolved path that may be read but never changed. */
   isWriteDenied?: (realPath: string) => boolean;
+  /** A resolved path that holds a hidden one: never copied, so a copy cannot show it. */
+  holdsHidden?: (realPath: string) => boolean;
   /**
    * Why a path as the client spelled it is refused before it is placed (a
    * machine on Windows: UNC and device paths, streams, trailing dots), or
@@ -142,6 +144,7 @@ export class Roots {
   private readonly isHidden: ((realPath: string) => boolean) | undefined;
   private readonly isWriteDenied: ((realPath: string) => boolean) | undefined;
   private readonly refusePath: ((input: string) => string | null) | undefined;
+  private readonly holdsHidden: ((realPath: string) => boolean) | undefined;
 
   constructor(opts: RootsOptions) {
     this.roots = opts.roots.map((r) => ({ id: r.id, path: path.resolve(r.path), mode: r.mode, stateDir: path.resolve(r.stateDir) }));
@@ -155,6 +158,7 @@ export class Roots {
     this.isHidden = opts.isHidden;
     this.isWriteDenied = opts.isWriteDenied;
     this.refusePath = opts.refusePath;
+    this.holdsHidden = opts.holdsHidden;
   }
 
   byId(id: string): Root {
@@ -294,6 +298,11 @@ export class Roots {
         }
       }
     }
+  }
+
+  /** Refuse to copy an entry that holds a hidden path: the copy would show it. */
+  assertCopyable(ref: EntryRef): void {
+    if (this.holdsHidden?.(ref.fs)) throw new FilesError(403, `permission denied: ${ref.abs}`, "denied");
   }
 
   /** Resolve through every symlink; the destination must stay in the root. */

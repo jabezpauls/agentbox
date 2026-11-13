@@ -66,8 +66,9 @@ describe("the never-writable and never-visible lists", () => {
     expect(mac.isWriteDenied("/users/O/.BashRC")).toBe(true);
     const linux = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: {}, resolve: false });
     expect(linux.isWriteDenied("/home/o/.bashrc")).toBe(true);
-    expect(linux.isWriteDenied("/home/o/.BASHRC")).toBe(false);
-    expect(linux.isWriteDenied("/home/o/.bashrc-notes")).toBe(false);
+    expect(linux.isWriteDenied("/home/o/n/policy.json")).toBe(true);
+    expect(linux.isWriteDenied("/home/o/N/policy.json")).toBe(false);
+    expect(linux.isWriteDenied("/home/o/bin-notes")).toBe(false);
     expect(linux.isHidden("/home/o/.sshkeys")).toBe(false);
   });
 
@@ -84,12 +85,43 @@ describe("the never-writable and never-visible lists", () => {
     const r = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: {}, resolve: false });
     expect(r.isWriteDenied("/home/o/code/app/.git/config")).toBe(true);
     expect(r.isWriteDenied("/home/o/code/app/.git/hooks/pre-commit")).toBe(true);
-    expect(r.isWriteDenied("/home/o/code/app/.git/HEAD")).toBe(false);
     expect(r.isWriteDenied("/home/o/code/app/src/config")).toBe(false);
+    expect(r.isWriteDenied("/home/o/code/app/.gitignore")).toBe(false);
+    // Nothing named .git at all: not its other config files, not the
+    // directory itself (renamed away, edited, renamed back), not a `.git`
+    // file pointing git elsewhere, not a bare repository's hooks.
+    for (const p of [".git", ".git/HEAD", ".git/modules/sub/config", ".git/worktrees/w/config", "sub/.git"]) {
+      expect(r.isWriteDenied(`/home/o/code/app/${p}`), p).toBe(true);
+    }
+    expect(r.isWriteDenied("/home/o/code/site.git/hooks/post-receive")).toBe(true);
+    const win = pathRules({ home: "C:\\Users\\o", nodeDir: "C:\\n", platform: "win32", env: {}, resolve: false });
+    expect(win.isWriteDenied("C:\\code\\app\\.GIT")).toBe(true);
+  });
+
+  it("never let a dot file or folder in home be written, where programs keep what they run (and AppData on Windows)", () => {
+    const r = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: {}, resolve: false });
+    for (const p of [".local/lib/python3.12/site-packages/x.pth", ".claude/settings.json", ".npmrc", ".config/herdr/config.toml", ".bashrc.d/x.sh", ".vimrc"]) {
+      expect(r.isWriteDenied(`/home/o/${p}`), p).toBe(true);
+    }
+    expect(r.isWriteDenied("/home/o/code/app/.env")).toBe(false);
+    expect(r.isWriteDenied("/home/o/notes/.todo")).toBe(false);
+    const win = pathRules({ home: "C:\\Users\\o", nodeDir: "C:\\n", platform: "win32", env: {}, resolve: false });
+    expect(win.isWriteDenied("C:\\Users\\o\\AppData\\Roaming\\Python\\Python312\\site-packages\\x.pth")).toBe(true);
+    expect(win.isWriteDenied("C:\\Users\\o\\.npmrc")).toBe(true);
+    expect(win.isWriteDenied("C:\\Users\\o\\code\\x.txt")).toBe(false);
+  });
+
+  it("treat a folder that holds a listed path as that path: it is not moved, trashed or copied away", () => {
+    const r = pathRules({ home: "/home/o", nodeDir: "/home/o/n", platform: "linux", env: { PATH: "/home/o/go/bin" }, resolve: false });
+    expect(r.isWriteDenied("/home/o/go")).toBe(true);
+    expect(r.isWriteDenied("/home/o/snap")).toBe(true);
+    expect(r.holdsHidden("/home/o/snap")).toBe(true);
+    expect(r.holdsHidden("/home/o/go")).toBe(false);
+    expect(r.isWriteDenied("/home/o/code")).toBe(false);
   });
 
   it("refuse Windows' other path forms outright: UNC, device paths, streams, trailing dots and spaces, DOS devices", () => {
-    for (const bad of ["\\\\server\\share\\x", "//server/share", "\\\\.\\pipe\\x", "\\\\?\\C:\\x", "//?/C:/x", "C:\\code\\a.txt:secret", "/C:/code/a.txt:$DATA", "C:/code/.bashrc.", "C:/code/dir /x", "C:/code/NUL", "C:/code/com1.txt"]) {
+    for (const bad of ["C:/Users/o/GITCON~1", "C:\\code\\PROGRA~2\\x", "\\\\server\\share\\x", "//server/share", "\\\\.\\pipe\\x", "\\\\?\\C:\\x", "//?/C:/x", "C:\\code\\a.txt:secret", "/C:/code/a.txt:$DATA", "C:/code/.bashrc.", "C:/code/dir /x", "C:/code/NUL", "C:/code/com1.txt"]) {
       expect(refuseWindowsPath(bad), bad).not.toBeNull();
     }
     for (const ok of ["C:\\code\\a.txt", "/C:/code/a.txt", "C:/code/v1.2/x", "C:/code/..", "relative/name.txt", "C:/code/console.log"]) {
@@ -139,6 +171,40 @@ describe("files on a machine", () => {
     expect(await status(svc.roots.entry(path.join(h.home, ".ssh")))).toBe(404);
     expect(await status(svc.roots.target(path.join(h.node, "credentials.json")))).toBe(404);
     expect(await status(svc.ops.write({ path: path.join(h.home, ".ssh", "authorized_keys"), content: "ssh-ed25519 x" }))).toBe(404);
+  });
+
+  it("never lets a repository's .git be renamed away, edited and put back, or one be made", async () => {
+    const h = home();
+    const repo = path.join(h.home, "code", "app");
+    fs.mkdirSync(path.join(repo, ".git", "hooks"), { recursive: true });
+    fs.writeFileSync(path.join(repo, ".git", "config"), "[core]\n");
+    const svc = service(h, [{ path: "~/code", mode: "write" }]);
+    expect(await status(svc.ops.move({ from: path.join(repo, ".git"), to: path.join(repo, "g") }))).toBe(403);
+    expect(await status(svc.ops.copy({ from: path.join(repo, ".git"), to: path.join(repo, "g") }))).toBe(200);
+    await svc.ops.write({ path: path.join(repo, "g", "config"), content: "[core]\n\tfsmonitor = evil\n", overwrite: true });
+    expect(await status(svc.ops.move({ from: path.join(repo, "g"), to: path.join(h.home, "code", "other", ".git") }))).toBe(403);
+    expect(await status(svc.ops.write({ path: path.join(h.home, "code", "other", ".git"), content: "gitdir: ../app/g\n" }))).toBe(403);
+    expect(await status(svc.trash.trash([path.join(repo, ".git")]))).toBe(403);
+    expect(fs.readFileSync(path.join(repo, ".git", "config"), "utf8")).toBe("[core]\n");
+    // The repository itself moves as a whole, its .git untouched.
+    expect(await status(svc.ops.move({ from: repo, to: path.join(h.home, "code", "app2") }))).toBe(200);
+  });
+
+  it("never moves, trashes or copies a folder that holds what the lists protect, with the whole home allowed", async () => {
+    const h = home();
+    for (const d of ["snap/firefox/profile", "go/bin"]) fs.mkdirSync(path.join(h.home, d), { recursive: true });
+    fs.writeFileSync(path.join(h.home, "snap", "firefox", "profile", "cookies"), "secret\n");
+    const rules = pathRules({ home: h.home, nodeDir: h.node, env: { PATH: path.join(h.home, "go", "bin") } });
+    const svc = filesFor(parsePolicy(JSON.stringify({ files: [{ path: "~", mode: "write" }] }), h.home).policy, h.paths, rules);
+    if (!svc) throw new Error("no service");
+    expect(await status(svc.ops.move({ from: path.join(h.home, "snap"), to: path.join(h.home, "s") }))).toBe(403);
+    expect(await status(svc.ops.copy({ from: path.join(h.home, "snap"), to: path.join(h.home, "s") }))).toBe(403);
+    expect(await status(svc.trash.trash([path.join(h.home, "snap")]))).toBe(403);
+    expect(await status(svc.ops.move({ from: path.join(h.home, "go"), to: path.join(h.home, "g") }))).toBe(403);
+    expect(await status(svc.ops.move({ from: path.join(h.home, "code"), to: path.join(h.home, "c"), overwrite: true }))).toBe(200);
+    expect(await status(svc.ops.move({ from: path.join(h.home, "c"), to: path.join(h.home, "snap"), overwrite: true }))).toBe(403);
+    expect(fs.existsSync(path.join(h.home, "snap", "firefox", "profile", "cookies"))).toBe(true);
+    expect(fs.existsSync(path.join(h.home, "s"))).toBe(false);
   });
 
   it("refuses a link that leads out of its folder, whichever way it is used", async () => {

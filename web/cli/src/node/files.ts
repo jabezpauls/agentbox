@@ -15,9 +15,11 @@ import type { Policy } from "./policy.js";
  *   folder, shell profiles, autostart locations, `~/.ssh/authorized_keys`,
  *   git's global config — and, beyond the spec's list, every folder on PATH
  *   inside the home folder (`~/.local/bin`: the node itself runs `docker` and
- *   `nvidia-smi` by name), desktop entries, and in any repository
- *   `.git/config` and `.git/hooks`, which git runs from. With `terminals` off
- *   this is what keeps "write a file" from becoming "run code";
+ *   `nvidia-smi` by name), desktop entries, every dot file and folder directly
+ *   in home (and AppData on Windows), anything named `.git` in any
+ *   repository, and any folder that holds one of these or a hidden path (so
+ *   it is not moved, trashed or replaced with them in it). With `terminals`
+ *   off this is what keeps "write a file" from becoming "run code";
  * - **never visible**: `~/.ssh`, `~/.gnupg`, agentbox's own config and the
  *   node's secrets, Claude Code's credentials and the node's
  *   `CLAUDE_CONFIG_DIR`, browser profiles, the Windows credential stores.
@@ -54,6 +56,8 @@ export interface PathRules {
   writeDenied: string[];
   isHidden(realPath: string): boolean;
   isWriteDenied(realPath: string): boolean;
+  /** Whether a hidden path lies inside this one, so that a copy of it would show it. */
+  holdsHidden(realPath: string): boolean;
   refusePath(input: string): string | null;
 }
 
@@ -203,6 +207,8 @@ export function refuseWindowsPath(input: string): string | null {
   for (const part of rest.split("\\")) {
     if (part === "" || part === "." || part === "..") continue;
     if (/[. ]$/.test(part)) return "a name ending in a dot or a space is refused";
+    // `GITCON~1` may be `.gitconfig`'s short name: the lists know only long ones.
+    if (/~\d/.test(part)) return "short (8.3) names, with a ~ and a digit, are refused";
     if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(\..*)?$/i.test(part)) return "DOS device names are refused";
   }
   return null;
@@ -237,13 +243,39 @@ export function pathRules(o: PathRulesOptions): PathRules {
     const f = fold(p);
     return list.some((e) => f === e || f.startsWith(e.endsWith(P.sep) ? e : e + P.sep));
   };
-  /** `.git/config` or anything in `.git/hooks`, in any repository. */
+  /**
+   * Anything named `.git`, in any repository: git runs what its config and
+   * hooks say, and a `.git` renamed away, edited and renamed back (or a `.git`
+   * file pointing elsewhere) would be the same. And a bare repository's
+   * (`site.git/`) hooks and config.
+   */
   const gitRuns = (p: string): boolean => {
     const parts = fold(p).split(P.sep);
-    for (let i = 0; i + 1 < parts.length; i++) {
-      if (parts[i] === ".git" && (parts[i + 1] === "hooks" || parts[i + 1] === "config")) return true;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === ".git") return true;
+      if (parts[i]?.endsWith(".git") && (parts[i + 1] === "hooks" || parts[i + 1] === "config")) return true;
     }
     return false;
+  };
+  /**
+   * A dot file or folder directly in home (and on Windows, AppData), and all
+   * in it: where programs keep what they run — shell and editor configs,
+   * `~/.local` (Python's `.pth` files), `~/.claude` (Claude Code's hooks),
+   * `~/.npmrc`, herdr's config. No list of them would be complete.
+   */
+  const homeF = fold(o.home);
+  const homeBase = homeF.endsWith(P.sep) ? homeF : homeF + P.sep;
+  const inHomeDot = (p: string): boolean => {
+    const f = fold(p);
+    if (!f.startsWith(homeBase)) return false;
+    const first = f.slice(homeBase.length).split(P.sep)[0] ?? "";
+    return first.startsWith(".") || (platform === "win32" && first === "appdata");
+  };
+  /** Whether an entry of `list` lies inside `p`: moving, trashing or replacing `p` would carry it along. */
+  const holds = (p: string, list: string[]): boolean => {
+    const f = fold(p);
+    const base = f.endsWith(P.sep) ? f : f + P.sep;
+    return list.some((e) => e.startsWith(base));
   };
   // A link or junction that resolves to a network share (or any `\\` path):
   // never shown, never written, wherever it sits.
@@ -254,7 +286,8 @@ export function pathRules(o: PathRulesOptions): PathRules {
     hidden,
     writeDenied,
     isHidden: (p) => remote(p) || under(p, hiddenF),
-    isWriteDenied: (p) => remote(p) || under(p, deniedF) || gitRuns(p),
+    isWriteDenied: (p) => remote(p) || under(p, deniedF) || gitRuns(p) || inHomeDot(p) || holds(p, deniedF) || holds(p, hiddenF),
+    holdsHidden: (p) => holds(p, hiddenF),
     refusePath: (input) => (platform === "win32" ? refuseWindowsPath(input) : null),
   };
 }
@@ -332,6 +365,7 @@ export function filesFor(policy: Policy, paths: NodePaths, rules: PathRules): Fi
     caseInsensitive: rules.caseInsensitive,
     isHidden: rules.isHidden,
     isWriteDenied: rules.isWriteDenied,
+    holdsHidden: rules.holdsHidden,
     refusePath: rules.refusePath,
     ...(rules.platform === "win32" ? { apiPaths: { toHost: (p: string) => toHostPath(p, "win32"), toApi: (p: string) => toApiPath(p, "win32") } } : {}),
   });
