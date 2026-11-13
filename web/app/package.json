@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.machines.config.ts",
+    "build:machines": "vite build -c vite.machines.config.ts",
     "test": "vitest run",
     "lint": "eslint src",
     "typecheck": "tsc -b --noEmit",

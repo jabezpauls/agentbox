@@ -316,6 +316,19 @@ describe("a machine's server, over its link", () => {
   });
 });
 
+describe("the Workbench's link", () => {
+  it("is offered in the box's session only when machines are on", async () => {
+    const hh = await on();
+    const login = await request(hh.base, "POST", "/_gate/login", { headers: { host: MAIN, origin: `https://${MAIN}` }, body: { username: USER, password: PASSWORD } });
+    const s = await request(hh.base, "GET", "/_gate/session", { headers: { host: MAIN, cookie: cookieFrom(login) } });
+    expect(s.json()).toMatchObject({ machines: { url: `https://${MACHINES}/` } });
+    await hh.close();
+    h = await startHarness({});
+    const off = await request(h.base, "POST", "/_gate/login", { headers: { origin: h.base }, body: { username: USER, password: PASSWORD } });
+    expect((await request(h.base, "GET", "/_gate/session", { headers: { cookie: cookieFrom(off) } })).json()).toMatchObject({ machines: null });
+  });
+});
+
 describe("the shared Claude token", () => {
   it("is write-only, kept out of gate.json, and pushed only to opted-in machines", async () => {
     const hh = await on();

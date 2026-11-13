@@ -22,7 +22,9 @@ COPY web/vscode-ext/package.json vscode-ext/
 COPY web/cli/package.json cli/
 RUN npm ci
 COPY web/ .
-RUN npm run build -w gate
+# The machines UI (web/app's second entry), which the gate serves on the
+# machines origin; copied into the gate's dist/ by its build.
+RUN npm run build:machines -w app && npm run build -w gate
 # The CLI the gate serves at /cli/, stamped with this box's version, which is
 # what /_gate/version reports and the CLI compares itself with. Declared only
 # here, so a new version rebuilds just this step.

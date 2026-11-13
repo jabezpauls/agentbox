@@ -1,4 +1,4 @@
-import { Box, PanelRight, Search } from "lucide-react";
+import { Box, Monitor, PanelRight, Search } from "lucide-react";
 import { useApp } from "../store/app.ts";
 import { Tooltip } from "../components/ui/Tooltip.tsx";
 import { openPalette, toggleDock } from "./actions.ts";
@@ -7,6 +7,7 @@ import { useRouter } from "./router.ts";
 import type { SurfaceId } from "./routes.ts";
 import { SURFACE_BY_ID, SURFACES, type SurfaceMeta } from "./surfaces.ts";
 import { useAttention } from "./attention.ts";
+import { useGateSession } from "./session.ts";
 
 const CONN = {
   connecting: { label: "Connecting", title: "Opening the connection to herdr." },
@@ -52,6 +53,22 @@ export function ConnLight({ withLabel = false }: { withLabel?: boolean }) {
 }
 
 /**
+ * Machines, when the box has them: the machines origin in a tab of its own,
+ * never a frame here, and with no way back to this page from there.
+ */
+function MachinesLink() {
+  const url = useGateSession((s) => s.session?.machines?.url ?? null);
+  if (!url) return null;
+  return (
+    <Tooltip label="Machines (opens a new tab)" side="right">
+      <a className="rail-item" href={url} target="_blank" rel="noopener noreferrer" aria-label="Machines" data-testid="machines-link">
+        <Monitor size={18} strokeWidth={1.75} aria-hidden="true" />
+      </a>
+    </Tooltip>
+  );
+}
+
+/**
  * The rail: one icon per surface, a label and its shortcut on hover or
  * focus. Settings, the palette, the dock and the connection light sit at the
  * foot. A surface that needs you — an agent waiting, a review to answer —
@@ -76,6 +93,7 @@ export function Rail() {
         ))}
       </div>
       <div className="rail-foot">
+        <MachinesLink />
         <Tooltip label="Search" keys={paletteLabel()} side="right">
           <button className="rail-item" aria-label="Search" onClick={() => openPalette()}>
             <Search size={18} strokeWidth={1.75} aria-hidden="true" />
