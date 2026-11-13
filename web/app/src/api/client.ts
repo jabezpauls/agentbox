@@ -12,6 +12,8 @@ import type {
 } from "@workbench/shared";
 import { apiUrl } from "./base.ts";
 
+export { setApiBase } from "./base.ts";
+
 export class RpcError extends Error {
   status: number;
   /** herdr's reason, when it refused the call: `tab_not_found` and the like. */

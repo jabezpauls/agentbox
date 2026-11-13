@@ -302,13 +302,13 @@ export function PreviewPanel() {
         <p className="prev-note" role="note">
           <span>
             This app assumes it runs at <code>/</code>. Start it with <code>agentbox-preview</code> or set its base path to{" "}
-            <code>/a/{app.id}/</code>.
+            <code>{appUrl(app.id)}</code>.
           </span>
           <button
             className="icon-btn is-sm"
             aria-label="Copy the base path"
             title="Copy the base path"
-            onClick={() => copy("base", `/a/${app.id}/`)}
+            onClick={() => copy("base", appUrl(app.id))}
           >
             {copied === "base" ? <Check size={13} /> : <Copy size={13} />}
           </button>

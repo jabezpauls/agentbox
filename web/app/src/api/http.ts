@@ -1,3 +1,5 @@
+import { apiUrl } from "./base.ts";
+
 /**
  * JSON over fetch for the app's own APIs — the bridge's `/api/*` and the
  * gate's `/_gate/*`. Every failure is an {@link HttpError} carrying the
@@ -45,7 +47,7 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
     init.body = JSON.stringify(body);
   }
   if (signal) init.signal = signal;
-  const res = await fetch(path, init);
+  const res = await fetch(apiUrl(path), init);
   const data = await parse(res);
   if (!res.ok) {
     const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
