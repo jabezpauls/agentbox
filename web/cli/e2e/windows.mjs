@@ -323,7 +323,7 @@ try {
     if (WIN) {
       type('echo "shell-$($PSVersionTable.PSEdition)"\r');
       await on("the shell", "shell-Core");
-      type('echo "path-$env:Path session-$env:HERDR_SESSION"\r');
+      type('echo "path-$(($env:Path -split \';\')[0..2] -join \'|\') session-$env:HERDR_SESSION"\r');
       await on("the PATH", "session-");
       type('echo "shim-$((Get-Command claude).Source)"\r');
       await on("claude.cmd", "claude.cmd");
