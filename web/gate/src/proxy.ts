@@ -245,12 +245,14 @@ export function proxyHttp(upstream: Upstream, req: IncomingMessage, res: ServerR
 }
 
 /** Write a bare HTTP response on a socket that was about to be upgraded, and close it. */
-export function refuseUpgrade(socket: Duplex, status: number, reason: string): void {
+/** `extra`: further header lines, each ending in CRLF. */
+export function refuseUpgrade(socket: Duplex, status: number, reason: string, extra = ""): void {
   if (socket.destroyed) return;
   const body = `${reason}\n`;
   socket.end(
     `HTTP/1.1 ${status} ${reason}\r\n` +
       "Connection: close\r\n" +
+      extra +
       "Content-Type: text/plain; charset=utf-8\r\n" +
       `Content-Length: ${Buffer.byteLength(body)}\r\n` +
       "\r\n" +

@@ -7,6 +7,7 @@ import { BUNDLE_NAME, INSTALL_NAME, renderInstallScript } from "./cli-files.js";
 import { clearedSessionCookie, sessionCookie } from "./cookies.js";
 import { cleanDeviceName, TooManyPending } from "./device.js";
 import { infoOf, originOf, safeEqual, safeNext, type GateCore, type RequestInfo } from "./context.js";
+import { MAIN } from "./hosts.js";
 import { isSafeMethod, isSameOriginRequest } from "./origin.js";
 import { PAGE_CSP, loginMessage, renderDevices, renderLogin, type DeviceView, type LoginError } from "./pages.js";
 import { hashPassword, passwordProblem } from "./password.js";
@@ -166,6 +167,9 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   });
 
   app.addHook("onRequest", async (req, reply) => {
+    // The box's credentials, and its rules, are for the box's origin alone:
+    // the machines origin has its own (machines/routes.ts).
+    if (infoOf(req.raw).hostKind !== "main") return;
     req.subject = core.authenticate(req.raw);
     // Cross-site request forgery: a state-changing request riding the session
     // cookie must come from this origin. A bearer token is not ambient — a page
@@ -183,6 +187,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   });
 
   app.addHook("preHandler", async (req, reply) => {
+    if (infoOf(req.raw).hostKind !== "main") return;
     const need = req.routeOptions.config.auth ?? "none";
     if (need === "none") return;
     if (!req.subject) return reply.code(401).header("x-agentbox-login", "/login").send({ error: "unauthorized" });
@@ -202,13 +207,13 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- sign-in page and its assets ------------------------------------------
 
-  app.get<{ Querystring: { next?: string } }>("/login", async (req, reply) => {
-    const next = safeNext(req.query.next);
+  app.get<{ Querystring: { next?: string } }>("/login", { config: { hosts: MAIN } }, async (req, reply) => {
+    const next = safeNext(req.query.next, { handoff: core.hosts !== null });
     if (req.subject?.kind === "session") return reply.code(302).header("location", next).send();
     return html(reply, 200, renderLogin({ next, username: "", host: infoOf(req.raw).host, needCode: false, error: null, retryAfterMs: 0 }));
   });
 
-  app.get<{ Params: { name: string } }>("/login/assets/:name", async (req, reply) => {
+  app.get<{ Params: { name: string } }>("/login/assets/:name", { config: { hosts: MAIN } }, async (req, reply) => {
     const type = ASSETS[req.params.name];
     if (!type) return reply.code(404).send({ error: "not found" });
     let data: Buffer;
@@ -222,12 +227,12 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- sign-in and sign-out ---------------------------------------------------
 
-  app.post("/_gate/login", async (req, reply) => {
+  app.post("/_gate/login", { config: { hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     const form = isForm(req);
     const info = infoOf(req.raw);
     const username = str(b.username);
-    const next = safeNext(b.next);
+    const next = safeNext(b.next, { handoff: core.hosts !== null });
 
     const refuse = (status: number, error: LoginError, waitMs = 0): FastifyReply => {
       if (waitMs > 0) retryAfter(reply, waitMs);
@@ -298,7 +303,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return { ok: true, next };
   });
 
-  app.post("/_gate/logout", async (req, reply) => {
+  app.post("/_gate/logout", { config: { hosts: MAIN } }, async (req, reply) => {
     if (req.subject?.kind === "session") await auth.endSession(req.subject.id);
     reply.header("set-cookie", clearedSessionCookie());
     if (isForm(req)) return reply.code(303).header("location", "/login").send();
@@ -307,7 +312,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- the current session, and the other sessions -----------------------------
 
-  app.get("/_gate/session", { config: { auth: "any" } }, async (req) => {
+  app.get("/_gate/session", { config: { auth: "any", hosts: MAIN } }, async (req) => {
     const s = req.subject as Subject;
     if (s.kind === "token") {
       return { kind: "token", id: s.id, name: s.token.name, user: config.user, createdAt: s.token.createdAt };
@@ -324,7 +329,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     };
   });
 
-  app.get("/_gate/sessions", { config: { auth: "session" } }, async (req) => {
+  app.get("/_gate/sessions", { config: { auth: "session", hosts: MAIN } }, async (req) => {
     const current = (req.subject as Subject).id;
     return auth.listSessions().map((s) => ({
       id: s.id,
@@ -337,14 +342,14 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     }));
   });
 
-  app.delete<{ Params: { id: string } }>("/_gate/sessions/:id", { config: { auth: "session" } }, async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/_gate/sessions/:id", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const ended = await auth.endSession(req.params.id);
     if (!ended) return reply.code(404).send({ error: "no such session" });
     if (req.params.id === (req.subject as Subject).id) reply.header("set-cookie", clearedSessionCookie());
     return reply.code(204).send();
   });
 
-  app.delete<{ Querystring: { others?: string } }>("/_gate/sessions", { config: { auth: "session" } }, async (req, reply) => {
+  app.delete<{ Querystring: { others?: string } }>("/_gate/sessions", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     if (req.query.others !== "1") return reply.code(400).send({ error: "say ?others=1 to end every other session" });
     const ended = await auth.endSessions((req.subject as Subject).id);
     return { ended };
@@ -353,7 +358,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   // --- password ---------------------------------------------------------------
 
   // `current` is the password field here, and it is required.
-  app.post("/_gate/password", { config: { auth: "session" } }, async (req, reply) => {
+  app.post("/_gate/password", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     const info = infoOf(req.raw);
     // Checked first: refusing a weak new password needs no bcrypt, so it costs
@@ -373,7 +378,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- two-factor -------------------------------------------------------------
 
-  app.post("/_gate/totp/setup", { config: { auth: "session" } }, async (req, reply) => {
+  app.post("/_gate/totp/setup", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
     if (refused) return refuseJson(reply, refused);
@@ -387,7 +392,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return { secret, otpauthUrl: url, qrSvg: qrSvg(url) };
   });
 
-  app.post("/_gate/totp/confirm", { config: { auth: "session" } }, async (req, reply) => {
+  app.post("/_gate/totp/confirm", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
     const b = body(req);
     const wait = core.totpConfirms.take(info.key);
@@ -423,7 +428,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return { recoveryCodes };
   });
 
-  app.delete("/_gate/totp", { config: { auth: "session" } }, async (req, reply) => {
+  app.delete("/_gate/totp", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
     const b = body(req);
     const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
@@ -437,7 +442,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- device login (the CLI) --------------------------------------------------
 
-  app.post("/_gate/device/start", async (req, reply) => {
+  app.post("/_gate/device/start", { config: { hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
     const wait = core.deviceStarts.take(info.key);
     if (wait !== null) {
@@ -460,7 +465,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // Answers follow RFC 8628: 200 with the token once, else 400 with
   // `authorization_pending`, `slow_down`, `access_denied` or `expired_token`.
-  app.post("/_gate/device/poll", async (req, reply) => {
+  app.post("/_gate/device/poll", { config: { hosts: MAIN } }, async (req, reply) => {
     const info = infoOf(req.raw);
     if (core.devicePolls.take(info.key) !== null) return reply.code(400).send({ error: "slow_down" });
     const deviceCode = str(body(req).deviceCode);
@@ -473,7 +478,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return reply.code(400).send(result);
   });
 
-  app.get<{ Querystring: { code?: string } }>("/_gate/device/pending", { config: { auth: "session" } }, async (req, reply) => {
+  app.get<{ Querystring: { code?: string } }>("/_gate/device/pending", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const rec = devices.pending(str(req.query.code));
     if (!rec) return reply.code(404).send({ error: "no such login waiting" });
     return { userCode: rec.userCode, name: rec.name, ip: rec.ip, createdAt: rec.createdAt, expiresAt: rec.expiresAt };
@@ -494,7 +499,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   // Approving gives a new device full access, so it needs the password (and a
   // code) in the same request: the page asks for them in its form. Denying
   // does not.
-  app.post("/_gate/device/approve", { config: { auth: "session" } }, async (req, reply) => {
+  app.post("/_gate/device/approve", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     const code = str(b.userCode);
     const refused = await freshCredentials(req, str(b.password), str(b.code).trim());
@@ -514,7 +519,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return { ok: true };
   });
 
-  app.post("/_gate/device/deny", { config: { auth: "session" } }, async (req, reply) => {
+  app.post("/_gate/device/deny", { config: { auth: "session", hosts: MAIN } }, async (req, reply) => {
     const rec = await devices.deny(str(body(req).userCode));
     if (rec) console.log(`[gate] device "${rec.name}" denied from ${infoOf(req.raw).ip}`);
     if (isForm(req)) {
@@ -526,7 +531,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- device tokens ------------------------------------------------------------
 
-  app.get("/_gate/tokens", { config: { auth: "any" } }, async (req) => {
+  app.get("/_gate/tokens", { config: { auth: "any", hosts: MAIN } }, async (req) => {
     const current = req.subject?.kind === "token" ? req.subject.id : null;
     return auth.listTokens().map((t) => ({
       id: t.id,
@@ -555,15 +560,15 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     if (!(await auth.revokeToken(id))) return reply.code(404).send({ error: "no such token" });
     return reply.code(204).send();
   };
-  app.delete<{ Params: { id: string } }>("/_gate/tokens/self", { config: { auth: "any" } }, async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/_gate/tokens/self", { config: { auth: "any", hosts: MAIN } }, async (req, reply) => {
     if (req.subject?.kind !== "token") return reply.code(400).send({ error: "only a device token has a self to revoke" });
     return revoke(req, reply, req.subject.id);
   });
-  app.delete<{ Params: { id: string } }>("/_gate/tokens/:id", { config: { auth: "any" } }, async (req, reply) =>
+  app.delete<{ Params: { id: string } }>("/_gate/tokens/:id", { config: { auth: "any", hosts: MAIN } }, async (req, reply) =>
     revoke(req, reply, req.params.id),
   );
 
-  app.get("/_gate/version", { config: { auth: "any" } }, async () => ({ version: config.version }));
+  app.get("/_gate/version", { config: { auth: "any", hosts: MAIN } }, async () => ({ version: config.version }));
 
   // --- apps: the owner's side -------------------------------------------------
   //
@@ -583,13 +588,13 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     throw err;
   };
 
-  app.get("/_gate/apps", { config: { auth: "any" } }, async () => ({
+  app.get("/_gate/apps", { config: { auth: "any", hosts: MAIN } }, async () => ({
     sharing: apps.sharing,
     apps: apps.list().map(appView),
   }));
 
   // The owner making an app of a port ("Make an app" beside a listening port).
-  app.post("/_gate/apps", { config: { auth: "any" } }, async (req, reply) => {
+  app.post("/_gate/apps", { config: { auth: "any", hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     try {
       const created = await apps.create(
@@ -602,7 +607,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     }
   });
 
-  app.put<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any" } }, async (req, reply) => {
+  app.put<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any", hosts: MAIN } }, async (req, reply) => {
     const b = body(req);
     const mode = b.mode;
     if (mode !== "private" && mode !== "link" && mode !== "passcode") {
@@ -649,7 +654,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // Stop sharing: private again, and everyone let in as the public — or by a
   // passcode — is cut off at once.
-  app.delete<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any" } }, async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/_gate/apps/:id/visibility", { config: { auth: "any", hosts: MAIN } }, async (req, reply) => {
     try {
       return appView(await apps.setVisibility(req.params.id, { mode: "private", expiresAt: null }));
     } catch (err) {
@@ -659,7 +664,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
 
   // --- the device-approval page -----------------------------------------------
 
-  app.get<{ Querystring: { code?: string } }>("/settings/devices", async (req, reply) => {
+  app.get<{ Querystring: { code?: string } }>("/settings/devices", { config: { hosts: MAIN } }, async (req, reply) => {
     if (req.subject?.kind !== "session") {
       const next = safeNext(req.raw.url);
       return reply.code(302).header("location", `/login?next=${encodeURIComponent(next)}`).send();
@@ -680,7 +685,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
   // Neither is a page: nothing in them may run as one if a browser opens them.
   const CLI_CSP = "default-src 'none'; sandbox";
 
-  app.get("/cli/install", async (req, reply) => {
+  app.get("/cli/install", { config: { hosts: MAIN } }, async (req, reply) => {
     const template = await cliFile(INSTALL_NAME);
     if (!template) return reply.code(404).send({ error: "not found" });
     const origin = originOf(core, req.raw);
@@ -692,7 +697,7 @@ export async function registerApi(app: FastifyInstance, core: GateCore): Promise
     return reply.type("text/x-shellscript; charset=utf-8").header("content-security-policy", CLI_CSP).send(script);
   });
 
-  app.get("/cli/agentbox.mjs", async (_req, reply) => {
+  app.get("/cli/agentbox.mjs", { config: { hosts: MAIN } }, async (_req, reply) => {
     const bundle = await cliFile(BUNDLE_NAME);
     if (!bundle) return reply.code(404).send({ error: "not found" });
     return reply.type("text/javascript; charset=utf-8").header("content-security-policy", CLI_CSP).send(bundle);

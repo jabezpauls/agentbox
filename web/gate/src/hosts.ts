@@ -9,7 +9,44 @@
  * config, see app.ts); a route that says nothing serves none.
  */
 
+import type { IncomingMessage } from "node:http";
+import type { FastifyInstance } from "fastify";
+
 export type HostKind = "main" | "machines" | "machine-apps";
+
+declare module "fastify" {
+  interface FastifyContextConfig {
+    /** The origins this route serves. Required: a route that names none serves none. */
+    hosts?: HostKind[];
+  }
+}
+
+/** A registered gate route and the hosts it serves, for the test that every route says. */
+export interface TaggedRoute {
+  method: string | string[];
+  url: string;
+  hosts: HostKind[] | undefined;
+}
+
+/**
+ * Default deny for the gate's own routes: a request reaches a handler only on
+ * a host its route is tagged with, and a 404 everywhere else, as if the route
+ * did not exist. Install before any route is registered. Returns every route
+ * as registered, with its tag.
+ */
+export function enforceRouteHosts(app: FastifyInstance, hostKindOf: (req: IncomingMessage) => HostKind): TaggedRoute[] {
+  const routes: TaggedRoute[] = [];
+  app.addHook("onRoute", (r) => {
+    routes.push({ method: r.method, url: r.url, hosts: (r.config as { hosts?: HostKind[] } | undefined)?.hosts });
+  });
+  app.addHook("onRequest", async (req, reply) => {
+    // No route matched: the not-found handler answers, on any host.
+    if (req.is404) return;
+    const hosts = req.routeOptions.config.hosts;
+    if (!hosts || !hosts.includes(hostKindOf(req.raw))) return reply.code(404).send({ error: "not found" });
+  });
+  return routes;
+}
 
 /** The route tags. */
 export const MAIN: HostKind[] = ["main"];
