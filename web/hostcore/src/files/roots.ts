@@ -1,6 +1,5 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import type { FileRoot } from "@workbench/shared";
 import { decodeName, encodeName, fsPath, hasEscapes, NameError } from "./names.js";
 
 /**
@@ -18,10 +17,44 @@ export class FilesError extends Error {
   }
 }
 
+/** Whether the files API may change anything under a root. */
+export type RootMode = "read" | "write";
+
+/** One folder the files API serves, as configured. */
+export interface RootConfig {
+  /** How listings and the trash name it: `workspace` and `home` in the box. */
+  id: string;
+  path: string;
+  mode: RootMode;
+  /**
+   * Where the API keeps this root's trash and upload scratch space. Inside the
+   * root (the box's `<root>/.agentbox`), moving into and out of it is always a
+   * rename, never a copy.
+   */
+  stateDir: string;
+}
+
+export interface RootsOptions {
+  /**
+   * The roots, the first being where a relative path hangs. `~` means the one
+   * whose id is `home`, when there is one.
+   */
+  roots: RootConfig[];
+  /** Compare paths ignoring case, as on Windows and macOS. */
+  caseInsensitive?: boolean;
+  /** A resolved path that is never shown nor reached: it reads as missing. */
+  isHidden?: (realPath: string) => boolean;
+  /** A resolved path that may be read but never changed. */
+  isWriteDenied?: (realPath: string) => boolean;
+}
+
 export interface Root {
-  id: FileRoot;
+  id: string;
   /** The configured path, lexically normal. Paths are reported under it. */
   path: string;
+  mode: RootMode;
+  /** Absolute and lexically normal. */
+  stateDir: string;
 }
 
 /** A client path placed inside a root, before touching the filesystem. */
@@ -52,9 +85,10 @@ export interface NewRef extends Located {
 const MAX_PATH = 4096;
 
 /**
- * The directory under each root where the files API keeps its own state: the
- * trash, upload scratch space and clones in progress. It lives on the root's
- * own volume so moving into and out of it is always a rename, never a copy.
+ * The directory under each of the box's roots where the files API keeps its
+ * own state: the trash, upload scratch space and clones in progress. It lives
+ * on the root's own volume so moving into and out of it is always a rename,
+ * never a copy.
  */
 export const STATE_DIR = ".agentbox";
 const RESERVED = ["trash", "uploads", "clones"];
@@ -85,27 +119,65 @@ export function within(child: string, parent: string): boolean {
  *
  * The bridge runs as the same user as every agent, so this is not a defence
  * against the sandbox. It is what makes the API mean what it says: nothing a
- * caller names, however it is spelled, reaches outside the two roots.
+ * caller names, however it is spelled, reaches outside the roots.
+ *
+ * Beyond that, a root may be read-only, and the optional predicates hide
+ * resolved paths outright or refuse writes to them (a machine's node passes
+ * them; the box passes none).
  */
 export class Roots {
-  readonly workspace: Root;
-  readonly home: Root;
+  /** Where a relative path hangs: the first root configured. */
+  readonly primary: Root;
+  private readonly home: Root | undefined;
+  private readonly roots: Root[];
   private readonly all: Root[];
   private readonly realCache = new Map<string, string>();
+  private readonly caseInsensitive: boolean;
+  private readonly isHidden: ((realPath: string) => boolean) | undefined;
+  private readonly isWriteDenied: ((realPath: string) => boolean) | undefined;
 
-  constructor(workspacePath: string, homePath: string) {
-    this.workspace = { id: "workspace", path: path.resolve(workspacePath) };
-    this.home = { id: "home", path: path.resolve(homePath) };
+  constructor(opts: RootsOptions) {
+    this.roots = opts.roots.map((r) => ({ id: r.id, path: path.resolve(r.path), mode: r.mode, stateDir: path.resolve(r.stateDir) }));
+    const first = this.roots[0];
+    if (!first) throw new Error("at least one root is required");
+    this.primary = first;
+    this.home = this.roots.find((r) => r.id === "home");
     // Longest first, so a nested root (possible in tests) wins over its parent.
-    this.all = [this.workspace, this.home].sort((a, b) => b.path.length - a.path.length);
+    this.all = [...this.roots].sort((a, b) => b.path.length - a.path.length);
+    this.caseInsensitive = opts.caseInsensitive ?? false;
+    this.isHidden = opts.isHidden;
+    this.isWriteDenied = opts.isWriteDenied;
   }
 
-  byId(id: FileRoot): Root {
-    return id === "home" ? this.home : this.workspace;
+  byId(id: string): Root {
+    const root = this.roots.find((r) => r.id === id);
+    if (!root) throw new FilesError(404, `no root named ${id}`, "not-found");
+    return root;
   }
 
   list(): Root[] {
-    return [this.workspace, this.home];
+    return [...this.roots];
+  }
+
+  /** {@link within}, ignoring case when the roots were configured to. */
+  inside(child: string, parent: string): boolean {
+    return this.caseInsensitive ? within(child.toLowerCase(), parent.toLowerCase()) : within(child, parent);
+  }
+
+  /** True when a resolved path is hidden by the configured predicate. */
+  hidden(realPath: string): boolean {
+    return this.isHidden?.(realPath) ?? false;
+  }
+
+  /** A resolved path that is hidden reads as one that does not exist. */
+  private assertVisible(realPath: string, where: string): void {
+    if (this.hidden(realPath)) throw new FilesError(404, `${where} does not exist`, "not-found");
+  }
+
+  /** Refuse a change under a read-only root, or to a path the predicate denies. */
+  private assertWritable(root: Root, realPath: string, where: string): void {
+    if (root.mode === "read") throw new FilesError(403, `${root.path} is read-only`, "read-only");
+    if (this.isWriteDenied?.(realPath)) throw new FilesError(403, `permission denied: ${where}`, "denied");
   }
 
   /** The root's own real path, resolved once. */
@@ -124,7 +196,21 @@ export class Roots {
 
   /** The state directory of a root, e.g. `/workspace/.agentbox`. */
   stateDir(root: Root): string {
-    return path.join(root.path, STATE_DIR);
+    return root.stateDir;
+  }
+
+  /** The state directory's name when it sits directly in its root, e.g. `.agentbox`. */
+  stateName(root: Root): string | null {
+    return path.dirname(root.stateDir) === root.path ? path.basename(root.stateDir) : null;
+  }
+
+  /** The state directory as resolved on disk, or null when it cannot be. */
+  async realStateDir(root: Root): Promise<string | null> {
+    if (within(root.stateDir, root.path)) {
+      const real = await this.realRoot(root).catch(() => null);
+      return real === null ? null : path.join(real, path.relative(root.path, root.stateDir));
+    }
+    return fsp.realpath(root.stateDir).catch(() => null);
   }
 
   /** Place a client path lexically. Throws for anything outside every root. */
@@ -141,27 +227,41 @@ export class Roots {
       }
     }
     let abs: string;
-    if (input === "~" || input.startsWith("~/")) abs = path.resolve(this.home.path, "." + input.slice(1));
-    else abs = path.resolve(this.workspace.path, input === "" ? "." : input);
-    const root = this.all.find((r) => within(abs, r.path));
-    if (!root) throw new FilesError(403, `${input} is outside the workspace and home`, "outside");
+    if (input === "~" || input.startsWith("~/")) {
+      if (!this.home) throw new FilesError(403, `${input} is outside every root`, "outside");
+      abs = path.resolve(this.home.path, "." + input.slice(1));
+    } else abs = path.resolve(this.primary.path, input === "" ? "." : input);
+    const root = this.all.find((r) => this.inside(abs, r.path));
+    if (!root) throw new FilesError(403, `${input} is outside ${this.outsideWhat()}`, "outside");
     return { root, abs };
+  }
+
+  /** What a path outside every root is said to be outside of. */
+  private outsideWhat(): string {
+    const ids = this.roots.map((r) => r.id);
+    if (ids.length === 2 && ids[0] === "workspace" && ids[1] === "home") return "the workspace and home";
+    return "every root";
   }
 
   /** True when `abs` is the root itself or inside its reserved state dirs. */
   isReserved(loc: Located): boolean {
     if (loc.abs === loc.root.path) return true;
     const state = this.stateDir(loc.root);
-    if (loc.abs === state) return true;
-    return RESERVED.some((d) => within(loc.abs, path.join(state, d)));
+    if (this.inside(loc.abs, state) && this.inside(state, loc.abs)) return true;
+    return RESERVED.some((d) => this.inside(loc.abs, path.join(state, d)));
   }
 
-  /** Refuse to change the root itself or the API's own state. */
-  assertMutable(loc: Located): void {
+  /**
+   * Refuse to change the root itself or the API's own state, anything under a
+   * read-only root, and a path the write-denied predicate names (checked on
+   * the resolved path when the reference carries one).
+   */
+  assertMutable(loc: Located | EntryRef | NewRef): void {
     if (loc.abs === loc.root.path) throw new FilesError(403, "the root itself cannot be changed", "reserved");
     if (this.isReserved(loc)) {
       throw new FilesError(403, `${loc.abs} holds agentbox's own state`, "reserved");
     }
+    this.assertWritable(loc.root, "fs" in loc ? loc.fs : loc.abs, loc.abs);
   }
 
   /**
@@ -174,15 +274,12 @@ export class Roots {
   async assertMovable(ref: EntryRef): Promise<void> {
     for (const root of this.all) {
       const lexical = this.stateDir(root);
-      const real = await this.realRoot(root).then(
-        (r) => path.join(r, STATE_DIR),
-        () => null,
-      );
+      const real = await this.realStateDir(root);
       for (const [p, state] of [
         [ref.abs, lexical],
         [ref.fs, real],
       ] as const) {
-        if (state && (within(p, state) || within(state, p))) {
+        if (state && (this.inside(p, state) || this.inside(state, p))) {
           throw new FilesError(403, `${ref.abs} holds agentbox's own state`, "reserved");
         }
       }
@@ -199,9 +296,10 @@ export class Roots {
     } catch (err) {
       throw fsError(err, loc.abs);
     }
-    if (!within(real, rootReal)) {
+    if (!this.inside(real, rootReal)) {
       throw new FilesError(403, `${loc.abs} leads outside its root`, "outside");
     }
+    this.assertVisible(real, loc.abs);
     return { ...loc, real };
   }
 
@@ -216,6 +314,7 @@ export class Roots {
     }
     const parent = await this.realParent(loc);
     const fsp_ = path.join(parent, path.basename(loc.abs));
+    this.assertVisible(fsp_, loc.abs);
     try {
       await fsp.lstat(fsPath(fsp_));
     } catch (err) {
@@ -239,10 +338,13 @@ export class Roots {
     for (;;) {
       try {
         const real = decodeName(await fsp.realpath(fsPath(dir), { encoding: "buffer" }));
-        if (!within(real, rootReal)) throw new FilesError(403, `${loc.abs} leads outside its root`, "outside");
+        if (!this.inside(real, rootReal)) throw new FilesError(403, `${loc.abs} leads outside its root`, "outside");
         const st = await fsp.stat(fsPath(real));
         if (!st.isDirectory()) throw new FilesError(409, `${dir} is not a directory`, "not-a-directory");
-        return { ...loc, fs: path.join(real, ...missing.reverse()) };
+        const created = path.join(real, ...missing.reverse());
+        this.assertVisible(created, loc.abs);
+        this.assertWritable(loc.root, created, loc.abs);
+        return { ...loc, fs: created };
       } catch (err) {
         if (err instanceof FilesError) throw err;
         const code = (err as NodeJS.ErrnoException).code;
@@ -275,7 +377,7 @@ export class Roots {
         dir = path.dirname(dir);
       }
     }
-    if (!within(dir, rootReal)) throw new FilesError(403, `${ref.abs} leads outside its root`, "outside");
+    if (!this.inside(dir, rootReal)) throw new FilesError(403, `${ref.abs} leads outside its root`, "outside");
     for (const d of parts.reverse()) {
       try {
         await fsp.mkdir(fsPath(d));
@@ -296,7 +398,7 @@ export class Roots {
     } catch (err) {
       throw fsError(err, loc.abs);
     }
-    if (!within(real, rootReal)) throw new FilesError(403, `${loc.abs} leads outside its root`, "outside");
+    if (!this.inside(real, rootReal)) throw new FilesError(403, `${loc.abs} leads outside its root`, "outside");
     return real;
   }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { FilesError, Roots } from "../src/files/roots.js";
+import { FilesError, Roots, type RootConfig } from "../src/files/roots.js";
 import { tmpBase } from "./helpers/tmp.js";
 
 let base: string;
@@ -9,6 +9,14 @@ let ws: string;
 let home: string;
 let outside: string;
 let roots: Roots;
+
+/** The box's two roots, each keeping its state in its own `.agentbox`. */
+function boxRoots(ws: string, home: string): RootConfig[] {
+  return [
+    { id: "workspace", path: ws, mode: "write", stateDir: path.join(ws, ".agentbox") },
+    { id: "home", path: home, mode: "write", stateDir: path.join(home, ".agentbox") },
+  ];
+}
 
 async function status(p: Promise<unknown>): Promise<number | "ok"> {
   try {
@@ -33,7 +41,7 @@ beforeAll(() => {
   fs.symlinkSync(path.join(ws, "real"), path.join(ws, "inside-link"));
   fs.symlinkSync("loop-b", path.join(ws, "loop-a"));
   fs.symlinkSync("loop-a", path.join(ws, "loop-b"));
-  roots = new Roots(ws, home);
+  roots = new Roots({ roots: boxRoots(ws, home) });
 });
 
 afterAll(() => {
@@ -120,5 +128,47 @@ describe("what may be changed", () => {
     }
     expect(() => roots.assertMutable(roots.locate(".agentbox/review"))).not.toThrow();
     expect(() => roots.assertMutable(roots.locate("src/a.ts"))).not.toThrow();
+  });
+});
+
+describe("roots configured beyond the box's two", () => {
+  it("hangs relative paths off the first root, and has no ~ without a home", () => {
+    const one = new Roots({ roots: [{ id: "code", path: ws, mode: "write", stateDir: path.join(base, "state") }] });
+    expect(one.locate("src/a.ts").root.id).toBe("code");
+    expect(() => one.locate("~/x")).toThrow(expect.objectContaining({ status: 403 }));
+    expect(() => one.locate(home)).toThrow(expect.objectContaining({ status: 403 }));
+  });
+
+  it("refuses every change under a read-only root, and still reads it", async () => {
+    const ro = new Roots({ roots: [{ id: "code", path: ws, mode: "read", stateDir: path.join(base, "state") }] });
+    expect(await status(ro.target("src/a.ts"))).toBe("ok");
+    expect(await status(ro.creatable("src/new-file"))).toBe(403);
+    expect(() => ro.assertMutable(ro.locate("src/a.ts"))).toThrow(expect.objectContaining({ status: 403, code: "read-only" }));
+  });
+
+  it("reads a hidden path as missing, and a write-denied one as refused", async () => {
+    const real = fs.realpathSync(ws);
+    const hiddenDir = path.join(real, "real");
+    const guarded = new Roots({
+      roots: boxRoots(ws, home),
+      isHidden: (p) => p === hiddenDir || p.startsWith(hiddenDir + path.sep),
+      isWriteDenied: (p) => p === path.join(real, "src", "a.ts"),
+    });
+    expect(await status(guarded.target("real"))).toBe(404);
+    expect(await status(guarded.target("inside-link"))).toBe(404);
+    expect(await status(guarded.entry("real"))).toBe(404);
+    expect(await status(guarded.creatable("real/new"))).toBe(404);
+    expect(await status(guarded.target("src/a.ts"))).toBe("ok");
+    const a = await guarded.entry("src/a.ts");
+    expect(() => guarded.assertMutable(a)).toThrow(expect.objectContaining({ status: 403, code: "denied" }));
+    expect(await status(guarded.creatable("src/a.ts"))).toBe(403);
+  });
+
+  it("compares paths ignoring case when asked to", () => {
+    const upper = ws.toUpperCase();
+    const ci = new Roots({ roots: boxRoots(ws, home), caseInsensitive: true });
+    expect(ci.locate(path.join(upper, "src")).root.id).toBe("workspace");
+    const cs = new Roots({ roots: boxRoots(ws, home) });
+    expect(() => cs.locate(path.join(upper, "src"))).toThrow(expect.objectContaining({ status: 403 }));
   });
 });

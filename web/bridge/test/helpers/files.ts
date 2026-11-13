@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppDeps } from "../../src/app.js";
-import { loadConfig } from "../../src/config.js";
+import { boxFileRoots, loadConfig } from "../../src/config.js";
 import { type SessionHub, FilesService, type FilesOptions } from "@workbench/hostcore";
 import { SystemMonitor } from "../../src/system.js";
 import { tmpBase } from "../../../hostcore/test/helpers/tmp.js";
@@ -41,7 +41,7 @@ export async function filesFixture(
   const home = path.join(base, "home");
   fs.mkdirSync(workspace);
   fs.mkdirSync(home);
-  const files = new FilesService({ workspaceRoot: workspace, homeRoot: home, gitTtlMs: 0, ...opts });
+  const files = new FilesService({ roots: boxFileRoots({ workspaceRoot: workspace, homeRoot: home }), gitTtlMs: 0, ...opts });
   const config = loadConfig({
     WORKBENCH_PORT: "0",
     HERDR_SOCKET_PATH: path.join(base, "no-herdr.sock"),

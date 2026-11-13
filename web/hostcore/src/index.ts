@@ -14,7 +14,7 @@ export { pathGuard, pathGuard as guardPath } from "./path-guard.js";
 export { FilesService } from "./files/service.js";
 export type { FilesOptions } from "./files/service.js";
 export { fsError, FilesError, Roots, STATE_DIR, within } from "./files/roots.js";
-export type { EntryRef, Located, NewRef, Root, TargetRef } from "./files/roots.js";
+export type { EntryRef, Located, NewRef, Root, RootConfig, RootMode, RootsOptions, TargetRef } from "./files/roots.js";
 export { closeIfBodyUnread, registerFilesRoutes, sendError } from "./files/routes.js";
 export { DAV_METHODS, DAV_PREFIX, registerDavRoutes, routableUrl } from "./files/dav/routes.js";
 export { LockManager, parseIf } from "./files/dav/locks.js";

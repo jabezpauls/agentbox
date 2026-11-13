@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import type { ListeningPort } from "@workbench/shared";
-import type { Config } from "./config.js";
+import { boxFileRoots, type Config } from "./config.js";
 import {
   DAV_METHODS,
   FilesService,
@@ -122,7 +122,7 @@ export async function buildApp(config: Config, deps: AppDeps): Promise<FastifyIn
   const serveStatic = config.staticDir !== null && fs.existsSync(config.staticDir);
 
   const files =
-    deps.files ?? new FilesService({ workspaceRoot: config.workspaceRoot, homeRoot: config.homeRoot });
+    deps.files ?? new FilesService({ roots: boxFileRoots(config) });
   const events = deps.events ?? new BridgeEvents();
   const projects =
     deps.projects ??

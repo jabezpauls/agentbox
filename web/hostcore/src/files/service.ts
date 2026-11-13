@@ -1,13 +1,12 @@
 import { ListingCache } from "./entries.js";
 import { GitStatusCache } from "./git.js";
 import { FileOps } from "./ops.js";
-import { Roots } from "./roots.js";
+import { Roots, type RootsOptions } from "./roots.js";
 import { Trash } from "./trash.js";
 import { Uploads } from "./uploads.js";
 
-export interface FilesOptions {
-  workspaceRoot: string;
-  homeRoot: string;
+/** The roots and their predicates ({@link RootsOptions}), and a few knobs. */
+export interface FilesOptions extends RootsOptions {
   /** Chunk cap override (tests). */
   maxChunk?: number;
   gitTtlMs?: number;
@@ -32,7 +31,12 @@ export class FilesService {
   readonly listings = new ListingCache();
 
   constructor(opts: FilesOptions) {
-    this.roots = new Roots(opts.workspaceRoot, opts.homeRoot);
+    this.roots = new Roots({
+      roots: opts.roots,
+      ...(opts.caseInsensitive === undefined ? {} : { caseInsensitive: opts.caseInsensitive }),
+      ...(opts.isHidden === undefined ? {} : { isHidden: opts.isHidden }),
+      ...(opts.isWriteDenied === undefined ? {} : { isWriteDenied: opts.isWriteDenied }),
+    });
     this.git = new GitStatusCache(opts.gitTtlMs === undefined ? {} : { ttlMs: opts.gitTtlMs });
     this.trash = new Trash(this.roots);
     this.uploads = new Uploads(this.roots, this.trash, opts.maxChunk === undefined ? {} : { maxChunk: opts.maxChunk });

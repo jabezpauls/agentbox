@@ -158,11 +158,11 @@ export class Projects {
   }
 
   private get root(): string {
-    return this.deps.files.roots.workspace.path;
+    return this.deps.files.roots.byId("workspace").path;
   }
 
   async list(): Promise<Project[]> {
-    const rootReal = await this.deps.files.roots.realRoot(this.deps.files.roots.workspace);
+    const rootReal = await this.deps.files.roots.realRoot(this.deps.files.roots.byId("workspace"));
     let dirents;
     try {
       dirents = await fsp.readdir(fsPath(rootReal), { withFileTypes: true, encoding: "buffer" });
@@ -231,7 +231,7 @@ export class Projects {
 
   /** One project by name, described like the list does. */
   private async one(name: string): Promise<Project> {
-    const rootReal = await this.deps.files.roots.realRoot(this.deps.files.roots.workspace);
+    const rootReal = await this.deps.files.roots.realRoot(this.deps.files.roots.byId("workspace"));
     const project = await this.describe(name, rootReal, [], []);
     if (!project) throw new FilesError(404, "no such project");
     return project;
@@ -268,7 +268,7 @@ export class Projects {
     }
 
     const id = randomBytes(6).toString("hex");
-    const scratchDir = path.join(this.deps.files.roots.stateDir(this.deps.files.roots.workspace), "clones");
+    const scratchDir = path.join(this.deps.files.roots.stateDir(this.deps.files.roots.byId("workspace")), "clones");
     await fsp.mkdir(scratchDir, { recursive: true });
     const scratch = path.join(scratchDir, id);
     // What is shown and sent to every tab never carries the URL's secret.

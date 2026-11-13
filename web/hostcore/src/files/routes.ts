@@ -5,7 +5,7 @@ import type { FileEntry } from "@workbench/shared";
 import { describe, listDirectory, MAX_PAGE } from "./entries.js";
 import { fsPath, parseQuery } from "./names.js";
 import { sendFile, disposition, FILE_HEADERS, loadedAsCode } from "./raw.js";
-import { fsError, FilesError, STATE_DIR } from "./roots.js";
+import { fsError, FilesError } from "./roots.js";
 import { searchNames } from "./search.js";
 import type { FilesService } from "./service.js";
 import { zipStream } from "./zip.js";
@@ -129,8 +129,8 @@ export function registerFilesRoutes(app: FastifyInstance, files: FilesService): 
       // scratch space that sit beside them.
       const exclude = new Set<string>();
       for (const r of roots.list()) {
-        const real = await roots.realRoot(r).catch(() => null);
-        if (real) exclude.add(path.join(real, STATE_DIR));
+        const state = await roots.realStateDir(r);
+        if (state) exclude.add(state);
       }
       // A HEAD asks what the download is, not for the download: build nothing.
       if (req.method === "HEAD") return reply.send();

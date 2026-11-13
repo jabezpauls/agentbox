@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import type { FileEntry, TrashItem } from "@workbench/shared";
+import type { FileEntry, FileRoot, TrashItem } from "@workbench/shared";
 import { describe, typeOf } from "./entries.js";
 import { fsPath } from "./names.js";
 import { fsError, FilesError, type Root, type Roots } from "./roots.js";
@@ -72,7 +72,7 @@ export class Trash {
       id,
       name: path.basename(abs),
       originalPath: abs,
-      root: root.id,
+      root: root.id as FileRoot,
       type,
       size: type === "file" ? st.size : null,
       trashedAt: Date.now(),

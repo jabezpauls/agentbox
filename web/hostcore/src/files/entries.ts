@@ -1,7 +1,7 @@
 import type { Dirent, Stats } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import type { FileEntry, FileListing, FileType, GitFileStatus } from "@workbench/shared";
+import type { FileEntry, FileListing, FileRoot, FileType, GitFileStatus } from "@workbench/shared";
 import { decodeName, fsPath, hasEscapes } from "./names.js";
 import { fsError, FilesError, within, type Roots, type TargetRef } from "./roots.js";
 
@@ -185,7 +185,8 @@ export interface ListOptions {
 export async function listDirectory(roots: Roots, dir: TargetRef, opts: ListOptions): Promise<FileListing> {
   const rootReal = await roots.realRoot(dir.root);
   const all = await (opts.cache ?? new ListingCache({ ttlMs: 0 })).names(dir.real, dir.abs);
-  const named = opts.hidden ? all : all.filter((d) => !d.name.startsWith("."));
+  const shown = all.filter((d) => !roots.hidden(path.join(dir.real, d.name)));
+  const named = opts.hidden ? shown : shown.filter((d) => !d.name.startsWith("."));
 
   const page = named.slice(opts.offset, opts.offset + opts.limit);
   const entries = await mapLimit(page, 64, async (d) => {
@@ -201,7 +202,8 @@ export async function listDirectory(roots: Roots, dir: TargetRef, opts: ListOpti
   const kept = entries.filter((e): e is FileEntry => e !== null);
   return {
     path: dir.abs,
-    root: dir.root.id,
+    // The wire type names the box's two roots; a machine's are its own ids.
+    root: dir.root.id as FileRoot,
     entries: kept,
     total: named.length,
     offset: opts.offset,
