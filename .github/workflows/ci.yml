@@ -228,6 +228,32 @@ jobs:
           path: web/app/playwright-report
           retention-days: 7
 
+  standalone:
+    # The machines' standalone executable (Node 24 built in), linux-x64 only:
+    # built as the release builds it, and started in a container with no
+    # Node. The release builds and starts the other platforms.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Build the linux-x64 executable
+        working-directory: web
+        env:
+          AGENTBOX_VERSION: ci-1
+        run: npm run build:sea -w cli -- --targets linux-x64
+      - name: It runs where there is no Node
+        run: |
+          docker run --rm -v "$PWD/web/cli/dist/sea:/sea:ro" debian:bookworm-slim \
+            /sea/agentbox-linux-x64 --version | grep -x 'agentbox ci-1'
+          docker run --rm -v "$PWD/web/cli/dist/sea:/sea:ro" debian:bookworm-slim \
+            sh -c '! command -v node && /sea/agentbox-linux-x64 --help' | grep -q 'Usage: agentbox <command>'
+
   fidelity:
     # Real apps under /a/<id>/ in all three engines: a create-vite React app
     # started by agentbox-preview and plainly, browser storage, an app's own
