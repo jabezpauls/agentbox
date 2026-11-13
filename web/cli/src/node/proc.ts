@@ -1,5 +1,6 @@
 import path from "node:path";
 import { findOnPath } from "../mount.js";
+import { writePrivate } from "./paths.js";
 
 /**
  * What the node's children run with.
@@ -23,6 +24,31 @@ export function withPath(env: NodeJS.ProcessEnv, dirs: string[], platform: NodeJ
   for (const k of keys) delete out[k];
   out[key] = [...dirs, was].filter(Boolean).join(platform === "win32" ? ";" : ":");
   return out;
+}
+
+/**
+ * The shell herdr starts in each pane on Windows (its `SHELL`):
+ * `agentbox-shell.cmd`, which puts `dirs` first on PATH and runs `shell`.
+ *
+ * herdr's terminals (portable-pty) build a pane's environment from the
+ * node's with the registry's on top, and Windows' PATH there replaces the
+ * one the node passed: without this the panes would not find the `claude`
+ * and `agentbox-preview` shims. herdr takes an executable for its shell, with
+ * no arguments, hence a file. It clears SHELL again for what runs inside.
+ */
+export function writeShellShim(shims: string, dirs: string[], shell: string): string {
+  const q = (s: string): string => s.replace(/%/g, "%%");
+  const file = path.join(shims, "agentbox-shell.cmd");
+  const text = [
+    "@echo off",
+    "rem agentbox: the shell of the node's terminals. Written by the node; rewritten at every start.",
+    'set "SHELL="',
+    `set "Path=${dirs.map(q).join(";")};%Path%"`,
+    `"${q(shell)}" -NoLogo`,
+    "",
+  ].join("\r\n");
+  writePrivate(file, text, 0o700);
+  return file;
 }
 
 /**

@@ -4,7 +4,7 @@ import { SessionHub, TerminalStreams, type Viewer } from "@workbench/hostcore/he
 import { CliError, EXIT } from "../errors.js";
 import { claudePaths, holdToken, installedClaude, prepareClaude } from "./claude.js";
 import { HerdrSupervisor, HERDR_SESSION } from "./herdr.js";
-import { withPath, windowsShell } from "./proc.js";
+import { withPath, windowsShell, writeShellShim } from "./proc.js";
 import { GUI_EXE } from "./service-windows.js";
 import { PresenceGate } from "./presence.js";
 import { NodeServer } from "./server.js";
@@ -71,10 +71,12 @@ export async function runNode(o: RunOptions): Promise<number> {
   const claude = claudePaths(o.paths);
   prepareClaude(claude, { home: o.home, machine: creds.name });
   // On Windows herdr is in bin\herdr\ (its own CLI streams the terminals, by
-  // name), and its panes run PowerShell: pwsh when it is there.
+  // name), and its panes run PowerShell (pwsh when it is there) through a
+  // shell shim that puts these folders on PATH again (proc.ts).
   const win = process.platform === "win32";
-  const herdrEnv: NodeJS.ProcessEnv = withPath(process.env, [claude.shims, o.paths.bin, ...(win ? [herdrDir(o.paths.bin)] : [])]);
-  if (win && !herdrEnv.SHELL) herdrEnv.SHELL = windowsShell(herdrEnv);
+  const onPath = [claude.shims, o.paths.bin, ...(win ? [herdrDir(o.paths.bin)] : [])];
+  const herdrEnv: NodeJS.ProcessEnv = withPath(process.env, onPath);
+  if (win) herdrEnv.SHELL = writeShellShim(claude.shims, onPath, windowsShell(herdrEnv));
   delete herdrEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
   // Files: the policy's folders, behind the lists the box can never get past (files.ts).

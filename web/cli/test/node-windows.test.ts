@@ -11,7 +11,7 @@ import { WINDOWS_NOTES } from "../src/node/join.js";
 import { nodePaths } from "../src/node/paths.js";
 import { parsePolicy, summarize } from "../src/node/policy.js";
 import { writePreviewShim } from "../src/node/preview.js";
-import { withPath } from "../src/node/proc.js";
+import { withPath, writeShellShim } from "../src/node/proc.js";
 import { guiExecutable, RotatingLog, runCommandLine, runEntry, supervise } from "../src/node/service-windows.js";
 import { unzip } from "../src/node/unzip.js";
 import { tmpDir } from "./helpers.js";
@@ -242,6 +242,18 @@ describe("the node's shims and service on Windows", () => {
     expect(Object.keys(env).filter((k) => k.toUpperCase() === "PATH")).toEqual(["Path"]);
     expect(env.Path).toBe("C:\\n\\shims;C:\\Windows");
     expect(withPath({ PATH: "/usr/bin" }, ["/n/shims"], "linux").PATH).toBe("/n/shims:/usr/bin");
+    // herdr's panes get Windows' PATH from the registry: their shell puts the folders back.
+    const dir = tmpDir();
+    const shell = writeShellShim(dir, ["C:\\n\\shims", "C:\\100%\\bin"], "C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+    expect(path.basename(shell)).toBe("agentbox-shell.cmd");
+    expect(fs.readFileSync(shell, "utf8").split("\r\n")).toEqual([
+      "@echo off",
+      expect.stringMatching(/^rem /),
+      'set "SHELL="',
+      'set "Path=C:\\n\\shims;C:\\100%%\\bin;%Path%"',
+      '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo',
+      "",
+    ]);
   });
 
   it("registers only the standalone executable, starting node supervise without a window", () => {
