@@ -500,7 +500,8 @@ case "${1:-help}" in
                 { [ -n "$MHOST" ] && [ -n "$AHOST" ]; } \
                     || { echo "name both hostnames: agentbox machines enable --machines-host machines.example.com --apps-host mapps.example.com" >&2; exit 1; }
                 for h in "$MHOST" "$AHOST"; do
-                    printf '%s' "$h" | grep -Eq '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$' \
+                    # The whole value, not line by line as grep would.
+                    [[ "$h" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$ ]] \
                         || { echo "not a plain hostname: '$h'" >&2; exit 1; }
                 done
                 { [ -n "$DOMAIN" ] && [ "$DOMAIN" != localhost ]; } \
@@ -510,8 +511,9 @@ case "${1:-help}" in
                 if [ -t 0 ]; then
                     echo "The machines passphrase opens your machines from the browser. Type it only"
                     echo "here and on https://$MHOST — never on the box's own pages. At least 12 characters."
-                    read -rsp "Machines passphrase: " PASS; echo
-                    read -rsp "Again: " AGAIN; echo
+                    # IFS= keeps spaces at either end, as the browser and the machines keep them.
+                    IFS= read -rsp "Machines passphrase: " PASS; echo
+                    IFS= read -rsp "Again: " AGAIN; echo
                     [ "$PASS" = "$AGAIN" ] || { echo "the passphrases did not match" >&2; exit 1; }
                 else
                     IFS= read -r PASS || true
