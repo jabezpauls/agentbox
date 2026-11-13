@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { bool } from "../args.js";
 import { isLoopbackHost } from "../config.js";
 import { CliError } from "../errors.js";
 import { safeText } from "../format.js";
-import { VERSION } from "../version.js";
+import { STANDALONE, VERSION } from "../version.js";
 import { command, type Command } from "./types.js";
 
 /** The largest download taken for a CLI build: the real one is a few hundred KiB. */
@@ -59,6 +60,36 @@ export function npmVersionFor(boxVersion: string | null): string {
   return m ? (m[1] as string) : "latest";
 }
 
+/**
+ * The credentials a machine's node keeps once it has joined a box: in
+ * `~/.local/share/agentbox/node/` (or under `$XDG_DATA_HOME`), or
+ * `%LOCALAPPDATA%\agentbox\node\` on Windows. Where one is, this machine is a
+ * node, and the node updates only from signed releases.
+ */
+export function nodeCredentials(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
+  const candidates: string[] = [];
+  if (platform === "win32") {
+    if (env.LOCALAPPDATA && path.win32.isAbsolute(env.LOCALAPPDATA)) candidates.push(path.join(env.LOCALAPPDATA, "agentbox", "node", "credentials.json"));
+  } else {
+    const xdg = env.XDG_DATA_HOME;
+    if (xdg && path.isAbsolute(xdg)) candidates.push(path.join(xdg, "agentbox", "node", "credentials.json"));
+    candidates.push(path.join(env.HOME || os.homedir(), ".local", "share", "agentbox", "node", "credentials.json"));
+  }
+  return candidates.find((f) => fs.existsSync(f)) ?? null;
+}
+
+/** Why a box-served update is not for this CLI, if it is not: a machine's node, or the standalone executable. */
+export function signedUpdatesOnly(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform, standalone: boolean = STANDALONE): string | null {
+  const creds = nodeCredentials(env, platform);
+  if (creds) {
+    return `this machine is joined to a box as a node (${creds}), so agentbox here updates only from signed releases, never from a box: the node checks for them itself (\`updates\` in its policy.json), or see https://github.com/jabezpauls/agentbox/releases`;
+  }
+  if (standalone) {
+    return "this is the standalone agentbox, which updates only from signed releases, never from a box; download the latest from https://github.com/jabezpauls/agentbox/releases";
+  }
+  return null;
+}
+
 export const update = command({
   path: ["update"],
   summary: "replace this CLI with the box's own build",
@@ -69,6 +100,8 @@ export const update = command({
   ],
   details: "Downloads /cli/agentbox.mjs from the box (the current one, or --box), checks it runs, and swaps it in\nin one step.",
   async run(ctx, p) {
+    const signedOnly = signedUpdatesOnly(ctx.env, ctx.platform);
+    if (signedOnly) throw new CliError(signedOnly);
     const { name, box } = ctx.selected();
     const self = selfInstall(process.argv[1]);
     if (!self) throw new CliError("cannot tell which file this CLI runs from");
