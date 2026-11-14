@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { NodePaths } from "./paths.js";
 import { ensurePrivateDir, writePrivate } from "./paths.js";
-import { runCommand, type Runner } from "./service-linux.js";
+import { isStandalone, runCommand, runningAsSea, type Runner } from "./service-linux.js";
 
 /**
  * The node on Windows, with no admin (the design, "Running as a service"):
@@ -43,14 +43,14 @@ export function regExe(env: NodeJS.ProcessEnv = process.env): string {
   return path.win32.join(root, "System32", "reg.exe");
 }
 
-/** Whether this is the standalone executable (a SEA): its script is itself. */
-function standalone(execPath: string, script: string | undefined): boolean {
-  return script === undefined || path.resolve(script) === path.resolve(execPath);
-}
 
 /** The windowless `agentbox-node.exe` beside this standalone executable, or why there is none. */
-export function guiExecutable(execPath: string = process.execPath, script: string | undefined = process.argv[1]): { gui: string } | { problem: string } {
-  if (!standalone(execPath, script)) {
+export function guiExecutable(
+  execPath: string = process.execPath,
+  script: string | undefined = process.argv[1],
+  sea: boolean = runningAsSea(),
+): { gui: string } | { problem: string } {
+  if (!isStandalone(execPath, script, sea)) {
     return {
       problem:
         "the Windows sign-in entry needs the standalone agentbox.exe and agentbox-node.exe (this is agentbox.mjs under Node, " +
@@ -68,8 +68,8 @@ export function runEntry(gui: string): string {
 }
 
 /** The console `agentbox.exe node run` a supervisor starts (or, under Node, this script's `node run`). */
-export function runCommandLine(execPath: string = process.execPath, script: string | undefined = process.argv[1]): string[] {
-  if (!standalone(execPath, script)) return [execPath, path.resolve(script as string), "node", "run"];
+export function runCommandLine(execPath: string = process.execPath, script: string | undefined = process.argv[1], sea: boolean = runningAsSea()): string[] {
+  if (!isStandalone(execPath, script, sea)) return [execPath, path.resolve(script as string), "node", "run"];
   const dir = path.dirname(execPath);
   const exe = path.basename(execPath).toLowerCase() === GUI_EXE ? path.join(dir, CONSOLE_EXE) : execPath;
   return [exe, "node", "run"];
