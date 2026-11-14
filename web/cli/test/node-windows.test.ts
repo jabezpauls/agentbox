@@ -259,6 +259,7 @@ describe("the node's shims and service on Windows", () => {
     expect(guiExecutable("/usr/bin/node", "/opt/agentbox.mjs")).toMatchObject({ problem: expect.stringMatching(/standalone/) });
     expect(runEntry("C:\\a b\\agentbox-node.exe")).toBe('"C:\\a b\\agentbox-node.exe" node supervise');
     expect(runCommandLine("/x/agentbox-node.exe", "/x/agentbox-node.exe")).toEqual([path.join("/x", "agentbox.exe"), "node", "run"]);
+    expect(runCommandLine("/x/agentbox.exe", "agentbox.exe", true)).toEqual(["/x/agentbox.exe", "node", "run"]);
     expect(runCommandLine("/usr/bin/node", "/opt/agentbox.mjs")).toEqual(["/usr/bin/node", path.resolve("/opt/agentbox.mjs"), "node", "run"]);
     expect(WINDOWS_NOTES).toMatch(/other people also sign in/);
     expect(WINDOWS_NOTES).toMatch(/Smart App Control/);

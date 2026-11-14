@@ -33,10 +33,28 @@ export function unitDir(env: NodeJS.ProcessEnv = process.env, home: string = os.
   return path.join(xdg && path.isAbsolute(xdg) ? xdg : path.join(home, ".config"), "systemd", "user");
 }
 
+/** Whether Node reports this process as a standalone executable (a SEA). */
+export function runningAsSea(): boolean {
+  try {
+    const sea = process.getBuiltinModule?.("node:sea") as { isSea?: () => boolean } | undefined;
+    return typeof sea?.isSea === "function" && sea.isSea();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether this is the standalone executable rather than agentbox.mjs under
+ * Node. Ask Node first: in a SEA, `argv[1]` is the name as typed (`agentbox`
+ * found on PATH), not its path, so comparing paths alone misses it.
+ */
+export function isStandalone(execPath: string, script: string | undefined, sea: boolean = runningAsSea()): boolean {
+  return sea || script === undefined || path.resolve(script) === path.resolve(execPath);
+}
+
 /** How the service starts this same program: the Node running it and its script, or a standalone executable. */
-export function execStart(execPath: string = process.execPath, script: string | undefined = process.argv[1]): string[] {
-  const isSea = script === undefined || path.resolve(script) === path.resolve(execPath);
-  return isSea ? [execPath, "node", "run"] : [execPath, path.resolve(script), "node", "run"];
+export function execStart(execPath: string = process.execPath, script: string | undefined = process.argv[1], sea: boolean = runningAsSea()): string[] {
+  return isStandalone(execPath, script, sea) ? [execPath, "node", "run"] : [execPath, path.resolve(script as string), "node", "run"];
 }
 
 function quote(arg: string): string {

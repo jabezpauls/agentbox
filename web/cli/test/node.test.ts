@@ -481,6 +481,8 @@ describe("the service", () => {
   it("is a user unit restarted only on failure", async () => {
     expect(execStart("/usr/bin/node", "/home/o/.local/bin/agentbox")).toEqual(["/usr/bin/node", "/home/o/.local/bin/agentbox", "node", "run"]);
     expect(execStart("/opt/agentbox", "/opt/agentbox")).toEqual(["/opt/agentbox", "node", "run"]);
+    // A SEA run as `agentbox` from PATH: argv[1] is the bare name, resolved against the working folder.
+    expect(execStart("/home/o/.local/bin/agentbox", "agentbox", true)).toEqual(["/home/o/.local/bin/agentbox", "node", "run"]);
     const text = unitText(["/usr/bin/node", "/x y/agentbox", "node", "run"]);
     expect(text).toContain('ExecStart="/usr/bin/node" "/x y/agentbox" "node" "run"');
     expect(text).toContain("Restart=on-failure");
