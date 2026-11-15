@@ -35,6 +35,7 @@ import {
   type PublicKey,
 } from "../ssh.js";
 import { openTunnel, type TunnelTarget } from "../tunnel.js";
+import { STANDALONE } from "../version.js";
 import { command, type Command } from "./types.js";
 
 /**
@@ -56,7 +57,9 @@ export function sshDir(ctx: Context): string {
 }
 
 /** How ssh should start this CLI: the installed launcher itself, or node and the script. */
-function cliCommand(platform: NodeJS.Platform): string[] {
+function cliCommand(platform: NodeJS.Platform, standalone: boolean = STANDALONE): string[] {
+  // The standalone executable is the whole CLI; its argv[1] is only the name as typed.
+  if (standalone) return [process.execPath];
   const script = path.resolve(process.argv[1] ?? "agentbox");
   if (platform !== "win32") {
     try {

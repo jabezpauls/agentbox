@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { STANDALONE } from "../version.js";
 
 /**
  * The node as a systemd **user** service: no root. `Restart=on-failure`, so a
@@ -35,6 +36,7 @@ export function unitDir(env: NodeJS.ProcessEnv = process.env, home: string = os.
 
 /** Whether Node reports this process as a standalone executable (a SEA). */
 export function runningAsSea(): boolean {
+  if (STANDALONE) return true;
   try {
     const sea = process.getBuiltinModule?.("node:sea") as { isSea?: () => boolean } | undefined;
     return typeof sea?.isSea === "function" && sea.isSea();
